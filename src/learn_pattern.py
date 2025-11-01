@@ -33,15 +33,15 @@ if __name__ == "__main__":
     )
 
     
-    target = load_image("test_data/lenna.png", size=28)
+    target = load_image("test_data/chest.png", size=28)
 
     board = make_seed(28,28)
     board = model.seed(board)
     model.target(target)
     testable_model, avg_loss = model.grow(
         env=adapt_env,
-        epochs=1000,
-        learnign_rate=0.005,
+        epochs=5000,
+        learnign_rate=0.0005,
         pool_size=1024,
     )
 
@@ -50,12 +50,12 @@ if __name__ == "__main__":
         # Example: list of frames (NumPy arrays)
         frame = testable_model(board)
         frame_np = frame[0,...].permute(1, 2, 0).cpu().detach().numpy()  # (H, W, C)
-        frame_np = (frame_np[..., :3] * 255).astype(np.uint8)
+        frame_np = (frame_np[..., :4] * 255).astype(np.uint8)
         frames.append(frame_np)
 
     # Convert NumPy arrays to PIL images
     pil_frames = [
-        Image.fromarray(frame.resize(128, 128).astype(np.uint8))
+        Image.fromarray(frame.astype(np.uint8))
         for frame in frames
     ]
 
