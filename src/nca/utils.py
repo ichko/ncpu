@@ -6,6 +6,7 @@ from PIL import Image
 
 # import matplotlib.pyplot as plt
 
+
 def show_pool_seeds_cv2(pool_seeds, n_cols=16, scale_each=1.0):
     """
     Display a grid of images from pool_seeds using OpenCV.
@@ -58,6 +59,7 @@ def show_pool_seeds_cv2(pool_seeds, n_cols=16, scale_each=1.0):
     # Show
     cv2.imshow("Pool Seeds Grid", grid_img[:, :, :4])
     cv2.waitKey(10)
+
 
 def test_show(model, image, device, steps=5000, channels=16, name="image"):
     board = make_image_seed(image, channels).to(device)

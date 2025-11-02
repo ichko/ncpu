@@ -6,13 +6,13 @@ import torch.nn as nn
 class NCA(nn.Module):
     def __init__(
         self,
-        n_channels : int = 16,
-        hidden_channels : int = 128,
-        fire_rate : float = 0.5,
-        life_masking : bool = True,
-        lmc : int = 3,
-        set_to_zero : bool = True,
-        device : str = "cpu",
+        n_channels: int = 16,
+        hidden_channels: int = 128,
+        fire_rate: float = 0.5,
+        life_masking: bool = True,
+        lmc: int = 3,
+        set_to_zero: bool = True,
+        device: str = "cpu",
     ):
         super(NCA, self).__init__()
 
@@ -115,7 +115,9 @@ class NCA(nn.Module):
         """
         return nn.functional.max_pool2d(
             x[:, self.lmc : self.lmc + 1, :, :], kernel_size=3, stride=1, padding=1
-        ) > (0.1 - (self.life_masking * 100)) # why do I have magic 100 value here? /Piotr
+        ) > (
+            0.1 - (self.life_masking * 100)
+        )  # why do I have magic 100 value here? /Piotr
 
     def forward(self, x):
         """
