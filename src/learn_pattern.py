@@ -5,13 +5,8 @@ from datetime import datetime
 
 from PIL import Image
 
-from src.piotrs_model.utils import L2, make_seed, load_image
-from src.piotrs_model.model import NCADish
-
-class NoModelAdaptedException(Exception):
-    def __init__(self, message="No Model Adapted!"):
-        super().__init__(message)
-
+from src.nca.utils import L2, make_seed, load_image
+from src.nca.model import NCADish
 
 def adapt_env(model, cs, target):
     length = np.random.randint(64, 96)

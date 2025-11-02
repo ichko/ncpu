@@ -10,8 +10,8 @@ import torch.multiprocessing as mp
 from cma.optimization_tools import EvalParallel2
 
 from tqdm import tqdm
-from src.piotrs_model.utils import *
-from src.piotrs_model.nca import NCA
+from src.nca.utils import *
+from src.nca.nca import NCA
 from matplotlib import pyplot as plt
 from IPython.display import clear_output
 
@@ -85,7 +85,8 @@ class NCADish:
         learnign_rate : float  = 0.002,
         pool_size : int = 1024,
         batch_size : int = 8,
-        damage : bool = False):
+        damage : bool = False,
+        loss_callback : Callable = None):
 
         assert not damage, "EMOTIONAL DAMAGE. Damage is not functional yet."
         self.pool_size = pool_size
@@ -137,6 +138,8 @@ class NCADish:
             )
 
             losses.append(total_loss.cpu().detach())
+            if loss_callback:
+                loss_callback(losses)
 
         avg_loss = np.sum(losses)/len(losses)
 
