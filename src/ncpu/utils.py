@@ -4,7 +4,26 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-# import matplotlib.pyplot as plt
+
+def make_io_screen(H, W, r, spacing, margin, left_input, right_input):
+    screen = np.zeros((H, W), dtype=np.uint8)
+    among_spacing, side_spacing = spacing
+
+    for i in range(left_input.bit_length()):
+        x = side_spacing
+        y = margin + i * among_spacing
+        bit = left_input & (1 << i)
+        if bit:
+            cv2.circle(screen, (x, y), r, 255, -1)
+
+    for i in range(right_input.bit_length()):
+        x = W - side_spacing
+        y = margin + i * among_spacing
+        bit = right_input & (1 << i)
+        if bit:
+            cv2.circle(screen, (x, y), r, 255, -1)
+
+    return screen
 
 
 def show_pool_seeds_cv2(pool_seeds, n_cols=16, scale_each=1.0):
