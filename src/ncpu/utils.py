@@ -1,8 +1,29 @@
+import os
+
+os.environ["CXX_RNG_USE_RDRND"] = "0"
+
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 from PIL import Image
+import mediapy as media
+
+
+def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
+    tensor = tensor[:, :, 0].detach().cpu().numpy()
+    tensor = media.to_rgb(tensor, cmap="viridis", vmin=0, vmax=1)
+
+    return media.show_videos(
+        tensor,
+        titles=[f"#{i}" for i in range(tensor.shape[0])],
+        fps=fps,
+        codec="gif",
+        columns=columns,
+        width=100,
+        height=100,
+        return_html=return_html,
+    )
 
 
 def make_io_screen(H, W, r, spacing, margin, left_input, right_input):
