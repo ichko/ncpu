@@ -21,6 +21,32 @@ class NCPUDataset(IterableDataset):
         self.margin = margin
         self.sampler = sampler
 
+    def getInp(self):
+        left_input = np.random.randint(0, 2**16)
+        inp = make_io_screen(
+            W=self.W,
+            H=self.H,
+            r=self.r,
+            spacing=self.spacing,
+            margin=self.margin,
+            left_input=left_input,
+            right_input=0,
+        )
+        return inp
+
+    def getOut(self):
+        right_input = np.random.randint(0, 2**16)
+        out = make_io_screen(
+            W=self.W,
+            H=self.H,
+            r=self.r,
+            spacing=self.spacing,
+            margin=self.margin,
+            left_input=0,
+            right_input=right_input,
+        )
+        return out
+
     def __iter__(self):
         while True:
             left, right = self.sampler()
