@@ -1,25 +1,8 @@
 import panel as pn
 import torch
 from ncpu.model import NeuralCA
-import mediapy as media
 
 pn.extension()
-
-
-def sequence_batch_to_html_gifs(tensor):
-    tensor = tensor[:, :, 0].detach().cpu().numpy()
-    tensor = media.to_rgb(tensor, cmap="viridis", vmin=0, vmax=1)
-
-    return media.show_videos(
-        tensor,
-        titles=[f"#{i}" for i in range(tensor.shape[0])],
-        fps=20,
-        codec="gif",
-        columns=8,
-        width=100,
-        height=100,
-        return_html=True,
-    )
 
 
 def nca_dashboard():

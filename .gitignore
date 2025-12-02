@@ -1,2 +1,4 @@
 __pycache__
 .gif
+checkpoints/
+.ipynb_checkpoints/

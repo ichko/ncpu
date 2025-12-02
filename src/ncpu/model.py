@@ -7,8 +7,17 @@ class NeuralCA(nn.Module):
     def alive(self, x):
         return F.max_pool2d(x[:, :1, :, :], kernel_size=3, stride=1, padding=0) > 0.1
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
     def __init__(
-        self, channels, hidden_channels=128, fire_rate=0.5, alive_masking=True
+        self,
+        channels,
+        hidden_channels,
+        fire_rate,
+        alive_masking,
+        zero_initialization,
     ) -> None:
         super().__init__()
         sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]) / 8
@@ -29,10 +38,20 @@ class NeuralCA(nn.Module):
         self.fire_rate = fire_rate
         self.alive_masking = alive_masking
 
-        # nn.init.zeros_(self.rule[-1].weight)
+        if zero_initialization:
+            nn.init.zeros_(self.rule[-1].weight)
+
+        self.symetry_break = None
 
     def forward(self, x, steps):
         seq = [x]
+        if self.symetry_break is None:
+            H, W = x.shape[-2:]
+            self.symetry_break = torch.rand(1, self.channels, H, W) < 0.1
+            self.symetry_break = self.symetry_break.float()
+            self.symetry_break = self.symetry_break.to(x.device)
+
+        x += self.symetry_break
         for _ in range(steps):
             x_padded = F.pad(x, (1, 1, 1, 1), "circular")
             pre_life_mask = self.alive(x_padded)
