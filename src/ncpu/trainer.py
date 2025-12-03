@@ -1,34 +1,10 @@
 import torch
 from torch.nn import functional as F
-from ncpu.dataset import NCPUDataset
 from ncpu.model import NeuralCA
+import numpy as np
 
 
 class NCPUTrainer:
-    @staticmethod
-    def get_default_trainer():
-        W, H = 117, 117
-        r = 25
-        spacing = (55, 30)
-        margin = 30
-        lr = 0.00001
-        batch_size = 16
-        device = "cuda"
-
-        dataset = NCPUDataset(W=W, H=H, r=r, spacing=spacing, margin=margin)
-        dataloader = dataset.get_dataloader(batch_size=batch_size)
-        nca = NeuralCA(
-            channels=16,
-            hidden_channels=128,
-            fire_rate=0.8,
-            alive_masking=True,
-            zero_initialization=True,
-        ).to(device)
-        trainer = NCPUTrainer(nca, dataloader, lr=lr)
-        trainer.sanity_check()
-
-        return trainer
-
     def sanity_check(self):
         print("Sanity check...")
 
@@ -50,7 +26,7 @@ class NCPUTrainer:
         print("  rollout:", rollout.shape)
 
         with torch.no_grad():
-            loss = self.optim_step(steps=10)
+            loss = self.optim_step()
             print("  loss:", loss["loss"].item())
 
         print("Sanity check completed successfully")
@@ -62,12 +38,7 @@ class NCPUTrainer:
         first_state[:, 0] = inp  # inplant in the first channel
         return first_state
 
-    def __init__(
-        self,
-        nca: NeuralCA,
-        dataloader,
-        lr,
-    ):
+    def __init__(self, nca: NeuralCA, dataloader, lr):
         super().__init__()
         self.nca = nca
         self.ds = dataloader.dataset
@@ -76,7 +47,7 @@ class NCPUTrainer:
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
         self.history = []
 
-    def optim_step(self, steps):
+    def optim_step(self):
         batch = next(self.it)
 
         inp, out = batch
@@ -87,14 +58,14 @@ class NCPUTrainer:
         out = out / 255.0
 
         first_state = self._inplant_input(inp)
-        rollout = self.nca.forward(first_state, steps=steps)
+        rollout = self.nca.forward(first_state, steps=np.random.randint(10, 20))
         nca_out = rollout[:, -1, 0]
 
         white_mask = (out > 0.5).float()
 
         white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
         black_loss = F.mse_loss(nca_out, out, reduction="none") * (1 - white_mask)
-        loss = 9 * white_loss.mean() + 1 * black_loss.mean()
+        loss = white_loss.mean() * 0.5 + black_loss.mean() * 0.5
 
         if torch.is_grad_enabled():
             self.optim.zero_grad()
