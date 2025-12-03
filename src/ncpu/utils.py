@@ -10,6 +10,13 @@ from PIL import Image
 import mediapy as media
 
 
+def print_tensor(title, t):
+    shape = tuple(t.shape)
+    print(
+        f"{title}: {shape} {t.dtype}, min={t.min():.2f}, max={t.max():.2f}, mean={t.mean():.2f}, std={t.std():.2f}"
+    )
+
+
 def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
     tensor = tensor[:, :, 0].detach().cpu().numpy()
     tensor = media.to_rgb(tensor, cmap="viridis", vmin=0, vmax=1)
