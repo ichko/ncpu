@@ -9,6 +9,7 @@ class NCPUTrainer:
         super().__init__()
         self.nca = nca
         self.dataloader = dataloader 
+        print(f"self.dataloader: {self.dataloader}")
         self.ds = dataloader.dataset
         self.dataset_iter = iter(self.dataloader)
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
@@ -67,11 +68,8 @@ class NCPUTrainer:
         white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
         black_loss = F.mse_loss(nca_out, out, reduction="none") * (1 - white_mask)
 
-        mean_losses = white_loss.mean(dim=(1, 2)) * 0.5 + black_loss.mean(dim=(1, 2)) * 0.5 # taking mean only from W, H 
+        mean_losses = white_loss.mean(dim=(1, 2)) * 0.99 + black_loss.mean(dim=(1, 2)) * 0.01 # taking mean only from W, H 
         mean_total_loss = mean_losses.mean()
-
-        if pool:
-            self.dataloader.update((nca_out, out), mean_losses)
 
         if torch.is_grad_enabled():
             self.optim.zero_grad()
@@ -79,6 +77,9 @@ class NCPUTrainer:
             self.optim.step()
 
         self.history.append(mean_total_loss.item())
+
+        if pool:
+            self.dataloader.update((nca_out, out.detach()), mean_losses)
 
         return {
             "loss": mean_total_loss,
