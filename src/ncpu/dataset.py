@@ -41,16 +41,26 @@ def sample_XOR_gate(*args):
     return left, right
 
 class NCPUDataset(IterableDataset):
-    def __init__(self, W, H, r, spacing, margin, sampler):
+    def __init__(self, W, H, r, spacing, margin, sampler, balanced = True):
         self.W = W
         self.H = H
         self.r = r
         self.spacing = spacing
         self.margin = margin
         self.sampler = sampler
+        self.balanced = True
+
+        self.prev_class = 0
+        self.class_neg = 0
 
     def getSample(self):
         left, right = self.sampler()
+
+        if self.balanced:
+            # alternate between classes
+            while self.prev_class == right:
+                left, right = self.sampler()
+            self.prev_class = right
 
         inp = make_io_screen(
             W=self.W,
