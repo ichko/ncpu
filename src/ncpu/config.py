@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ncpu.dataset import sample_conjunction_input_output
+from ncpu.dataset import sample_AND_gate
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,15 @@ class _BaseTrainingConfig:
     alive_masking = True
     zero_initialization = True
 
+@dataclass(frozen=True)
+class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
+    name = "TinyAnd"
+    W = 32
+    H = 32
+    r = 4
+    spacing = (16, 4)
+    margin = 4
+    sampler = sample_AND_gate
 
 @dataclass(frozen=True)
 class _BigConjunctionTrainingConfig(_BaseTrainingConfig):
@@ -24,8 +33,9 @@ class _BigConjunctionTrainingConfig(_BaseTrainingConfig):
     r = 25
     spacing = (55, 30)
     margin = 30
-    sampler = sample_conjunction_input_output
+    sampler = sample_AND_gate
 
 
 BASE_TRAINING_CONFIG = _BaseTrainingConfig()
 BIG_CONJUNCTION_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
+TINY_CONJUNCTION_TRAINING_CONFIG = _TinyConjunctionTrainingConfig()
