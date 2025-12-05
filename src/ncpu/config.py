@@ -7,13 +7,26 @@ from ncpu.dataset import sample_AND_gate, sample_NAND_gate
 class _BaseTrainingConfig:
     name = "Base"
     device = "cuda"
-    lr = 0.0001
+    lr = 0.00001
     batch_size = 16
     channels = 16
     hidden_channels = 128
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
+
+@dataclass(frozen=True)
+class _FastTrainingConfig:
+    name = "Fast"
+    device = "cuda"
+    lr = 0.0005
+    batch_size = 16
+    channels = 16
+    hidden_channels = 128
+    fire_rate = 0.8
+    alive_masking = True
+    zero_initialization = True
+
 
 @dataclass(frozen=True)
 class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
@@ -26,7 +39,7 @@ class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
     sampler = sample_AND_gate
 
 @dataclass(frozen=True)
-class _TinyNANDTrainingConfig(_BaseTrainingConfig):
+class _TinyNANDTrainingConfig(_FastTrainingConfig):
     name = "TinyNAND"
     W = 32
     H = 32
