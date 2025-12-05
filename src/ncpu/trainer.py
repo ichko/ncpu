@@ -68,7 +68,7 @@ class NCPUTrainer:
         white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
         black_loss = F.mse_loss(nca_out, out, reduction="none") * (1 - white_mask)
 
-        mean_losses = white_loss.mean(dim=(1, 2)) * 0.7 + black_loss.mean(dim=(1, 2)) * 0.3 # taking mean only from W, H 
+        mean_losses = white_loss.mean(dim=(1, 2)) * 0.5 + black_loss.mean(dim=(1, 2)) * 0.5 # taking mean only from W, H 
         mean_total_loss = mean_losses.mean()
 
         if torch.is_grad_enabled():
