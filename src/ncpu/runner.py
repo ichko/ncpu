@@ -26,6 +26,7 @@ def setup_trainer(config):
         spacing=config.spacing,
         margin=config.margin,
         sampler=config.sampler,
+        balanced=True
     )
     dataloader = dataset.get_dataloader(batch_size=config.batch_size)
 
@@ -51,6 +52,7 @@ def setup_pool_trainer(config):
             spacing=config.spacing,
             margin=config.margin,
             sampler=config.sampler,
+            balanced=True
         ),
         pool_size = 256
     )

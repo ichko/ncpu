@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 
-from ncpu.dataset import sample_AND_gate
+from ncpu.dataset import sample_AND_gate, sample_NAND_gate
 
 
 @dataclass(frozen=True)
 class _BaseTrainingConfig:
     name = "Base"
     device = "cuda"
-    lr = 0.00001
+    lr = 0.0001
     batch_size = 16
     channels = 16
     hidden_channels = 128
@@ -21,9 +21,19 @@ class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
     W = 32
     H = 32
     r = 4
-    spacing = (16, 4)
-    margin = 4
+    spacing = (16, 8)
+    margin = 8
     sampler = sample_AND_gate
+
+@dataclass(frozen=True)
+class _TinyNANDTrainingConfig(_BaseTrainingConfig):
+    name = "TinyNAND"
+    W = 32
+    H = 32
+    r = 4
+    spacing = (16, 8)
+    margin = 8
+    sampler = sample_NAND_gate
 
 @dataclass(frozen=True)
 class _BigConjunctionTrainingConfig(_BaseTrainingConfig):
@@ -39,3 +49,4 @@ class _BigConjunctionTrainingConfig(_BaseTrainingConfig):
 BASE_TRAINING_CONFIG = _BaseTrainingConfig()
 BIG_CONJUNCTION_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
 TINY_CONJUNCTION_TRAINING_CONFIG = _TinyConjunctionTrainingConfig()
+TINY_NAND_TRAINING_CONFIG = _TinyNANDTrainingConfig()
