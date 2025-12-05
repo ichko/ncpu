@@ -103,26 +103,31 @@ class PoolDataset(IterableDataset):
         self.W = self.dataset.W
         self.H = self.dataset.H
         self.r = self.dataset.r
+        self.dataset_iter = iter(self.dataset)
 
     def __iter__(self):
-        dataset_iter = iter(self.dataset)
         while True:
             if not self.pool[self._counter]:
-                self.pool[self._counter] = next(dataset_iter)
+                self.pool[self._counter] = next(self.dataset_iter)
             val = self.pool[self._counter]
-            self._counter_list.append(val)
+            self._counter_list.append(self._counter)
             self._counter += 1
             self._counter = self._counter % self.pool_size
-            yield val
+            yield val[0].clone(), val[1].clone()
 
     def update(self, batch, losses):
-        min_idx = torch.argmax(losses)
-        for i ,sample in enumerate(batch):
-            i = self._counter_list.popleft()
-            if min_idx == i:
-                self.pool[i] = next(dataset_iter) # prune worst results by re 
+        inp, out = batch[0].detach(), batch[0].detach()
+        max_idx = torch.argmax(losses)
+        min_idx = torch.argmin(losses)
+        for batch_i, sample in enumerate(batch):
+            pool_i = self._counter_list.popleft()
+            if min_idx == batch_i:
+                self.pool[pool_i] = (
+                    inp[min_idx].cpu(),
+                    self.pool[pool_i][1].cpu()
+                ) 
             else:
-                self.pool[i] = sample
+                self.pool[pool_i] = next(self.dataset_iter) # prune worst results by refreshing pool
 
     def get_dataloader(self, batch_size):
         return Poolloader(
