@@ -52,7 +52,8 @@ def setup_pool_trainer(config):
             spacing=config.spacing,
             margin=config.margin,
             sampler=config.sampler,
-            balanced=True
+            balanced=True,
+            noise=True
         ),
         pool_size = 256
     )
