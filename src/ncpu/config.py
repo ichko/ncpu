@@ -19,7 +19,7 @@ class _BaseTrainingConfig:
 class _FastTrainingConfig:
     name = "Fast"
     device = "cuda"
-    lr = 0.0005
+    lr = 0.002
     batch_size = 16
     channels = 16
     hidden_channels = 128

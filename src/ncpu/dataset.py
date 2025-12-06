@@ -1,5 +1,5 @@
 import torch
-from ncpu.utils import make_io_screen
+from ncpu.utils import make_io_screen, add_gaussian_noise
 from torch.utils.data import IterableDataset, DataLoader
 from collections import deque
 import numpy as np
@@ -41,15 +41,16 @@ def sample_XOR_gate(*args):
     return left, right
 
 class NCPUDataset(IterableDataset):
-    def __init__(self, W, H, r, spacing, margin, sampler, balanced = True):
+    def __init__(self, W, H, r, spacing, margin, sampler, balanced = True, noise = False):
         self.W = W
         self.H = H
         self.r = r
         self.spacing = spacing
         self.margin = margin
         self.sampler = sampler
-        self.balanced = True
+        self.noise = noise
 
+        self.balanced = balanced
         self.prev_class = 0
         self.class_neg = 0
 
@@ -71,6 +72,10 @@ class NCPUDataset(IterableDataset):
             left_input=left,
             right_input=0,
         )
+
+        if self.noise:
+            inp = add_gaussian_noise(inp)
+
         out = make_io_screen(
             W=self.W,
             H=self.H,
