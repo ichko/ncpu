@@ -33,7 +33,7 @@ class NCPUTrainer:
         first_state = self._inplant_input(inp).to(self.nca.device)
         print("  first_state:", first_state.shape)
 
-        rollout = self.nca.forward(first_state, steps=10) # why does it crashes here?
+        rollout = self.nca.forward(first_state, steps=10)
         print("  rollout:", rollout.shape)
 
         with torch.no_grad():
@@ -60,7 +60,7 @@ class NCPUTrainer:
     #     black_weights = 1.0 - white_weights
     #     return white_weights, black_weights
 
-    def optim_step(self, pool = False):
+    def optim_step(self):
         batch = next(self.dataset_iter)
 
         inp, out = batch
@@ -91,7 +91,7 @@ class NCPUTrainer:
 
         self.history.append(mean_total_loss.item())
 
-        if pool:
+        if hasattr(self.dataloader, "update"):
             self.dataloader.update((nca_out, out.detach()), mean_losses)
 
         return {

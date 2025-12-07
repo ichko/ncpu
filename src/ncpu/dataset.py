@@ -54,7 +54,7 @@ class NCPUDataset(IterableDataset):
         self.prev_class = 0
         self.class_neg = 0
 
-    def getSample(self):
+    def get_sample(self):
         left, right = self.sampler()
 
         if self.balanced:
@@ -90,13 +90,7 @@ class NCPUDataset(IterableDataset):
 
     def __iter__(self):
         while True:
-            yield self.getSample()
-
-    def __getitem__(self, idx):
-        return self.getSample()
-
-    def __len__(self):
-        return self.length
+            yield self.get_sample()
 
     def get_dataloader(self, batch_size):
         return DataLoader(

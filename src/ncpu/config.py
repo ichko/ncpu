@@ -14,6 +14,7 @@ class _BaseTrainingConfig:
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
+    noise = False # set to true if you want to apply gaussian noise
 
 @dataclass(frozen=True)
 class _FastTrainingConfig:
@@ -26,7 +27,7 @@ class _FastTrainingConfig:
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
-
+    noise = False # set to true if you want to apply gaussian noise
 
 @dataclass(frozen=True)
 class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
