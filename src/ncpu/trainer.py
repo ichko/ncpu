@@ -49,6 +49,17 @@ class NCPUTrainer:
         first_state[:, 0] = inp  # inplant in the first channel
         return first_state
 
+    # TOOD: not yet sure if that works or not <- commenting out for now
+    # please do not remove // Piotr
+    # 
+    # def _adaptive_weights(self, out):
+    #     s = out.sum(dim=(1, 2))
+    #     white_weights = torch.where(s > 0.5, torch.tensor(0.7), torch.tensor(0.3))
+
+    #     # Create opposite vector
+    #     black_weights = 1.0 - white_weights
+    #     return white_weights, black_weights
+
     def optim_step(self, pool = False):
         batch = next(self.dataset_iter)
 
@@ -68,7 +79,7 @@ class NCPUTrainer:
         white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
         black_loss = F.mse_loss(nca_out, out, reduction="none") * (1 - white_mask)
 
-        mean_losses = white_loss.mean(dim=(1, 2)) * 0.7 + black_loss.mean(dim=(1, 2)) * 0.3 # taking mean only from W, H 
+        mean_losses = white_loss.mean(dim=(1, 2)) * white_w + black_loss.mean(dim=(1, 2)) * black_w # taking mean only from W, H 
         mean_total_loss = mean_losses.mean()
 
         if torch.is_grad_enabled():

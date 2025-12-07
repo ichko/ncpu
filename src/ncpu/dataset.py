@@ -145,13 +145,13 @@ class PoolDataset(IterableDataset):
                 self.pool[pool_i] = next(self.dataset_iter) # prune worst results by refreshing pool
 
     def get_dataloader(self, batch_size):
-        return Poolloader(
+        return PoolLoader(
             self,
             batch_size=batch_size,
             shuffle=False,  # can't shuffle IterableDataset
         )
 
-class Poolloader(DataLoader):
+class PoolLoader(DataLoader):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
