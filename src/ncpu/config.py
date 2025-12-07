@@ -39,7 +39,7 @@ class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
     sampler = sample_AND_gate
 
 @dataclass(frozen=True)
-class _TinyNANDTrainingConfig(_FastTrainingConfig):
+class _TinyNANDTrainingConfig(_BaseTrainingConfig):
     name = "TinyNAND"
     W = 32
     H = 32

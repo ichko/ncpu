@@ -79,6 +79,8 @@ class NCPUTrainer:
         white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
         black_loss = F.mse_loss(nca_out, out, reduction="none") * (1 - white_mask)
 
+        black_w = 0.5
+        white_w = 0.5
         mean_losses = white_loss.mean(dim=(1, 2)) * white_w + black_loss.mean(dim=(1, 2)) * black_w # taking mean only from W, H 
         mean_total_loss = mean_losses.mean()
 
