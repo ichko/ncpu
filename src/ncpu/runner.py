@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import threading
 import time
 
-from ncpu.dataset import NCPUDataset
+from ncpu.dataset import NCPUDataset, PoolDataset
 from ncpu.model import NeuralCA
 from ncpu.trainer import NCPUTrainer
 
@@ -26,6 +26,36 @@ def setup_trainer(config):
         spacing=config.spacing,
         margin=config.margin,
         sampler=config.sampler,
+        balanced=True
+    )
+    dataloader = dataset.get_dataloader(batch_size=config.batch_size)
+
+    nca = NeuralCA(
+        channels=config.channels,
+        hidden_channels=config.hidden_channels,
+        fire_rate=config.fire_rate,
+        alive_masking=config.alive_masking,
+        zero_initialization=config.zero_initialization,
+    ).to(config.device)
+
+    trainer = NCPUTrainer(nca, dataloader, lr=config.lr)
+    trainer.sanity_check()
+
+    return trainer
+
+def setup_pool_trainer(config):
+    dataset = PoolDataset(
+        dataset = NCPUDataset(
+            W=config.W,
+            H=config.H,
+            r=config.r,
+            spacing=config.spacing,
+            margin=config.margin,
+            sampler=config.sampler,
+            balanced=True,
+            noise=config.sampler
+        ),
+        pool_size = 256
     )
     dataloader = dataset.get_dataloader(batch_size=config.batch_size)
 

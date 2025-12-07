@@ -32,6 +32,10 @@ def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
         return_html=return_html,
     )
 
+def add_gaussian_noise(img, mean=0, std=10):
+    noise = np.random.normal(mean, std, img.shape)
+    noisy = img + noise
+    return np.clip(noisy, 0, 255).astype(np.uint8)
 
 def make_io_screen(H, W, r, spacing, margin, left_input, right_input):
     screen = np.zeros((H, W), dtype=np.uint8)
