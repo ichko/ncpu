@@ -39,17 +39,19 @@ def add_gaussian_noise(img, mean=0, std=10):
     return np.clip(noisy, 0, 255).astype(np.uint8)
 
 
-def make_io_screen(H, W, r, small_r, spacing, margin, left_input, right_input):
+def make_io_screen(
+    H, W, r, small_r, spacing, margin, left_input, right_input, bit_length=2
+):
     screen = np.zeros((H, W), dtype=np.uint8)
     among_spacing, side_spacing = spacing
 
-    for i in range(left_input.bit_length()):
+    for i in range(bit_length):
         x = side_spacing
         y = margin + i * among_spacing
         bit = left_input & (1 << i)
         cv2.circle(screen, (x, y), r if bit else small_r, 255, -1)
 
-    for i in range(right_input.bit_length()):
+    for i in range(bit_length):
         x = W - side_spacing
         y = margin + i * among_spacing
         bit = right_input & (1 << i)
