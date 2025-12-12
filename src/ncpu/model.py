@@ -45,16 +45,16 @@ class NeuralCA(nn.Module):
 
     def forward(self, x, steps):
         seq = [x]
-        if self.symetry_break is None:
-            H, W = x.shape[-2:]
-            self.symetry_break = torch.rand(1, self.channels, H, W) < 0.01
-            self.symetry_break = self.symetry_break.float()
-            self.symetry_break = self.symetry_break.to(x.device)
+        # if self.symetry_break is None:
+        #     H, W = x.shape[-2:]
+        #     self.symetry_break = torch.rand(1, self.channels, H, W) < 0.01
+        #     self.symetry_break = self.symetry_break.float()
+        #     self.symetry_break = self.symetry_break.to(x.device)
+        # x += self.symetry_break
 
         # pad_type = "circular"
         pad_type = "constant"
 
-        x += self.symetry_break
         for _ in range(steps):
             x_padded = F.pad(x, (1, 1, 1, 1), pad_type)
             pre_life_mask = self.alive(x_padded)

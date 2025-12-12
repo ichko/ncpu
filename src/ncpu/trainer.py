@@ -3,17 +3,20 @@ from torch.nn import functional as F
 from ncpu.model import NeuralCA
 import numpy as np
 
+from ncpu.utils import add_gaussian_noise
+
 
 class NCPUTrainer:
-    def __init__(self, nca: NeuralCA, dataloader, lr):
+    def __init__(self, nca: NeuralCA, dataloader, lr, apply_gaussian_noise=False):
         super().__init__()
         self.nca = nca
-        self.dataloader = dataloader 
+        self.dataloader = dataloader
         print(f"self.dataloader: {self.dataloader}")
         self.ds = dataloader.dataset
         self.dataset_iter = iter(self.dataloader)
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
         self.history = []
+        self.apply_gaussian_noise = apply_gaussian_noise
 
     def sanity_check(self):
         print("Sanity check...")
@@ -37,7 +40,7 @@ class NCPUTrainer:
         print("  rollout:", rollout.shape)
 
         with torch.no_grad():
-            loss = self.optim_step()
+            loss = self.optim_step(steps=10)
             print("  loss:", loss["loss"].item())
 
         print("Sanity check completed successfully")
@@ -51,7 +54,7 @@ class NCPUTrainer:
 
     # TOOD: not yet sure if that works or not <- commenting out for now
     # please do not remove // Piotr
-    # 
+    #
     # def _adaptive_weights(self, out):
     #     s = out.sum(dim=(1, 2))
     #     white_weights = torch.where(s > 0.5, torch.tensor(0.7), torch.tensor(0.3))
@@ -60,42 +63,49 @@ class NCPUTrainer:
     #     black_weights = 1.0 - white_weights
     #     return white_weights, black_weights
 
-    def optim_step(self):
+    def optim_step(self, steps):
         batch = next(self.dataset_iter)
 
         inp, out = batch
         inp = inp.to(self.nca.device)
         out = out.to(self.nca.device)
         inp = inp / 255.0
-        # inp += torch.randn_like(inp) / 10.0
         out = out / 255.0
 
+        if self.apply_gaussian_noise:
+            inp = add_gaussian_noise(inp)
+
         first_state = self._inplant_input(inp)
-        rollout = self.nca.forward(first_state, steps=np.random.randint(10, 20))
+        if isinstance(steps, (tuple, list)):
+            steps = np.random.randint(steps[0], steps[1])
+
+        rollout = self.nca.forward(first_state, steps=steps)
         nca_out = rollout[:, -1, 0]
 
         white_mask = (out > 0.5).float()
+        black_mask = 1 - white_mask
 
         white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
-        black_loss = F.mse_loss(nca_out, out, reduction="none") * (1 - white_mask)
+        black_loss = F.mse_loss(nca_out, out, reduction="none") * black_mask
 
-        black_w = 0.5
-        white_w = 0.5
-        mean_losses = white_loss.mean(dim=(1, 2)) * white_w + black_loss.mean(dim=(1, 2)) * black_w # taking mean only from W, H 
-        mean_total_loss = mean_losses.mean()
+        masks_sum = white_mask + black_mask
+        white_weight = black_mask / masks_sum
+        black_weight = white_mask / masks_sum
+
+        loss = (white_loss * white_weight + black_loss * black_weight).mean()
 
         if torch.is_grad_enabled():
             self.optim.zero_grad()
-            mean_total_loss.backward()
+            loss.backward()
             self.optim.step()
 
-        self.history.append(mean_total_loss.item())
+        self.history.append(loss.item())
 
         if hasattr(self.dataloader, "update"):
-            self.dataloader.update((nca_out, out.detach()), mean_losses)
+            self.dataloader.update((nca_out, out.detach()), loss)
 
         return {
-            "loss": mean_total_loss,
+            "loss": loss,
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
