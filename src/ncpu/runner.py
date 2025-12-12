@@ -27,6 +27,7 @@ def setup_trainer(config):
         spacing=config.spacing,
         margin=config.margin,
         sampler=config.sampler,
+        bit_length=config.bit_length,
         balanced=config.balanced,
     )
     if config.pool_size > 0:

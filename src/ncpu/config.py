@@ -8,7 +8,7 @@ class _BaseTrainingConfig:
     name = "Base"
     device = "cuda"
     lr = 0.00001
-    batch_size = 16
+    batch_size = 24
     channels = 16
     hidden_channels = 128
     fire_rate = 0.8
@@ -27,7 +27,7 @@ class _FastTrainingConfig:
     batch_size = 16
     channels = 16
     hidden_channels = 128
-    fire_rate = 0.8
+    fire_rate = 0.99
     alive_masking = True
     zero_initialization = True
     gauissian_noise = False
@@ -43,6 +43,7 @@ class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
     spacing = (16, 8)
     margin = 8
     sampler = sample_AND_gate
+    bit_length = 2
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class _TinyNANDTrainingConfig(_BaseTrainingConfig):
     spacing = (16, 8)
     margin = 8
     sampler = sample_NAND_gate
+    bit_length = 2
 
 
 @dataclass(frozen=True)
@@ -63,9 +65,11 @@ class _BigConjunctionTrainingConfig(_BaseTrainingConfig):
     W = 117
     H = 117
     r = 25
+    small_r = 10
     spacing = (55, 30)
     margin = 30
     sampler = sample_AND_gate
+    bit_length = 2
 
 
 BASE_TRAINING_CONFIG = _BaseTrainingConfig()

@@ -55,6 +55,7 @@ class NCPUDataset(IterableDataset):
         spacing,
         margin,
         sampler,
+        bit_length,
         balanced=True,
     ):
         self.W = W
@@ -64,6 +65,7 @@ class NCPUDataset(IterableDataset):
         self.spacing = spacing
         self.margin = margin
         self.sampler = sampler
+        self.bit_length = bit_length
 
         self.balanced = balanced
         self.prev_class = 0
@@ -86,7 +88,8 @@ class NCPUDataset(IterableDataset):
             spacing=self.spacing,
             margin=self.margin,
             left_input=left,
-            right_input=0,
+            right_input=0,  # intentionally left at 0
+            bit_length=self.bit_length,
         )
 
         out = make_io_screen(
@@ -96,8 +99,9 @@ class NCPUDataset(IterableDataset):
             small_r=self.small_r,
             spacing=self.spacing,
             margin=self.margin,
-            left_input=0,
+            left_input=left,
             right_input=right,
+            bit_length=self.bit_length,
         )
 
         return torch.from_numpy(inp), torch.from_numpy(out)
