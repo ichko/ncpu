@@ -14,7 +14,10 @@ class _BaseTrainingConfig:
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
-    noise = False # set to true if you want to apply gaussian noise
+    apply_gaussian_noise = False
+    balanced = False
+    pool_size = 0
+
 
 @dataclass(frozen=True)
 class _FastTrainingConfig:
@@ -27,7 +30,8 @@ class _FastTrainingConfig:
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
-    noise = False # set to true if you want to apply gaussian noise
+    gauissian_noise = False
+
 
 @dataclass(frozen=True)
 class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
@@ -35,9 +39,11 @@ class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
     W = 32
     H = 32
     r = 4
+    small_r = 1
     spacing = (16, 8)
     margin = 8
     sampler = sample_AND_gate
+
 
 @dataclass(frozen=True)
 class _TinyNANDTrainingConfig(_BaseTrainingConfig):
@@ -45,9 +51,11 @@ class _TinyNANDTrainingConfig(_BaseTrainingConfig):
     W = 32
     H = 32
     r = 4
+    small_r = 1
     spacing = (16, 8)
     margin = 8
     sampler = sample_NAND_gate
+
 
 @dataclass(frozen=True)
 class _BigConjunctionTrainingConfig(_BaseTrainingConfig):

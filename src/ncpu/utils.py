@@ -32,12 +32,14 @@ def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
         return_html=return_html,
     )
 
+
 def add_gaussian_noise(img, mean=0, std=10):
     noise = np.random.normal(mean, std, img.shape)
     noisy = img + noise
     return np.clip(noisy, 0, 255).astype(np.uint8)
 
-def make_io_screen(H, W, r, spacing, margin, left_input, right_input):
+
+def make_io_screen(H, W, r, small_r, spacing, margin, left_input, right_input):
     screen = np.zeros((H, W), dtype=np.uint8)
     among_spacing, side_spacing = spacing
 
@@ -45,15 +47,13 @@ def make_io_screen(H, W, r, spacing, margin, left_input, right_input):
         x = side_spacing
         y = margin + i * among_spacing
         bit = left_input & (1 << i)
-        if bit:
-            cv2.circle(screen, (x, y), r, 255, -1)
+        cv2.circle(screen, (x, y), r if bit else small_r, 255, -1)
 
     for i in range(right_input.bit_length()):
         x = W - side_spacing
         y = margin + i * among_spacing
         bit = right_input & (1 << i)
-        if bit:
-            cv2.circle(screen, (x, y), r, 255, -1)
+        cv2.circle(screen, (x, y), r if bit else small_r, 255, -1)
 
     return screen
 
