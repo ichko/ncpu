@@ -67,13 +67,14 @@ class NCPUTrainer:
         batch = next(self.dataset_iter)
 
         inp, out = batch
-        inp = inp.to(self.nca.device)
-        out = out.to(self.nca.device)
         inp = inp / 255.0
         out = out / 255.0
 
         if self.apply_gaussian_noise:
-            inp = add_gaussian_noise(inp)
+            inp = add_gaussian_noise(inp, 0, 0.2)
+
+        inp = inp.to(self.nca.device)
+        out = out.to(self.nca.device)
 
         first_state = self._inplant_input(inp)
         if isinstance(steps, (tuple, list)):
