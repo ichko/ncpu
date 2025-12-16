@@ -1,8 +1,7 @@
 import torch
-from ncpu.utils import make_io_screen, add_gaussian_noise
+from ncpu.utils import make_io_screen
 from torch.utils.data import IterableDataset, DataLoader
 from collections import deque
-import numpy as np
 
 
 def sample_AND_gate(*args):
@@ -87,6 +86,7 @@ class NCPUDataset(IterableDataset):
             margin=self.margin,
             left_input=left,
             right_input=0,
+            bit_size_right=0
         )
 
         out = make_io_screen(
@@ -98,6 +98,8 @@ class NCPUDataset(IterableDataset):
             margin=self.margin,
             left_input=0,
             right_input=right,
+            bit_size_left=0,
+            bit_size_right=1
         )
 
         return torch.from_numpy(inp), torch.from_numpy(out)

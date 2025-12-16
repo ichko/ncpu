@@ -30,11 +30,13 @@ class _FastTrainingConfig:
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
-    gauissian_noise = False
+    apply_gaussian_noise = True
+    balanced = True
+    pool_size = 256
 
 
 @dataclass(frozen=True)
-class _TinyConjunctionTrainingConfig(_BaseTrainingConfig):
+class _TinyConjunctionTrainingConfig(_FastTrainingConfig):
     name = "TinyAnd"
     W = 32
     H = 32
@@ -69,6 +71,6 @@ class _BigConjunctionTrainingConfig(_BaseTrainingConfig):
 
 
 BASE_TRAINING_CONFIG = _BaseTrainingConfig()
-BIG_CONJUNCTION_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
-TINY_CONJUNCTION_TRAINING_CONFIG = _TinyConjunctionTrainingConfig()
+BIG_AND_GATE_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
+TINY_AND_GATE_TRAINING_CONFIG = _TinyConjunctionTrainingConfig()
 TINY_NAND_TRAINING_CONFIG = _TinyNANDTrainingConfig()
