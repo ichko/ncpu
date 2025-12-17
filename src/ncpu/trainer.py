@@ -11,7 +11,6 @@ class NCPUTrainer:
         super().__init__()
         self.nca = nca
         self.dataloader = dataloader
-        print(f"self.dataloader: {self.dataloader}")
         self.ds = dataloader.dataset
         self.dataset_iter = iter(self.dataloader)
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
@@ -85,12 +84,14 @@ class NCPUTrainer:
         white_mask = (out > 0.5).float()
         black_mask = 1 - white_mask
 
-        white_loss = F.mse_loss(nca_out, out, reduction="none") * white_mask
-        black_loss = F.mse_loss(nca_out, out, reduction="none") * black_mask
+        batch_loss = F.mse_loss(nca_out, out, reduction="none")
+        # batch_loss = F.binary_cross_entropy_with_logits(nca_out, out, reduction="none")
+        white_loss = batch_loss * white_mask
+        black_loss = batch_loss * black_mask
 
-        masks_sum = white_mask + black_mask
-        white_weight = black_mask / masks_sum
-        black_weight = white_mask / masks_sum
+        masks_sum = white_mask.sum() + black_mask.sum()
+        white_weight = black_mask.sum() / masks_sum
+        black_weight = white_mask.sum() / masks_sum
 
         loss = (white_loss * white_weight + black_loss * black_weight).mean()
 
@@ -99,13 +100,19 @@ class NCPUTrainer:
             loss.backward()
             self.optim.step()
 
-        self.history.append(loss.item())
+        track = {
+            "loss": loss,
+            "white_loss": white_loss,
+            "black_loss": black_loss,
+        }
+        self.history.append(track)
 
         if hasattr(self.dataloader, "update"):
             self.dataloader.update((nca_out, out.detach()), loss)
 
         return {
             "loss": loss,
+            "track": track,
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
