@@ -1,8 +1,7 @@
 import torch
-from ncpu.utils import make_io_screen, add_gaussian_noise
+from ncpu.utils import make_io_screen
 from torch.utils.data import IterableDataset, DataLoader
 from collections import deque
-import numpy as np
 
 
 def sample_AND_gate(*args):
@@ -12,12 +11,14 @@ def sample_AND_gate(*args):
     left = a << 1 | b
     return left, right
 
+
 def sample_OR_gate(*args):
     a = torch.randint(0, 2, size=(1,)).item()
     b = torch.randint(0, 2, size=(1,)).item()
     right = a | b
     left = a << 1 | b
     return left, right
+
 
 def sample_NOR_gate(*args):
     a = torch.randint(0, 2, size=(1,)).item()
@@ -26,12 +27,14 @@ def sample_NOR_gate(*args):
     left = a << 1 | b
     return left, right
 
+
 def sample_NAND_gate(*args):
     a = torch.randint(0, 2, size=(1,)).item()
     b = torch.randint(0, 2, size=(1,)).item()
     right = not (a & b)
     left = a << 1 | b
     return left, right
+
 
 def sample_XOR_gate(*args):
     a = torch.randint(0, 2, size=(1,)).item()
@@ -40,15 +43,28 @@ def sample_XOR_gate(*args):
     left = a << 1 | b
     return left, right
 
+
 class NCPUDataset(IterableDataset):
-    def __init__(self, W, H, r, spacing, margin, sampler, balanced = True, noise = False):
+    def __init__(
+        self,
+        W,
+        H,
+        r,
+        small_r,
+        spacing,
+        margin,
+        sampler,
+        bit_length,
+        balanced=True,
+    ):
         self.W = W
         self.H = H
         self.r = r
+        self.small_r = small_r
         self.spacing = spacing
         self.margin = margin
         self.sampler = sampler
-        self.noise = noise
+        self.bit_length = bit_length
 
         self.balanced = balanced
         self.prev_class = 0
@@ -67,26 +83,29 @@ class NCPUDataset(IterableDataset):
             W=self.W,
             H=self.H,
             r=self.r,
+            small_r=self.small_r,
             spacing=self.spacing,
             margin=self.margin,
             left_input=left,
-            right_input=0,
+            right_input=0,  # intentionally left at 0
+            bit_size_left=2,
+            bit_size_right=1,
         )
-
-        if self.noise:
-            inp = add_gaussian_noise(inp)
 
         out = make_io_screen(
             W=self.W,
             H=self.H,
             r=self.r,
+            small_r=self.small_r,
             spacing=self.spacing,
             margin=self.margin,
-            left_input=0,
+            left_input=left,
             right_input=right,
+            bit_size_left=2,
+            bit_size_right=1,
         )
 
-        return torch.from_numpy(inp), torch.from_numpy(out) 
+        return torch.from_numpy(inp), torch.from_numpy(out)
 
     def __iter__(self):
         while True:
@@ -99,15 +118,15 @@ class NCPUDataset(IterableDataset):
             shuffle=False,  # can't shuffle IterableDataset
         )
 
-class PoolDataset(IterableDataset):
 
+class PoolDataset(IterableDataset):
     def __init__(self, dataset, pool_size):
         self.dataset = dataset
         self.pool_size = pool_size
         self.pool = [None for _ in range(self.pool_size)]
         self._counter = 0
         self._counter_list = deque()
-        
+
         # ugly hackety hack
         self.W = self.dataset.W
         self.H = self.dataset.H
@@ -131,12 +150,11 @@ class PoolDataset(IterableDataset):
         for batch_i, sample in enumerate(batch):
             pool_i = self._counter_list.popleft()
             if min_idx == batch_i:
-                self.pool[pool_i] = (
-                    inp[min_idx].cpu(),
-                    self.pool[pool_i][1].cpu()
-                ) 
+                self.pool[pool_i] = (inp[min_idx].cpu(), self.pool[pool_i][1].cpu())
             else:
-                self.pool[pool_i] = next(self.dataset_iter) # prune worst results by refreshing pool
+                self.pool[pool_i] = next(
+                    self.dataset_iter
+                )  # prune worst results by refreshing pool
 
     def get_dataloader(self, batch_size):
         return PoolLoader(
@@ -144,6 +162,7 @@ class PoolDataset(IterableDataset):
             batch_size=batch_size,
             shuffle=False,  # can't shuffle IterableDataset
         )
+
 
 class PoolLoader(DataLoader):
     def __init__(self, *args, **kwargs):
