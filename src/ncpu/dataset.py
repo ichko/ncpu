@@ -88,7 +88,8 @@ class NCPUDataset(IterableDataset):
             margin=self.margin,
             left_input=left,
             right_input=0,  # intentionally left at 0
-            bit_size_right=0,
+            bit_size_left=2,
+            bit_size_right=1,
         )
 
         out = make_io_screen(
@@ -100,7 +101,7 @@ class NCPUDataset(IterableDataset):
             margin=self.margin,
             left_input=left,
             right_input=right,
-            bit_size_left=0,
+            bit_size_left=2,
             bit_size_right=1,
         )
 
