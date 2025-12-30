@@ -1,5 +1,5 @@
 import torch
-from ncpu.utils import make_io_screen
+from ncpu.utils import make_io_screen, add_gaussian_noise
 from torch.utils.data import IterableDataset, DataLoader
 from collections import deque
 
@@ -56,6 +56,7 @@ class NCPUDataset(IterableDataset):
         sampler,
         bit_length,
         balanced=True,
+        apply_gaussian_noise=True,
     ):
         self.W = W
         self.H = H
@@ -66,6 +67,7 @@ class NCPUDataset(IterableDataset):
         self.sampler = sampler
         self.bit_length = bit_length
 
+        self.apply_gaussian_noise = apply_gaussian_noise
         self.balanced = balanced
         self.prev_class = 0
         self.class_neg = 0
@@ -105,7 +107,7 @@ class NCPUDataset(IterableDataset):
             bit_size_right=1,
         )
 
-        return torch.from_numpy(inp), torch.from_numpy(out)
+        return torch.from_numpy(inp).to(dtype=torch.float32), torch.from_numpy(out).to(dtype=torch.float32)
 
     def __iter__(self):
         while True:
@@ -144,12 +146,12 @@ class PoolDataset(IterableDataset):
             yield val[0].clone(), val[1].clone()
 
     def update(self, batch, losses):
-        inp, out = batch[0].detach(), batch[0].detach()
+        inp, out = batch[0].detach(), batch[1].detach()
         max_idx = torch.argmax(losses)
         min_idx = torch.argmin(losses)
         for batch_i, sample in enumerate(batch):
             pool_i = self._counter_list.popleft()
-            if min_idx == batch_i:
+            if min_idx == batch_i and (inp[min_idx].mean() > 0.01):
                 self.pool[pool_i] = (inp[min_idx].cpu(), self.pool[pool_i][1].cpu())
             else:
                 self.pool[pool_i] = next(

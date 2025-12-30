@@ -1,9 +1,8 @@
 import torch
 from torch.nn import functional as F
 from ncpu.model import NeuralCA
-import numpy as np
-
 from ncpu.utils import add_gaussian_noise
+import numpy as np
 
 
 class NCPUTrainer:
@@ -20,9 +19,9 @@ class NCPUTrainer:
     def sanity_check(self):
         print("Sanity check...")
 
-        inp = torch.randn(2, self.nca.channels, self.ds.W, self.ds.H).to(
-            self.nca.device
-        )
+        inp = torch.randn(
+            2, self.nca.channels, self.ds.W, self.ds.H
+        ).to(self.nca.device)
         out = self.nca.forward(inp, steps=10)
 
         print("  forward:", inp.shape, "->", out.shape)
@@ -66,9 +65,16 @@ class NCPUTrainer:
         batch = next(self.dataset_iter)
 
         inp, out = batch
-        inp = inp / 255.0
-        out = out / 255.0
+        
+        # only apply normalization and noise
+        # if image is fresh and not reused from pool
+        # Compute per-sample max
+        inp_max = inp.amax(dim=(1, 2), keepdim=True)
+        out_max = out.amax(dim=(1, 2), keepdim=True)
+        inp = inp / (inp_max + 1e-8)
+        out = out / (out_max + 1e-8)
 
+        # this has to be applied during dataset creation, or it messes with pool
         if self.apply_gaussian_noise:
             inp = add_gaussian_noise(inp, 0, 0.2)
 
@@ -119,3 +125,6 @@ class NCPUTrainer:
             "nca_out": nca_out,
             "rollout": rollout,
         }
+
+    def get_current_pool(self):
+        return self.ds.pool, len(self.ds.pool)
