@@ -33,12 +33,31 @@ def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
     )
 
 
-def add_gaussian_noise(img, mean=0, std=1.0):
-    noise = torch.randn_like(img) * std + mean
-    noisy = img + noise
-    return torch.clamp(noisy, 0, 255)
+def add_gaussian_noise(img, mean=1.0, std=1.0):
+    if isinstance(img, torch.Tensor):
+        noise = torch.randn_like(img) * std + mean
+        noisy = img + noise
+        return torch.clamp(noisy, 0, 255)
+    elif isinstance(img, np.ndarray):
+        noise = np.random.normal(mean, std, img.shape).astype(img.dtype)
+        noisy = img + noise
+        return np.clip(noisy, 0, 255).astype(img.dtype)
+    else:
+        raise TypeError("Input must be torch.Tensor or np.ndarray")
 
-def make_io_screen(H, W, r, small_r, spacing, margin, left_input, right_input, bit_size_left, bit_size_right):
+
+def make_io_screen(
+    H,
+    W,
+    r,
+    small_r,
+    spacing,
+    margin,
+    left_input,
+    right_input,
+    bit_size_left,
+    bit_size_right,
+):
     screen = np.zeros((H, W), dtype=np.uint8)
     among_spacing, side_spacing = spacing
 

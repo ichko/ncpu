@@ -27,6 +27,7 @@ def setup_trainer(config):
         sampler=config.sampler,
         bit_length=config.bit_length,
         balanced=config.balanced,
+        apply_gaussian_noise=config.apply_gaussian_noise,
     )
     if config.pool_size > 0:
         dataset = PoolDataset(dataset, pool_size=config.pool_size)
