@@ -1,16 +1,6 @@
-import time
-
 from ncpu.dataset import NCPUDataset, PoolDataset
 from ncpu.model import NeuralCA
 from ncpu.trainer import NCPUTrainer
-
-from matplotlib import pyplot as plt
-from IPython.display import clear_output, display
-from tqdm.auto import tqdm
-from datetime import datetime
-from ncpu.utils import print_tensor, sequence_batch_to_html_gifs
-import mediapy as media
-import torch
 import panel as pn
 
 pn.extension()
