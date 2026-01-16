@@ -3,19 +3,27 @@ from torch.nn import functional as F
 from ncpu.model import NeuralCA
 import numpy as np
 
+from ncpu.persisted_list import PersistedList
 from ncpu.utils import add_gaussian_noise
 
 
 class NCPUTrainer:
-    def __init__(self, nca: NeuralCA, dataloader, lr, apply_gaussian_noise=False):
-        super().__init__()
+    def __init__(
+        self,
+        nca: NeuralCA,
+        dataloader,
+        lr,
+        gaussian_noise,
+    ):
         self.nca = nca
         self.dataloader = dataloader
         self.ds = dataloader.dataset
         self.dataset_iter = iter(self.dataloader)
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
-        self.history = []
-        self.apply_gaussian_noise = apply_gaussian_noise
+        self.gaussian_noise = gaussian_noise
+
+        self.optim_snapshots = PersistedList.new_list("./training_history")
+        self.metrics = []
 
     def sanity_check(self):
         print("Sanity check...")
@@ -39,7 +47,7 @@ class NCPUTrainer:
         print("  rollout:", rollout.shape)
 
         with torch.no_grad():
-            loss = self.optim_step(steps=10)
+            loss = self.optim_step(steps=10, save_history=False)
             print("  loss:", loss["loss"].item())
 
         print("Sanity check completed successfully")
@@ -62,15 +70,15 @@ class NCPUTrainer:
     #     black_weights = 1.0 - white_weights
     #     return white_weights, black_weights
 
-    def optim_step(self, steps):
+    def optim_step(self, steps, save_history=True):
         batch = next(self.dataset_iter)
 
         inp, out = batch
         inp = inp / 255.0
         out = out / 255.0
 
-        if self.apply_gaussian_noise:
-            inp = add_gaussian_noise(inp, 0, 0.2)
+        if self.gaussian_noise > 0:
+            inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
 
         inp = inp.to(self.nca.device)
         out = out.to(self.nca.device)
@@ -86,7 +94,6 @@ class NCPUTrainer:
         black_mask = 1 - white_mask
 
         batch_loss = F.mse_loss(nca_out, out, reduction="none")
-        # batch_loss = F.binary_cross_entropy_with_logits(nca_out, out, reduction="none")
         white_loss = batch_loss * white_mask
         black_loss = batch_loss * black_mask
 
@@ -106,12 +113,12 @@ class NCPUTrainer:
             "white_loss": white_loss,
             "black_loss": black_loss,
         }
-        self.history.append(track)
+        self.metrics.append(track)
 
         if hasattr(self.dataloader, "update"):
             self.dataloader.update((nca_out, out.detach()), loss)
 
-        return {
+        info = {
             "loss": loss,
             "track": track,
             "inp": inp,
@@ -119,3 +126,8 @@ class NCPUTrainer:
             "nca_out": nca_out,
             "rollout": rollout,
         }
+
+        if save_history:
+            self.optim_snapshots.append(info)
+
+        return info
