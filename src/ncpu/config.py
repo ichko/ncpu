@@ -9,12 +9,12 @@ class _BaseTrainingConfig:
     device = "cuda"
     lr = 0.00001
     batch_size = 24
-    channels = 16
+    channels = 8
     hidden_channels = 128
     fire_rate = 0.8
     alive_masking = True
     zero_initialization = True
-    apply_gaussian_noise = False
+    gaussian_noise = 0
     balanced = False
     pool_size = 0
 
@@ -23,16 +23,16 @@ class _BaseTrainingConfig:
 class _FastTrainingConfig:
     name = "Fast"
     device = "cuda"
-    lr = 0.002
+    lr = 0.0002
     batch_size = 16
     channels = 16
     hidden_channels = 128
     fire_rate = 0.99
     alive_masking = True
     zero_initialization = True
-    apply_gaussian_noise = True
-    balanced = True
-    pool_size = 256
+    gaussian_noise = 0.01
+    balanced = False
+    pool_size = 0
 
 
 @dataclass(frozen=True)
