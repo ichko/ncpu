@@ -1,47 +1,36 @@
-import torch
-from ncpu.utils import make_io_screen
-from torch.utils.data import IterableDataset, DataLoader
 from collections import deque
+
+import torch
+from torch.utils.data import DataLoader, IterableDataset
+
+from ncpu.utils import make_io_screen
+
+
+def two_arg_sampler(op):
+    inp = torch.randint(0, 2, size=(2,))
+    a, b = inp
+    out = op(a, b)
+    return inp, torch.tensor([out])
 
 
 def sample_AND_gate(*args):
-    a = torch.randint(0, 2, size=(1,)).item()
-    b = torch.randint(0, 2, size=(1,)).item()
-    right = a & b
-    left = a << 1 | b
-    return left, right
+    return two_arg_sampler(lambda a, b: a & b)
 
 
 def sample_OR_gate(*args):
-    a = torch.randint(0, 2, size=(1,)).item()
-    b = torch.randint(0, 2, size=(1,)).item()
-    right = a | b
-    left = a << 1 | b
-    return left, right
+    return two_arg_sampler(lambda a, b: a | b)
 
 
 def sample_NOR_gate(*args):
-    a = torch.randint(0, 2, size=(1,)).item()
-    b = torch.randint(0, 2, size=(1,)).item()
-    right = not (a | b)
-    left = a << 1 | b
-    return left, right
+    return two_arg_sampler(lambda a, b: not (a | b))
 
 
 def sample_NAND_gate(*args):
-    a = torch.randint(0, 2, size=(1,)).item()
-    b = torch.randint(0, 2, size=(1,)).item()
-    right = not (a & b)
-    left = a << 1 | b
-    return left, right
+    return two_arg_sampler(lambda a, b: not (a & b))
 
 
 def sample_XOR_gate(*args):
-    a = torch.randint(0, 2, size=(1,)).item()
-    b = torch.randint(0, 2, size=(1,)).item()
-    right = a != b
-    left = a << 1 | b
-    return left, right
+    return two_arg_sampler(lambda a, b: a != b)
 
 
 class NCPUDataset(IterableDataset):
@@ -50,21 +39,17 @@ class NCPUDataset(IterableDataset):
         W,
         H,
         r,
-        small_r,
         spacing,
         margin,
         sampler,
-        bit_length,
         balanced=True,
     ):
         self.W = W
         self.H = H
         self.r = r
-        self.small_r = small_r
         self.spacing = spacing
         self.margin = margin
         self.sampler = sampler
-        self.bit_length = bit_length
 
         self.balanced = balanced
         self.prev_class = 0
@@ -83,26 +68,20 @@ class NCPUDataset(IterableDataset):
             W=self.W,
             H=self.H,
             r=self.r,
-            small_r=self.small_r,
             spacing=self.spacing,
             margin=self.margin,
             left_input=left,
-            right_input=0,  # intentionally left at 0
-            bit_size_left=2,
-            bit_size_right=1,
+            right_input=torch.zeros_like(right),  # blank right input for input screen
         )
 
         out = make_io_screen(
             W=self.W,
             H=self.H,
             r=self.r,
-            small_r=self.small_r,
             spacing=self.spacing,
             margin=self.margin,
             left_input=left,
             right_input=right,
-            bit_size_left=2,
-            bit_size_right=1,
         )
 
         return torch.from_numpy(inp), torch.from_numpy(out)

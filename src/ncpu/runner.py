@@ -1,9 +1,6 @@
 from ncpu.dataset import NCPUDataset, PoolDataset
 from ncpu.model import NeuralCA
 from ncpu.trainer import NCPUTrainer
-import panel as pn
-
-pn.extension()
 
 
 def setup_trainer(config):
@@ -11,11 +8,9 @@ def setup_trainer(config):
         W=config.W,
         H=config.H,
         r=config.r,
-        small_r=config.small_r,
         spacing=config.spacing,
         margin=config.margin,
         sampler=config.sampler,
-        bit_length=config.bit_length,
         balanced=config.balanced,
     )
     if config.pool_size > 0:
