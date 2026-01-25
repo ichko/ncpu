@@ -3,3 +3,4 @@ __pycache__
 checkpoints/
 .ipynb_checkpoints/
 training_history/
+.vscode

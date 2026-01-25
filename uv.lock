@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1228,6 +1228,7 @@ name = "ncpu"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "ipywidgets" },
     { name = "jupyter" },
     { name = "jupyter-bokeh" },
     { name = "matplotlib" },
@@ -1235,7 +1236,6 @@ dependencies = [
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "panel" },
-    { name = "pytest" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "tqdm" },
@@ -1248,6 +1248,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ipywidgets", specifier = ">=8.1.8" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "jupyter-bokeh", specifier = ">=4.0.5" },
     { name = "matplotlib", specifier = ">=3.10.7" },
@@ -1255,7 +1256,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "panel", specifier = ">=1.8.3" },
-    { name = "pytest", specifier = ">=9.0.2" },
     { name = "torch", specifier = ">=2.9.1" },
     { name = "torchvision", specifier = ">=0.24.1" },
     { name = "tqdm", specifier = ">=4.67.1" },
