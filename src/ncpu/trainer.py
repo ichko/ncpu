@@ -1,10 +1,18 @@
-import torch
-from torch.nn import functional as F
-from ncpu.model import NeuralCA
-import numpy as np
+import os
+from datetime import datetime
 
-from ncpu.persisted_list import PersistedList
-from ncpu.utils import add_gaussian_noise
+import mediapy as media
+import numpy as np
+import torch
+from IPython.display import display
+from matplotlib import pyplot as plt
+from torch.nn import functional as F
+
+from ncpu.model import NeuralCA
+from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
+
+CHECKPOINT_DIR = "./checkpoints"
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 
 class NCPUTrainer:
@@ -22,8 +30,8 @@ class NCPUTrainer:
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
         self.gaussian_noise = gaussian_noise
 
-        self.optim_snapshots = PersistedList.new_list("./training_history")
         self.metrics = []
+        self.optim_steps = 0
 
     def sanity_check(self):
         print("Sanity check...")
@@ -47,7 +55,7 @@ class NCPUTrainer:
         print("  rollout:", rollout.shape)
 
         with torch.no_grad():
-            loss = self.optim_step(steps=10, save_history=False)
+            loss = self.optim_step(steps=10)
             print("  loss:", loss["loss"].item())
 
         print("Sanity check completed successfully")
@@ -59,7 +67,7 @@ class NCPUTrainer:
         first_state[:, 0] = inp  # inplant in the first channel
         return first_state
 
-    # TOOD: not yet sure if that works or not <- commenting out for now
+    # TODO: not yet sure if that works or not <- commenting out for now
     # please do not remove // Piotr
     #
     # def _adaptive_weights(self, out):
@@ -70,7 +78,17 @@ class NCPUTrainer:
     #     black_weights = 1.0 - white_weights
     #     return white_weights, black_weights
 
-    def optim_step(self, steps, save_history=True):
+    def save_checkpoint(self):
+        it = self.optim_steps
+        t = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        path = f"{CHECKPOINT_DIR}/ncpu_{it:06d}_{t}.pth"
+        torch.save(self.nca.state_dict(), path)
+
+        return path
+
+    def optim_step(self, steps):
+        self.optim_steps += 1
         batch = next(self.dataset_iter)
 
         inp, out = batch
@@ -108,26 +126,45 @@ class NCPUTrainer:
             loss.backward()
             self.optim.step()
 
-        track = {
+        metrics = {
             "loss": loss,
             "white_loss": white_loss,
             "black_loss": black_loss,
         }
-        self.metrics.append(track)
+        self.metrics.append(metrics)
 
         if hasattr(self.dataloader, "update"):
             self.dataloader.update((nca_out, out.detach()), loss)
 
         info = {
             "loss": loss,
-            "track": track,
+            "metrics": metrics,
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
             "rollout": rollout,
         }
 
-        if save_history:
-            self.optim_snapshots.append(info)
-
         return info
+
+    def display_optim_step(self, info):
+        fig, ax = plt.subplots(figsize=(8, 3))
+        loss = [h["loss"].item() for h in self.metrics]
+        ax.scatter(range(len(loss)), loss, s=1)
+        ax.set_yscale("log")
+        plt.close(fig)
+        display(fig)
+
+        print_tensor("inp    ", info["inp"])
+        print_tensor("out    ", info["out"])
+        print_tensor("nca_out", info["nca_out"])
+
+        to_show = 8
+        inp = info["inp"][:to_show]
+        out = info["out"][:to_show]
+        nca_out = info["nca_out"][:to_show]
+        rollout = info["rollout"][:to_show]
+        io = torch.cat([inp, out, nca_out], dim=0)
+
+        media.show_images(io.detach().cpu(), columns=to_show, width=100, height=100)
+        sequence_batch_to_html_gifs(rollout, columns=to_show, fps=10)
