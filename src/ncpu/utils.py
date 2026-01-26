@@ -17,7 +17,9 @@ def print_tensor(title, t):
     )
 
 
-def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
+def sequence_batch_to_html_gifs(
+    tensor, width, height, return_html=False, columns=8, fps=20
+):
     tensor = tensor[:, :, 0].detach().cpu().numpy()
     tensor = media.to_rgb(tensor, cmap="viridis", vmin=0, vmax=1)
 
@@ -27,8 +29,8 @@ def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
         fps=fps,
         codec="gif",
         columns=columns,
-        width=100,
-        height=100,
+        width=width,
+        height=height,
         return_html=return_html,
     )
 
@@ -39,26 +41,22 @@ def add_gaussian_noise(img, mean=0, std=1.0):
     return torch.clamp(noisy, 0, 255)
 
 
-def make_io_screen(
-    H,
-    W,
-    r,
-    spacing,
-    margin,
-    left_input,
-    right_input,
-):
+def make_io_screen(H, W, r, spacing, left_input, right_input):
     screen = np.zeros((H, W), dtype=np.uint8)
     among_spacing, side_spacing = spacing
 
     for i, bit in enumerate(left_input):
         x = side_spacing
-        y = margin + i * among_spacing
+        v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
+        top_margin = (H - v_size) // 2
+        y = top_margin + r + i * (among_spacing + r * 2)
         cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
 
     for i, bit in enumerate(right_input):
         x = W - side_spacing
-        y = margin + i * among_spacing
+        v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
+        top_margin = (H - v_size) // 2
+        y = top_margin + r + i * (among_spacing + r * 2)
         cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
 
     return screen

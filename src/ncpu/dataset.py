@@ -40,7 +40,6 @@ class NCPUDataset(IterableDataset):
         H,
         r,
         spacing,
-        margin,
         sampler,
         balanced=True,
     ):
@@ -48,7 +47,6 @@ class NCPUDataset(IterableDataset):
         self.H = H
         self.r = r
         self.spacing = spacing
-        self.margin = margin
         self.sampler = sampler
 
         self.balanced = balanced
@@ -69,9 +67,8 @@ class NCPUDataset(IterableDataset):
             H=self.H,
             r=self.r,
             spacing=self.spacing,
-            margin=self.margin,
             left_input=left,
-            right_input=torch.zeros_like(right),  # blank right input for input screen
+            right_input=torch.zeros_like(right),
         )
 
         out = make_io_screen(
@@ -79,8 +76,7 @@ class NCPUDataset(IterableDataset):
             H=self.H,
             r=self.r,
             spacing=self.spacing,
-            margin=self.margin,
-            left_input=left,
+            left_input=[],
             right_input=right,
         )
 

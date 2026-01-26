@@ -8,8 +8,7 @@ class _TwoArgSmallGridMixin:
     W = 32
     H = 32
     r = 4
-    spacing = (16, 8)
-    margin = 8
+    spacing = (8, 8)
 
 
 @dataclass(frozen=True)
@@ -18,7 +17,6 @@ class _TwoArgLargeGridMixin:
     H = 117
     r = 25
     spacing = (55, 30)
-    margin = 30
 
 
 @dataclass(frozen=True)
