@@ -48,7 +48,7 @@ class NCPUTrainer:
         inp, out = batch
         print("  dataloader:", inp.shape, "->", out.shape)
 
-        first_state = self._inplant_input(inp).to(self.nca.device)
+        first_state = self._implant_input(inp).to(self.nca.device)
         print("  first_state:", first_state.shape)
 
         rollout = self.nca.forward(first_state, steps=10)
@@ -60,11 +60,11 @@ class NCPUTrainer:
 
         print("Sanity check completed successfully")
 
-    def _inplant_input(self, inp):
+    def _implant_input(self, inp):
         bs = inp.shape[0]
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
         first_state = first_state.to(self.nca.device)
-        first_state[:, 0] = inp  # inplant in the first channel
+        first_state[:, 0] = inp  # implant in the first channel
         return first_state
 
     # TODO: not yet sure if that works or not <- commenting out for now
@@ -101,7 +101,7 @@ class NCPUTrainer:
         inp = inp.to(self.nca.device)
         out = out.to(self.nca.device)
 
-        first_state = self._inplant_input(inp)
+        first_state = self._implant_input(inp)
         if isinstance(steps, (tuple, list)):
             steps = np.random.randint(steps[0], steps[1])
 
@@ -166,5 +166,7 @@ class NCPUTrainer:
         rollout = info["rollout"][:to_show]
         io = torch.cat([inp, out, nca_out], dim=0)
 
-        media.show_images(io.detach().cpu(), columns=to_show, width=100, height=100)
-        sequence_batch_to_html_gifs(rollout, columns=to_show, fps=10)
+        media.show_images(io.detach().cpu(), columns=to_show, width=80, height=80)
+        sequence_batch_to_html_gifs(
+            rollout, columns=to_show, width=80, height=80, fps=10
+        )

@@ -9,7 +9,6 @@ def setup_trainer(config):
         H=config.H,
         r=config.r,
         spacing=config.spacing,
-        margin=config.margin,
         sampler=config.sampler,
         balanced=config.balanced,
     )
