@@ -3,11 +3,11 @@ import os
 os.environ["CXX_RNG_USE_RDRND"] = "0"
 
 import cv2
+import mediapy as media
 import numpy as np
 import torch
 import torch.nn as nn
 from PIL import Image
-import mediapy as media
 
 
 def print_tensor(title, t):
@@ -17,7 +17,9 @@ def print_tensor(title, t):
     )
 
 
-def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
+def sequence_batch_to_html_gifs(
+    tensor, width, height, return_html=False, columns=8, fps=20
+):
     tensor = tensor[:, :, 0].detach().cpu().numpy()
     tensor = media.to_rgb(tensor, cmap="viridis", vmin=0, vmax=1)
 
@@ -27,8 +29,8 @@ def sequence_batch_to_html_gifs(tensor, return_html=False, columns=8, fps=20):
         fps=fps,
         codec="gif",
         columns=columns,
-        width=100,
-        height=100,
+        width=width,
+        height=height,
         return_html=return_html,
     )
 
@@ -38,21 +40,24 @@ def add_gaussian_noise(img, mean=0, std=1.0):
     noisy = img + noise
     return torch.clamp(noisy, 0, 255)
 
-def make_io_screen(H, W, r, small_r, spacing, margin, left_input, right_input, bit_size_left, bit_size_right):
+
+def make_io_screen(H, W, r, spacing, left_input, right_input):
     screen = np.zeros((H, W), dtype=np.uint8)
     among_spacing, side_spacing = spacing
 
-    for i in range(bit_size_left):
+    for i, bit in enumerate(left_input):
         x = side_spacing
-        y = margin + i * among_spacing
-        bit = (left_input >> i) & 0b1
-        cv2.circle(screen, (x, y), r if bit else small_r, 255, -1)
+        v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
+        top_margin = (H - v_size) // 2
+        y = top_margin + r + i * (among_spacing + r * 2)
+        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
 
-    for i in range(bit_size_right):
+    for i, bit in enumerate(right_input):
         x = W - side_spacing
-        y = margin + i * among_spacing
-        bit = (right_input >> i) & 0b1
-        cv2.circle(screen, (x, y), r if bit else small_r, 255, -1)
+        v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
+        top_margin = (H - v_size) // 2
+        y = top_margin + r + i * (among_spacing + r * 2)
+        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
 
     return screen
 
