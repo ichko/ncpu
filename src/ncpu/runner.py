@@ -1,19 +1,6 @@
-import time
-
 from ncpu.dataset import NCPUDataset, PoolDataset
 from ncpu.model import NeuralCA
 from ncpu.trainer import NCPUTrainer
-
-from matplotlib import pyplot as plt
-from IPython.display import clear_output, display
-from tqdm.auto import tqdm
-from datetime import datetime
-from ncpu.utils import print_tensor, sequence_batch_to_html_gifs
-import mediapy as media
-import torch
-import panel as pn
-
-pn.extension()
 
 
 def setup_trainer(config):
@@ -21,11 +8,8 @@ def setup_trainer(config):
         W=config.W,
         H=config.H,
         r=config.r,
-        small_r=config.small_r,
         spacing=config.spacing,
-        margin=config.margin,
         sampler=config.sampler,
-        bit_length=config.bit_length,
         balanced=config.balanced,
         apply_gaussian_noise=config.apply_gaussian_noise,
     )
@@ -44,7 +28,7 @@ def setup_trainer(config):
         nca,
         dataset.get_dataloader(batch_size=config.batch_size),
         lr=config.lr,
-        apply_gaussian_noise=config.apply_gaussian_noise,
+        gaussian_noise=config.gaussian_noise,
     )
     trainer.sanity_check()
 
