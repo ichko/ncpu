@@ -32,7 +32,7 @@ class _FastTrainingConfig:
     zero_initialization = True
     apply_gaussian_noise = True
     balanced = True
-    pool_size = 32
+    pool_size = 0
 
 
 @dataclass(frozen=True)
