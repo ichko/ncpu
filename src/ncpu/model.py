@@ -41,16 +41,8 @@ class NeuralCA(nn.Module):
         if zero_initialization:
             nn.init.zeros_(self.rule[-1].weight)
 
-        self.symetry_break = None
-
     def forward(self, x, steps):
         seq = [x]
-        # if self.symetry_break is None:
-        #     H, W = x.shape[-2:]
-        #     self.symetry_break = torch.rand(1, self.channels, H, W) < 0.01
-        #     self.symetry_break = self.symetry_break.float()
-        #     self.symetry_break = self.symetry_break.to(x.device)
-        # x += self.symetry_break
 
         # pad_type = "circular"
         pad_type = "constant"
