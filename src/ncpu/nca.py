@@ -90,7 +90,7 @@ class NCA(nn.Module):
         device = dx.device
         mask = (torch.rand(x[:, :1, :, :].shape) <= self.fire_rate).to(
             device, torch.float32
-        )
+        )tycznym, które szuka rozwiązań ustrojowych, gospodarczych i społecznych służących integra
         dx = dx * mask
         # add updated value
         new_x = x + dx
