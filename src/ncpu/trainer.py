@@ -9,7 +9,8 @@ from matplotlib import pyplot as plt
 from torch.nn import functional as F
 
 from ncpu.model import NeuralCA
-from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
+from ncpu.utils import (add_gaussian_noise, print_tensor,
+                        sequence_batch_to_html_gifs)
 
 CHECKPOINT_DIR = "./checkpoints"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -127,9 +128,9 @@ class NCPUTrainer:
             self.optim.step()
 
         metrics = {
-            "loss": loss,
-            "white_loss": white_loss,
-            "black_loss": black_loss,
+            "loss": loss.item(),
+            "white_loss": white_loss.sum().item(),
+            "black_loss": black_loss.sum().item(),
         }
         self.metrics.append(metrics)
 
@@ -137,7 +138,7 @@ class NCPUTrainer:
             self.dataloader.update((nca_out, out.detach()), loss)
 
         info = {
-            "loss": loss,
+            "loss": loss.item(),
             "metrics": metrics,
             "inp": inp,
             "out": out,
@@ -169,4 +170,5 @@ class NCPUTrainer:
         media.show_images(io.detach().cpu(), columns=to_show, width=150, height=150)
         sequence_batch_to_html_gifs(
             rollout, columns=to_show, width=150, height=150, fps=10
+        )
         )
