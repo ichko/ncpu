@@ -68,7 +68,7 @@ class NCPUDataset(IterableDataset):
             r=self.r,
             spacing=self.spacing,
             left_input=left,
-            right_input=torch.zeros_like(right),
+            right_input=[],
         )
 
         out = make_io_screen(

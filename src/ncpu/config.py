@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ncpu.dataset import sample_AND_gate, sample_NAND_gate
+from ncpu.dataset import sample_AND_gate, sample_NAND_gate, sample_XOR_gate
 
 
 @dataclass(frozen=True)
@@ -8,7 +8,7 @@ class _TwoArgSmallGridMixin:
     W = 32
     H = 32
     r = 4
-    spacing = (8, 8)
+    spacing = (2, 16)
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,14 @@ class _TinyNANDTrainingConfig(
 
 
 @dataclass(frozen=True)
+class _TinyNANDTrainingConfig(
+    _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
+):
+    name = "TinyXOR"
+    sampler = sample_XOR_gate
+
+
+@dataclass(frozen=True)
 class _BigConjunctionTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgLargeGridMixin
 ):
@@ -65,3 +73,4 @@ class _BigConjunctionTrainingConfig(
 BIG_AND_GATE_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
 TINY_AND_GATE_TRAINING_CONFIG = _TinyConjunctionTrainingConfig()
 TINY_NAND_TRAINING_CONFIG = _TinyNANDTrainingConfig()
+TINY_XOR_TRAINING_CONFIG = _TinyNANDTrainingConfig()

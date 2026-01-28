@@ -50,14 +50,14 @@ def make_io_screen(H, W, r, spacing, left_input, right_input):
         v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
+        cv2.circle(screen, (x, y), r if bit else r // 2, 255, -1)
 
     for i, bit in enumerate(right_input):
         x = W - side_spacing
         v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
+        cv2.circle(screen, (x, y), r if bit else r // 2, 255, -1)
 
     return screen
 
