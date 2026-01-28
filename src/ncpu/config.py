@@ -36,7 +36,7 @@ class _DefaultNCAMixin:
 @dataclass(frozen=True)
 class _OptimizationArgsMixin:
     lr = 0.0002
-    batch_size = 16
+    batch_size = 8
     gaussian_noise = 0.01
     balanced = False
     pool_size = 0
