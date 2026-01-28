@@ -9,8 +9,7 @@ from matplotlib import pyplot as plt
 from torch.nn import functional as F
 
 from ncpu.model import NeuralCA
-from ncpu.utils import (add_gaussian_noise, print_tensor,
-                        sequence_batch_to_html_gifs)
+from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
 
 CHECKPOINT_DIR = "./checkpoints"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -57,7 +56,7 @@ class NCPUTrainer:
 
         with torch.no_grad():
             loss = self.optim_step(steps=10)
-            print("  loss:", loss["loss"].item())
+            print("  loss:", loss["loss"])
 
         print("Sanity check completed successfully")
 
@@ -150,7 +149,7 @@ class NCPUTrainer:
 
     def display_optim_step(self, info):
         fig, ax = plt.subplots(figsize=(8, 3))
-        loss = [h["loss"].item() for h in self.metrics]
+        loss = [h["loss"] for h in self.metrics]
         ax.scatter(range(len(loss)), loss, s=1)
         ax.set_yscale("log")
         plt.close(fig)
@@ -170,5 +169,4 @@ class NCPUTrainer:
         media.show_images(io.detach().cpu(), columns=to_show, width=150, height=150)
         sequence_batch_to_html_gifs(
             rollout, columns=to_show, width=150, height=150, fps=10
-        )
         )
