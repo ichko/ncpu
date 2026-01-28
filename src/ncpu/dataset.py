@@ -6,6 +6,21 @@ from torch.utils.data import DataLoader, IterableDataset
 from ncpu.utils import make_io_screen
 
 
+def sample_4bit_adder():
+    a = torch.randint(0, 2, size=(4,))
+    b = torch.randint(0, 2, size=(4,))
+
+    a_int = int("".join(map(str, a.tolist())), 2)
+    b_int = int("".join(map(str, b.tolist())), 2)
+
+    s_int = a_int + b_int
+
+    out = torch.tensor(list(map(int, f"{s_int:05b}")))
+    inp = torch.cat([a, b])
+
+    return inp, out
+
+
 def two_arg_sampler(op):
     inp = torch.randint(0, 2, size=(2,))
     a, b = inp
@@ -30,6 +45,10 @@ def sample_NAND_gate(*args):
 
 
 def sample_XOR_gate(*args):
+    return two_arg_sampler(lambda a, b: a != b)
+
+
+def sample_8bit_adder(*args):
     return two_arg_sampler(lambda a, b: a != b)
 
 
@@ -144,4 +163,5 @@ class PoolLoader(DataLoader):
         super().__init__(*args, **kwargs)
 
     def update(self, batch, losses):
+        self.dataset.update(batch, losses)
         self.dataset.update(batch, losses)
