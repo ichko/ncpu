@@ -166,7 +166,7 @@ class NCPUTrainer:
         rollout = info["rollout"][:to_show]
         io = torch.cat([inp, out, nca_out], dim=0)
 
-        media.show_images(io.detach().cpu(), columns=to_show, width=80, height=80)
+        media.show_images(io.detach().cpu(), columns=to_show, width=150, height=150)
         sequence_batch_to_html_gifs(
-            rollout, columns=to_show, width=80, height=80, fps=10
+            rollout, columns=to_show, width=150, height=150, fps=10
         )

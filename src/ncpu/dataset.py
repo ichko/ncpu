@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, IterableDataset
 from ncpu.utils import make_io_screen
 
 
-def sample_4bit_adder():
+def sample_4bit_adder(*args):
     a = torch.randint(0, 2, size=(4,))
     b = torch.randint(0, 2, size=(4,))
 
