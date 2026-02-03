@@ -133,7 +133,7 @@ class NCPUTrainer:
 
         with torch.no_grad():
             loss = self.optim_step(steps=10)
-            print("  loss:", loss["loss"].item())
+            print("  loss:", loss["loss"])
 
         print("Sanity check completed successfully")
 
@@ -210,9 +210,9 @@ class NCPUTrainer:
             self.optim.step()
 
         metrics = {
-            "loss": loss,
-            "white_loss": white_loss,
-            "black_loss": black_loss,
+            "loss": loss.item(),
+            "white_loss": white_loss.sum().item(),
+            "black_loss": black_loss.sum().item(),
         }
         self.metrics.append(metrics)
 
@@ -220,7 +220,7 @@ class NCPUTrainer:
             self.dataloader.update((nca_out, out.detach()), loss)
 
         info = {
-            "loss": loss,
+            "loss": loss.item(),
             "metrics": metrics,
             "inp": inp,
             "out": out,
@@ -232,7 +232,7 @@ class NCPUTrainer:
 
     def display_optim_step(self, info):
         fig, ax = plt.subplots(figsize=(8, 3))
-        loss = [h["loss"].item() for h in self.metrics]
+        loss = [h["loss"] for h in self.metrics]
         ax.scatter(range(len(loss)), loss, s=1)
         ax.set_yscale("log")
         plt.close(fig)
@@ -249,7 +249,7 @@ class NCPUTrainer:
         rollout = info["rollout"][:to_show]
         io = torch.cat([inp, out, nca_out], dim=0)
 
-        media.show_images(io.detach().cpu(), columns=to_show, width=80, height=80)
+        media.show_images(io.detach().cpu(), columns=to_show, width=150, height=150)
         sequence_batch_to_html_gifs(
-            rollout, columns=to_show, width=80, height=80, fps=10
+            rollout, columns=to_show, width=150, height=150, fps=10
         )
