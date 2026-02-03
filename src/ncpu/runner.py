@@ -11,7 +11,7 @@ def setup_trainer(config):
         spacing=config.spacing,
         sampler=config.sampler,
         balanced=config.balanced,
-        apply_gaussian_noise=config.apply_gaussian_noise,
+        apply_gaussian_noise=config.gaussian_noise,
     )
     if config.pool_size > 0:
         dataset = PoolDataset(dataset, pool_size=config.pool_size)
@@ -34,6 +34,7 @@ def setup_trainer(config):
 
     return trainer
 
+
 def setup_evaluator(config, path):
     dataset = NCPUDataset(
         W=config.W,
@@ -45,7 +46,7 @@ def setup_evaluator(config, path):
         sampler=config.sampler,
         bit_length=config.bit_length,
         balanced=config.balanced,
-        apply_gaussian_noise=config.apply_gaussian_noise,
+        apply_gaussian_noise=config.gaussian_noise,
     )
     if config.pool_size > 0:
         dataset = PoolDataset(dataset, pool_size=config.pool_size)
@@ -64,6 +65,7 @@ def setup_evaluator(config, path):
 
     evaluator = NCPUEval()
     return evaluator
+
 
 class TrainRunnerUI:
     def __init__(self, config):

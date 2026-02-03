@@ -44,7 +44,7 @@ class _OptimizationArgsMixin:
 
 
 @dataclass(frozen=True)
-class _TinyConjunctionTrainingConfig(
+class _TinyANDTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
 ):
     name = "TinyAnd"
@@ -60,11 +60,19 @@ class _TinyNANDTrainingConfig(
 
 
 @dataclass(frozen=True)
-class _TinyNANDTrainingConfig(
+class _TinyXORTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
 ):
     name = "TinyXOR"
     sampler = sample_XOR_gate
+
+
+@dataclass(frozen=True)
+class _TinyNORTrainingConfig(
+    _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
+):
+    name = "TinyNOR"
+    sampler = sample_NOR_gate
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,6 @@ class _Big4bitAdderTrainingConfig(
 
 
 BIG_AND_GATE_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
-TINY_AND_GATE_TRAINING_CONFIG = _TinyConjunctionTrainingConfig()
+TINY_AND_GATE_TRAINING_CONFIG = _TinyANDTrainingConfig()
 TINY_NAND_TRAINING_CONFIG = _TinyNANDTrainingConfig()
 BIG_4BIT_ADDER_TRAINING_CONFIG = _Big4bitAdderTrainingConfig()

@@ -101,7 +101,9 @@ class NCPUDataset(IterableDataset):
             right_input=right,
         )
 
-        return torch.from_numpy(inp).to(dtype=torch.float32), torch.from_numpy(out).to(dtype=torch.float32)
+        return torch.from_numpy(inp).to(dtype=torch.float32), torch.from_numpy(out).to(
+            dtype=torch.float32
+        )
 
     def __iter__(self):
         while True:
