@@ -21,3 +21,6 @@ format:
 
 generate_reqs:
 	${PYTHON} -m pipreqs . --force
+
+clean_checkpoints: 
+	rm -rf notebooks/checkpoints/*
