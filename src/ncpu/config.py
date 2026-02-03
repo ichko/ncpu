@@ -3,7 +3,9 @@ from dataclasses import dataclass
 from ncpu.dataset import (
     sample_4bit_adder,
     sample_AND_gate,
+    sample_OR_gate,
     sample_NAND_gate,
+    sample_NOR_gate,
     sample_XOR_gate,
 )
 
@@ -58,14 +60,12 @@ class _TinyNANDTrainingConfig(
     name = "TinyNAND"
     sampler = sample_NAND_gate
 
-
 @dataclass(frozen=True)
-class _TinyXORTrainingConfig(
+class _TinyORTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
 ):
-    name = "TinyXOR"
-    sampler = sample_XOR_gate
-
+    name = "TinyOR"
+    sampler = sample_OR_gate
 
 @dataclass(frozen=True)
 class _TinyNORTrainingConfig(
@@ -74,6 +74,12 @@ class _TinyNORTrainingConfig(
     name = "TinyNOR"
     sampler = sample_NOR_gate
 
+@dataclass(frozen=True)
+class _TinyXORTrainingConfig(
+    _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
+):
+    name = "TinyXOR"
+    sampler = sample_XOR_gate
 
 @dataclass(frozen=True)
 class _BigConjunctionTrainingConfig(
@@ -92,6 +98,9 @@ class _Big4bitAdderTrainingConfig(
 
 
 BIG_AND_GATE_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
-TINY_AND_GATE_TRAINING_CONFIG = _TinyANDTrainingConfig()
+TINY_AND_TRAINING_CONFIG = _TinyANDTrainingConfig()
 TINY_NAND_TRAINING_CONFIG = _TinyNANDTrainingConfig()
+TINY_OR_TRAINING_CONFIG = _TinyORTrainingConfig()
+TINY_NOR_TRAINING_CONFIG = _TinyNORTrainingConfig()
+TINY_XOR_TRAINING_CONFIG = _TinyXORTrainingConfig()
 BIG_4BIT_ADDER_TRAINING_CONFIG = _Big4bitAdderTrainingConfig()
