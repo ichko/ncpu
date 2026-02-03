@@ -6,8 +6,6 @@ import cv2
 import mediapy as media
 import numpy as np
 import torch
-import torch.nn as nn
-from PIL import Image
 
 
 def print_tensor(title, t):
@@ -68,6 +66,7 @@ def make_io_screen(H, W, r, spacing, left_input, right_input):
 
     return screen
 
+
 # do not remove, it can be useful later
 def show_pool_seeds_cv2(pool_seeds, n_cols=16, scale_each=1.0):
     """
@@ -121,6 +120,7 @@ def show_pool_seeds_cv2(pool_seeds, n_cols=16, scale_each=1.0):
     # Show
     cv2.imshow("Pool Seeds Grid", grid_img[:, :, :4])
     cv2.waitKey(10)
+
 
 def make_circle_masks(width, height):
     """
