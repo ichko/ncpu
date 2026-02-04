@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, IterableDataset
 
 from ncpu.utils import make_io_screen
 
+from typing import List
 
 def sample_4bit_adder(*args):
     a = torch.randint(0, 2, size=(4,))
@@ -55,22 +56,15 @@ def sample_8bit_adder(*args):
 class NCPUDataset(IterableDataset):
     def __init__(
         self,
-        W,
-        H,
-        r,
-        spacing,
-        sampler,
-        balanced=True,
-        apply_gaussian_noise=True,
+        config
     ):
-        self.W = W
-        self.H = H
-        self.r = r
-        self.spacing = spacing
-        self.sampler = sampler
+        self.W = config.W
+        self.H = config.H
+        self.r = config.r
+        self.spacing = config.spacing
+        self.sampler = config.sampler
 
-        self.apply_gaussian_noise = apply_gaussian_noise
-        self.balanced = balanced
+        self.balanced = config.balanced
         self.prev_class = 0
         self.class_neg = 0
 
@@ -116,6 +110,29 @@ class NCPUDataset(IterableDataset):
             shuffle=False,  # can't shuffle IterableDataset
         )
 
+class ScheduledDataset(IterableDataset):
+    def __init__(
+        self,
+        datasets : List[NCPUDataset],
+        steps : int,
+    ):
+        self.steps = steps
+        self.counter = 0
+        self.ds_index = 0
+        self.datasets = datasets
+
+    def get_sample(self):
+        if self.counter >= self.steps:
+            self.counter = 0
+            self.ds_index = self.ds_index + 1 if self.ds_index < len(self.datasets) else self.ds_index 
+
+        ret = self.datasets[self.ds_index].get_sample()
+        self.counter += 1
+        return ret
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
 
 class PoolDataset(IterableDataset):
     def __init__(self, dataset, pool_size):
