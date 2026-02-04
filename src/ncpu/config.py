@@ -17,6 +17,7 @@ class _TwoArgSmallGridMixin:
     r = 4
     spacing = (2, 16)
 
+
 @dataclass(frozen=True)
 class _TwoArgSmallGridMixinClose:
     W = 32
@@ -67,12 +68,14 @@ class _TinyANDTrainingConfig(
     name = "TinyAnd"
     sampler = sample_AND_gate
 
+
 @dataclass(frozen=True)
 class _TinyANDCloseTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixinClose
 ):
     name = "TinyAndClose"
     sampler = sample_AND_gate
+
 
 @dataclass(frozen=True)
 class _TinyANDFarAwayTrainingConfig(
@@ -89,12 +92,14 @@ class _TinyNANDTrainingConfig(
     name = "TinyNAND"
     sampler = sample_NAND_gate
 
+
 @dataclass(frozen=True)
 class _TinyORTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
 ):
     name = "TinyOR"
     sampler = sample_OR_gate
+
 
 @dataclass(frozen=True)
 class _TinyNORTrainingConfig(
@@ -103,12 +108,14 @@ class _TinyNORTrainingConfig(
     name = "TinyNOR"
     sampler = sample_NOR_gate
 
+
 @dataclass(frozen=True)
 class _TinyXORTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
 ):
     name = "TinyXOR"
     sampler = sample_XOR_gate
+
 
 @dataclass(frozen=True)
 class _BigConjunctionTrainingConfig(
