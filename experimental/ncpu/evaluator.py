@@ -21,7 +21,11 @@ CHECKPOINT_DIR = "./checkpoints"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 
+#[WIP]
+# This is all work in progress
 class NCPUEval:
+
+    #[WIP]
     def __init__(self, nca: NeuralCA, dataloader, lr, apply_gaussian_noise=False):
         super().__init__()
         self.nca = nca
@@ -31,6 +35,7 @@ class NCPUEval:
         self.history = []
         self.apply_gaussian_noise = apply_gaussian_noise
 
+    #[WIP]
     def _inplant_input(self, inp):
         bs = inp.shape[0]
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
@@ -38,6 +43,7 @@ class NCPUEval:
         first_state[:, 0] = inp  # inplant in the first channel
         return first_state
 
+    #[WIP]
     def eval(self, steps):
         batch = next(self.dataset_iter)
 
