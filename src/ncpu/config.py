@@ -17,6 +17,21 @@ class _TwoArgSmallGridMixin:
     r = 4
     spacing = (2, 16)
 
+@dataclass(frozen=True)
+class _TwoArgSmallGridMixinClose:
+    W = 32
+    H = 32
+    r = 4
+    spacing = (2, 12)
+
+
+@dataclass(frozen=True)
+class _TwoArgSmallGridMixinFarAway:
+    W = 32
+    H = 32
+    r = 4
+    spacing = (2, 6)
+
 
 @dataclass(frozen=True)
 class _TwoArgLargeGridMixin:
@@ -50,6 +65,20 @@ class _TinyANDTrainingConfig(
     _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixin
 ):
     name = "TinyAnd"
+    sampler = sample_AND_gate
+
+@dataclass(frozen=True)
+class _TinyANDCloseTrainingConfig(
+    _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixinClose
+):
+    name = "TinyAndClose"
+    sampler = sample_AND_gate
+
+@dataclass(frozen=True)
+class _TinyANDFarAwayTrainingConfig(
+    _DefaultNCAMixin, _OptimizationArgsMixin, _TwoArgSmallGridMixinFarAway
+):
+    name = "TinyAndFarAway"
     sampler = sample_AND_gate
 
 
@@ -99,6 +128,8 @@ class _Big4bitAdderTrainingConfig(
 
 BIG_AND_GATE_TRAINING_CONFIG = _BigConjunctionTrainingConfig()
 TINY_AND_TRAINING_CONFIG = _TinyANDTrainingConfig()
+TINY_AND_CLOSE_TRAINING_CONFIG = _TinyANDCloseTrainingConfig()
+TINY_AND_FARAWAY_TRAINING_CONFIG = _TinyANDFarAwayTrainingConfig()
 TINY_NAND_TRAINING_CONFIG = _TinyNANDTrainingConfig()
 TINY_OR_TRAINING_CONFIG = _TinyORTrainingConfig()
 TINY_NOR_TRAINING_CONFIG = _TinyNORTrainingConfig()
