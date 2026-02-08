@@ -50,8 +50,8 @@ def sample_XOR_gate(*args):
     return two_arg_sampler(lambda a, b: a != b)
 
 
-def sample_8bit_adder(*args):
-    return two_arg_sampler(lambda a, b: a != b)
+# def sample_8bit_adder(*args):
+#     return two_arg_sampler(lambda a, b: a != b)
 
 
 class NCPUDataset(IterableDataset):
