@@ -1,11 +1,7 @@
 # Detect OS and set PYTHON command accordingly
-ifeq ($(OS),Windows_NT)
-    PYTHON := $(shell where python3)
-else
-    PYTHON := $(shell which python3)
-endif
-
+PYTHON := uv run
 SOURCES := src
+TEST_DIR := tests
 
 lint:
 	${PYTHON} -m flake8 ${SOURCES}
@@ -21,3 +17,9 @@ format:
 
 generate_reqs:
 	${PYTHON} -m pipreqs . --force
+
+clean_checkpoints: 
+	rm -rf notebooks/checkpoints/*
+
+test:
+	${PYTHON} -m unittest discover -s ${TEST_DIR} -p "test_*.py"

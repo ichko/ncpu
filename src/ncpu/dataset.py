@@ -5,6 +5,23 @@ from torch.utils.data import DataLoader, IterableDataset
 
 from ncpu.utils import make_io_screen
 
+from typing import List
+
+
+def sample_4bit_adder(*args):
+    a = torch.randint(0, 2, size=(4,))
+    b = torch.randint(0, 2, size=(4,))
+
+    a_int = int("".join(map(str, a.tolist())), 2)
+    b_int = int("".join(map(str, b.tolist())), 2)
+
+    s_int = a_int + b_int
+
+    out = torch.tensor(list(map(int, f"{s_int:05b}")))
+    inp = torch.cat([a, b])
+
+    return inp, out
+
 
 def two_arg_sampler(op):
     inp = torch.randint(0, 2, size=(2,))
@@ -33,23 +50,19 @@ def sample_XOR_gate(*args):
     return two_arg_sampler(lambda a, b: a != b)
 
 
-class NCPUDataset(IterableDataset):
-    def __init__(
-        self,
-        W,
-        H,
-        r,
-        spacing,
-        sampler,
-        balanced=True,
-    ):
-        self.W = W
-        self.H = H
-        self.r = r
-        self.spacing = spacing
-        self.sampler = sampler
+# def sample_8bit_adder(*args):
+#     return two_arg_sampler(lambda a, b: a != b)
 
-        self.balanced = balanced
+
+class NCPUDataset(IterableDataset):
+    def __init__(self, config):
+        self.W = config.W
+        self.H = config.H
+        self.r = config.r
+        self.spacing = config.spacing
+        self.sampler = config.sampler
+
+        self.balanced = config.balanced
         self.prev_class = 0
         self.class_neg = 0
 
@@ -68,7 +81,7 @@ class NCPUDataset(IterableDataset):
             r=self.r,
             spacing=self.spacing,
             left_input=left,
-            right_input=torch.zeros_like(right),
+            right_input=[],
         )
 
         out = make_io_screen(
@@ -80,7 +93,9 @@ class NCPUDataset(IterableDataset):
             right_input=right,
         )
 
-        return torch.from_numpy(inp), torch.from_numpy(out)
+        return torch.from_numpy(inp).to(dtype=torch.float32), torch.from_numpy(out).to(
+            dtype=torch.float32
+        )
 
     def __iter__(self):
         while True:
@@ -92,6 +107,35 @@ class NCPUDataset(IterableDataset):
             batch_size=batch_size,
             shuffle=False,  # can't shuffle IterableDataset
         )
+
+
+class ScheduledDataset(IterableDataset):
+    def __init__(
+        self,
+        datasets: List[NCPUDataset],
+        steps: int,
+    ):
+        self.steps = steps
+        self.counter = 0
+        self.ds_index = 0
+        self.datasets = datasets
+
+    def get_sample(self):
+        if self.counter >= self.steps:
+            self.counter = 0
+            self.ds_index = (
+                self.ds_index + 1
+                if self.ds_index < len(self.datasets)
+                else self.ds_index
+            )
+
+        ret = self.datasets[self.ds_index].get_sample()
+        self.counter += 1
+        return ret
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
 
 
 class PoolDataset(IterableDataset):
@@ -119,12 +163,12 @@ class PoolDataset(IterableDataset):
             yield val[0].clone(), val[1].clone()
 
     def update(self, batch, losses):
-        inp, out = batch[0].detach(), batch[0].detach()
+        inp, out = batch[0].detach(), batch[1].detach()
         max_idx = torch.argmax(losses)
         min_idx = torch.argmin(losses)
         for batch_i, sample in enumerate(batch):
             pool_i = self._counter_list.popleft()
-            if min_idx == batch_i:
+            if min_idx == batch_i and (inp[min_idx].mean() > 0.01):
                 self.pool[pool_i] = (inp[min_idx].cpu(), self.pool[pool_i][1].cpu())
             else:
                 self.pool[pool_i] = next(
@@ -144,4 +188,5 @@ class PoolLoader(DataLoader):
         super().__init__(*args, **kwargs)
 
     def update(self, batch, losses):
+        self.dataset.update(batch, losses)
         self.dataset.update(batch, losses)
