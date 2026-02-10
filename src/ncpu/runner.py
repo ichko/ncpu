@@ -30,7 +30,7 @@ def setup_scheduled_trainer(configs : List = [], steps = 2_000):
     return trainer
 
 
-def setup_trainer(config, nca_model):
+def setup_trainer(config):
     dataset = NCPUDataset(config)
     if config.pool_size > 0:
         dataset = PoolDataset(dataset, pool_size=config.pool_size)
