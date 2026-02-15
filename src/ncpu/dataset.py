@@ -119,8 +119,12 @@ class ScheduledDataset(IterableDataset):
         self.counter = 0
         self.ds_index = 0
         self.datasets = datasets
+        self.W = datasets[self.ds_index].W
+        self.H = datasets[self.ds_index].H
+        self.r = datasets[self.ds_index].r
 
     def get_sample(self):
+        print(f"here: {self}")
         if self.counter >= self.steps:
             self.counter = 0
             self.ds_index = (
@@ -129,6 +133,10 @@ class ScheduledDataset(IterableDataset):
                 else self.ds_index
             )
 
+
+        self.W = self.datasets[self.ds_index].W
+        self.H = self.datasets[self.ds_index].H
+        self.r = self.datasets[self.ds_index].r
         ret = self.datasets[self.ds_index].get_sample()
         self.counter += 1
         return ret
@@ -137,6 +145,12 @@ class ScheduledDataset(IterableDataset):
         while True:
             yield self.get_sample()
 
+    def get_dataloader(self, batch_size):
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=False,  # can't shuffle IterableDataset
+        )
 
 class PoolDataset(IterableDataset):
     def __init__(self, dataset, pool_size):
