@@ -101,10 +101,12 @@ class NCPUTrainer:
         out = out.to(self.nca.device)
 
         first_state = self._implant_input(inp)
-        if isinstance(steps, (tuple, list)):
-            steps = np.random.randint(steps[0], steps[1])
 
-        rollout = self.nca.forward(first_state, steps=steps)
+        forward_steps = steps
+        if isinstance(steps, (tuple, list)):
+            forward_steps = np.random.randint(steps[0], steps[1])
+
+        rollout = self.nca.forward(first_state, steps=forward_steps)
         nca_out = rollout[:, -1, 0]
 
         white_mask = (out > 0.5).float()
