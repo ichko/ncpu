@@ -130,8 +130,8 @@ class DynamicDataset(IterableDataset):
         if self.counter >= self.steps:
             self.counter = 0
             spacing = self.spacing
-            spacing_x = max(spacing[0] - self.update_x, int(self.r/2) + 2) # stop points from moving outside the board
-            spacing_y = max(spacing[1] - self.update_y, int(self.r/2) + 2) # stop points from moving outside the board
+            spacing_x = max(spacing[0] - self.update_x, self.r + 2) # stop points from moving outside the board
+            spacing_y = max(spacing[1] - self.update_y, self.r + 2) # stop points from moving outside the board
             self.spacing = (spacing_x, spacing_y)
 
         self.dataset.W = self.W
