@@ -108,6 +108,50 @@ class NCPUDataset(IterableDataset):
             shuffle=False,  # can't shuffle IterableDataset
         )
 
+class DynamicDataset(IterableDataset):
+    def __init__(
+        self,
+        config,
+        update_y : int,
+        update_x : int,
+        steps: int,
+    ):
+        self.steps = steps
+        self.counter = 0
+        self.dataset = NCPUDataset(config)
+        self.spacing = self.dataset.spacing
+        self.W = self.dataset.W
+        self.H = self.dataset.H
+        self.r = self.dataset.r
+        self.update_y = update_y
+        self.update_x = update_x
+
+    def get_sample(self):
+        if self.counter >= self.steps:
+            self.counter = 0
+            spacing = self.spacing
+            spacing_x = max(spacing[0] - self.update_x, int(self.r/2) + 2) # stop points from moving outside the board
+            spacing_y = max(spacing[1] - self.update_y, int(self.r/2) + 2) # stop points from moving outside the board
+            self.spacing = (spacing_x, spacing_y)
+
+        self.dataset.W = self.W
+        self.dataset.H = self.H
+        self.dataset.r = self.r
+        self.dataset.spacing = self.spacing
+        ret = self.dataset.get_sample()
+        self.counter += 1
+        return ret
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
+
+    def get_dataloader(self, batch_size):
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=False,  # can't shuffle IterableDataset
+        )
 
 class ScheduledDataset(IterableDataset):
     def __init__(
@@ -124,7 +168,6 @@ class ScheduledDataset(IterableDataset):
         self.r = datasets[self.ds_index].r
 
     def get_sample(self):
-        print(f"here: {self}")
         if self.counter >= self.steps:
             self.counter = 0
             self.ds_index = (

@@ -1,7 +1,9 @@
-from ncpu.dataset import NCPUDataset, PoolDataset, ScheduledDataset
+from ncpu.dataset import NCPUDataset, PoolDataset, ScheduledDataset, DynamicDataset
 from ncpu.model import NeuralCA
 from ncpu.trainer import NCPUTrainer
 from typing import Optional, List
+
+from typing import Callable
 
 def setup_scheduled_trainer(configs : List = [], steps = 2_000):
     primary_config = configs[0]
@@ -24,6 +26,29 @@ def setup_scheduled_trainer(configs : List = [], steps = 2_000):
         dataset.get_dataloader(batch_size=primary_config.batch_size),
         lr=primary_config.lr,
         gaussian_noise=primary_config.gaussian_noise,
+    )
+    trainer.sanity_check()
+
+    return trainer
+
+def setup_dynamic_trainer(config, **kwargs):
+    dataset = DynamicDataset(config, **kwargs)
+    if config.pool_size > 0:
+        dataset = PoolDataset(dataset, pool_size=config.pool_size)
+
+    nca = NeuralCA(
+        channels=config.channels,
+        hidden_channels=config.hidden_channels,
+        fire_rate=config.fire_rate,
+        alive_masking=config.alive_masking,
+        zero_initialization=config.zero_initialization,
+    ).to(config.device)
+
+    trainer = NCPUTrainer(
+        nca,
+        dataset.get_dataloader(batch_size=config.batch_size),
+        lr=config.lr,
+        gaussian_noise=config.gaussian_noise,
     )
     trainer.sanity_check()
 
