@@ -20,3 +20,9 @@ python3 -m src.learn_pattern
 - (Sept 26) https://iclr.cc/Conferences/2026/Dates
 - (Jan 28 '26) https://icml.cc/Conferences/2026
 - (the conf happens in december) https://neurips.cc/Conferences/2025/Dates
+
+## Literature review:
+
+1. https://arxiv.org/pdf/2505.13058 - A Path to Universal Neural Cellular Automata
+2. https://google-research.github.io/self-organising-systems/difflogic-ca/
+3. https://github.com/PWhiddy/Growing-Neural-Cellular-Automata-Pytorch/tree/master
