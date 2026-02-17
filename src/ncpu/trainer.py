@@ -77,13 +77,19 @@ class NCPUTrainer:
         first_state[:, 0] = inp  # implant in the first channel
         return first_state
 
-    def save_checkpoint(self):
-
-        it = self.optim_steps
-        path = self.checkpointer.make(custom_string=f"{it:06d}")
+    def save_checkpoint(self, name : str = "", steps = True, timestamp = True) -> str:
+        if steps:
+            name = f"{name}{self.optim_steps:06d}"
+        else:
+            name = f"{name}"
+        path = self.checkpointer.make(custom_string = name, timestamp = timestamp)
         torch.save(self.nca.state_dict(), path)
 
         return path
+
+    def load_checkpoint(self, name : str = "") -> None:
+        path = self.checkpointer.get(name)
+        self.nca.load_state_dict(torch.load(path))
 
     def optim_step(self, steps):
         self.optim_steps += 1

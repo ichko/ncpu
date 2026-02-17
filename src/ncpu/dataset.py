@@ -1,5 +1,6 @@
 from collections import deque
 
+import sys
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -115,6 +116,7 @@ class DynamicDataset(IterableDataset):
         update_y : int,
         update_x : int,
         steps: int,
+        stages : int = sys.maxsize
     ):
         self.steps = steps
         self.counter = 0
@@ -126,13 +128,17 @@ class DynamicDataset(IterableDataset):
         self.update_y = update_y
         self.update_x = update_x
 
+        self.stage = 0
+        self.stages = stages
+
     def get_sample(self):
-        if self.counter >= self.steps:
+        if self.counter >= self.steps and self.stage < self.stages:
             self.counter = 0
             spacing = self.spacing
-            spacing_x = max(spacing[0] - self.update_x, self.r + 2) # stop points from moving outside the board
+            spacing_x = max(spacing[0] - self.update_x, self.r) # stop points from moving outside the board
             spacing_y = max(spacing[1] - self.update_y, self.r + 2) # stop points from moving outside the board
             self.spacing = (spacing_x, spacing_y)
+            self.stage += 1
 
         self.dataset.W = self.W
         self.dataset.H = self.H
