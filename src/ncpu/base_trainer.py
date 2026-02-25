@@ -19,6 +19,16 @@ class BaseTrainer(nn.Module):
         )
         self.metrics = []
 
+    def __getstate__(self):
+        return {
+            k: v for k, v in self.__dict__.items() if k not in self._exclude_from_pickle
+        }
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        for k in self._exclude_from_pickle:
+            setattr(self, k, None)
+
     def log_metrics(self, **metrics_kwargs):
         self.metrics.append(metrics_kwargs)
 
