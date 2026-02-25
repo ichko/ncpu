@@ -6,14 +6,20 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 
+from ncpu.const import PROJECT_ROOT
+
 
 class BaseTrainer(nn.Module):
-    def __init__(self, checkpoint_path):
+    def __init__(self, checkpoint_path=f"{PROJECT_ROOT}/checkpoints"):
         super().__init__()
         self.checkpoint_path = checkpoint_path
         self.name = (
             f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         )
+        self.metrics = []
+
+    def log_metrics(self, *metrics_kwargs):
+        self.metrics.append(metrics_kwargs)
 
     def save_checkpoint(self):
         root = os.path.join(self.checkpoint_path, self.name)
@@ -22,10 +28,6 @@ class BaseTrainer(nn.Module):
             self.nca.state_dict(),
             os.path.join(root, f"nca_{self.learning_steps:06d}.pt"),
         )
-        torch.save(
-            self.decoder.state_dict(),
-            os.path.join(root, f"decoder_{self.learning_steps:06d}.pt"),
-        )
         with open(os.path.join(root, "self.pkl"), "wb") as f:
             pickle.dump(self, f)
 
@@ -33,9 +35,6 @@ class BaseTrainer(nn.Module):
         root = os.path.join(self.checkpoint_path, self.name)
         self.nca.load_state_dict(
             torch.load(os.path.join(root, f"nca_{learning_step:06d}.pt"))
-        )
-        self.decoder.load_state_dict(
-            torch.load(os.path.join(root, f"decoder_{learning_step:06d}.pt"))
         )
 
     def load_last_checkpoint(self):
