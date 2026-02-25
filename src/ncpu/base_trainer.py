@@ -12,13 +12,14 @@ from ncpu.const import PROJECT_ROOT
 class BaseTrainer(nn.Module):
     def __init__(self, checkpoint_path=f"{PROJECT_ROOT}/checkpoints"):
         super().__init__()
+        self.optim_steps = 0
         self.checkpoint_path = checkpoint_path
         self.name = (
             f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         )
         self.metrics = []
 
-    def log_metrics(self, *metrics_kwargs):
+    def log_metrics(self, **metrics_kwargs):
         self.metrics.append(metrics_kwargs)
 
     def save_checkpoint(self):
@@ -26,7 +27,7 @@ class BaseTrainer(nn.Module):
         os.makedirs(root, exist_ok=True)
         torch.save(
             self.nca.state_dict(),
-            os.path.join(root, f"nca_{self.learning_steps:06d}.pt"),
+            os.path.join(root, f"nca_{self.optim_steps:06d}.pt"),
         )
         with open(os.path.join(root, "self.pkl"), "wb") as f:
             pickle.dump(self, f)
