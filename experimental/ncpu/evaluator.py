@@ -1,7 +1,6 @@
-
 import torch
 from torch.nn import functional as F
-from ncpu.model import NeuralCA
+from ncpu.nca import NeuralCA
 from ncpu.utils import add_gaussian_noise
 import numpy as np
 import os
@@ -14,18 +13,18 @@ from IPython.display import display
 from matplotlib import pyplot as plt
 from torch.nn import functional as F
 
-from ncpu.model import NeuralCA
+from ncpu.nca import NeuralCA
 from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
 
 CHECKPOINT_DIR = "./checkpoints"
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 
-#[WIP]
+# [WIP]
 # This is all work in progress
 class NCPUEval:
 
-    #[WIP]
+    # [WIP]
     def __init__(self, nca: NeuralCA, dataloader, lr, apply_gaussian_noise=False):
         super().__init__()
         self.nca = nca
@@ -35,7 +34,7 @@ class NCPUEval:
         self.history = []
         self.apply_gaussian_noise = apply_gaussian_noise
 
-    #[WIP]
+    # [WIP]
     def _inplant_input(self, inp):
         bs = inp.shape[0]
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
@@ -43,7 +42,7 @@ class NCPUEval:
         first_state[:, 0] = inp  # inplant in the first channel
         return first_state
 
-    #[WIP]
+    # [WIP]
     def eval(self, steps):
         batch = next(self.dataset_iter)
 
