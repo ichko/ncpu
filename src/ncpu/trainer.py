@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional as F
-from ncpu.model import NeuralCA
-from ncpu.utils import add_gaussian_noise
+from ncpu.base_trainer import BaseTrainer
+from ncpu.nca import NeuralCA
 import numpy as np
 
 import mediapy as media
@@ -11,16 +11,14 @@ from IPython.display import display
 from matplotlib import pyplot as plt
 from torch.nn import functional as F
 
-from ncpu.model import NeuralCA
+from ncpu.nca import NeuralCA
 from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
 from torch.utils.data import DataLoader
 
 from typing import Optional
 
-from ncpu.checkpoints import CheckpointTracker
 
-
-class NCPUTrainer:
+class NCPUTrainer(BaseTrainer):
     def __init__(
         self,
         nca: NeuralCA,
@@ -28,9 +26,8 @@ class NCPUTrainer:
         lr: float,
         gaussian_noise: float,
         stop_loss: Optional[float] = None,
-        checkpointer: CheckpointTracker = CheckpointTracker(),
     ):
-        self.checkpointer = checkpointer
+        super().__init__()
         self.nca = nca
         self.dataloader = dataloader
         self.ds = dataloader.dataset
@@ -38,15 +35,12 @@ class NCPUTrainer:
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
         self.gaussian_noise = gaussian_noise
 
-        self.metrics = []
-        self.optim_steps = 0
-
         self.stop_loss = stop_loss
 
     def sanity_check(self):
         print("Sanity check...")
 
-        inp = torch.randn(2, self.nca.channels, self.ds.W, self.ds.H).to(
+        inp = torch.randn(2, self.nca.total_channels, self.ds.W, self.ds.H).to(
             self.nca.device
         )
         out = self.nca.forward(inp, steps=10)
@@ -72,18 +66,10 @@ class NCPUTrainer:
 
     def _implant_input(self, inp):
         bs = inp.shape[0]
-        first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
+        first_state = torch.zeros(bs, self.nca.total_channels, self.ds.H, self.ds.W)
         first_state = first_state.to(self.nca.device)
         first_state[:, 0] = inp  # implant in the first channel
         return first_state
-
-    def save_checkpoint(self):
-
-        it = self.optim_steps
-        path = self.checkpointer.make(custom_string=f"{it:06d}")
-        torch.save(self.nca.state_dict(), path)
-
-        return path
 
     def optim_step(self, steps):
         self.optim_steps += 1
@@ -127,19 +113,17 @@ class NCPUTrainer:
             loss.backward()
             self.optim.step()
 
-        metrics = {
-            "loss": loss.item(),
-            "white_loss": white_loss.sum().item(),
-            "black_loss": black_loss.sum().item(),
-        }
-        self.metrics.append(metrics)
+            self.log_metrics(
+                loss=loss.item(),
+                white_loss=white_loss.sum().item(),
+                black_loss=black_loss.sum().item(),
+            )
 
         if hasattr(self.dataloader, "update"):
             self.dataloader.update((nca_out, out.detach()), loss)
 
         info = {
             "loss": loss.item(),
-            "metrics": metrics,
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
@@ -148,7 +132,7 @@ class NCPUTrainer:
 
         return info
 
-    def display_optim_step(self, info):
+    def display_optim_step(self, info, display_size, to_show=8):
         fig, ax = plt.subplots(figsize=(8, 3))
         loss = [h["loss"] for h in self.metrics]
         ax.scatter(range(len(loss)), loss, s=1)
@@ -160,14 +144,15 @@ class NCPUTrainer:
         print_tensor("out    ", info["out"])
         print_tensor("nca_out", info["nca_out"])
 
-        to_show = 8
         inp = info["inp"][:to_show]
         out = info["out"][:to_show]
         nca_out = info["nca_out"][:to_show]
         rollout = info["rollout"][:to_show]
         io = torch.cat([inp, out, nca_out], dim=0)
 
-        media.show_images(io.detach().cpu(), columns=to_show, width=150, height=150)
+        media.show_images(
+            io.detach().cpu(), columns=to_show, width=display_size, height=display_size
+        )
         sequence_batch_to_html_gifs(
-            rollout, columns=to_show, width=150, height=150, fps=10
+            rollout, columns=to_show, width=display_size, height=display_size, fps=10
         )
