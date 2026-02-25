@@ -20,7 +20,7 @@ class NeuralCA(nn.Module):
 
     def __init__(
         self,
-        message_channels,
+        channels,
         hidden_channels,
         fire_rate,
         alive_threshold,
@@ -36,12 +36,12 @@ class NeuralCA(nn.Module):
         self.kernel_size = kernel_size
         self.padding_size = kernel_size // 2  # same padding
 
-        self.total_channels = message_channels + visual_channels
+        self.total_channels = channels + visual_channels
         all_filters = torch.stack((identity, sobel_x, sobel_y))
         all_filters_batch = all_filters.repeat(self.total_channels, 1, 1).unsqueeze(1)
         all_filters_batch = nn.Parameter(all_filters_batch, requires_grad=False)
 
-        self.message_channels = message_channels
+        self.message_channels = channels
         self.visual_channels = visual_channels
         self.all_filters_batch = all_filters_batch
         self.rule = nn.Sequential(
