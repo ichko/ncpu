@@ -26,3 +26,4 @@ python3 -m src.learn_pattern
 1. https://arxiv.org/pdf/2505.13058 - A Path to Universal Neural Cellular Automata
 2. https://google-research.github.io/self-organising-systems/difflogic-ca/
 3. https://github.com/PWhiddy/Growing-Neural-Cellular-Automata-Pytorch/tree/master
+4. MaCE (Mass conserving Dynamics for CA) https://arxiv.org/pdf/2507.12306 
