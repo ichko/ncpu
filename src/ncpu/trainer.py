@@ -19,6 +19,8 @@ from typing import Optional
 
 
 class NCPUTrainer(BaseTrainer):
+    _exclude_from_pickle = {"dataloader", "ds", "dataset_iter"}
+
     def __init__(
         self,
         nca: NeuralCA,
