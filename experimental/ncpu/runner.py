@@ -1,8 +1,9 @@
 from ncpu.dataset import NCPUDataset, PoolDataset
-from ncpu.model import NeuralCA
+from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
 
-#[WIP]
+
+# [WIP]
 # This is all work in progress
 def setup_evaluator(config, path):
     dataset = NCPUDataset(config)

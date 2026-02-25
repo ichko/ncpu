@@ -1,6 +1,6 @@
 import os
 
-from torch.nn.functional import F
+import torch.nn.functional as F
 
 os.environ["CXX_RNG_USE_RDRND"] = "0"
 

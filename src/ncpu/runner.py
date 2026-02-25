@@ -1,7 +1,7 @@
 from typing import List, Optional
 
 from ncpu.dataset import NCPUDataset, PoolDataset, ScheduledDataset
-from ncpu.model import NeuralCA
+from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
 
 
