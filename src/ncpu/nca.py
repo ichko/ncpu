@@ -2,22 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ncpu.utils import make_sobel_kernels, mass_conserving_update
+from ncpu.utils import make_sobel_kernels
 
 
 class NeuralCA(nn.Module):
-    def alive(self, x, alive_threshold):
-        return (
-            F.max_pool2d(
-                x[:, : self.visual_channels, :, :], kernel_size=3, stride=1, padding=0
-            ).amax(dim=1, keepdim=True)
-            > alive_threshold
-        )
-
-    @property
-    def device(self):
-        return next(self.parameters()).device
-
     def __init__(
         self,
         channels,
@@ -26,79 +14,90 @@ class NeuralCA(nn.Module):
         alive_threshold,
         zero_initialization,
         mass_conserving,
-        visual_channels,
-        kernel_size=3,
+        kernel_size,
+        num_perception_kernels,
+        learnable_kernels=False,
+        learnable_initial_state=False,
         padding_type="circular",
+        read_only_dims=[],
     ) -> None:
         super().__init__()
 
-        identity, sobel_x, sobel_y = make_sobel_kernels(kernel_size)
+        # identity, sobel_x, sobel_y = make_sobel_kernels(kernel_size)
+        # all_filters = torch.stack((identity, sobel_x, sobel_y))
+        # self.num_perception_kernels = len(all_filters)
+        # all_filters_batch = all_filters.repeat(self.channels, 1, 1).unsqueeze(1)
+        # self.all_filters_batch = nn.Parameter(all_filters_batch, requires_grad=False)
+
+        self.num_perception_kernels = num_perception_kernels
         self.kernel_size = kernel_size
-        self.padding_size = kernel_size // 2  # same padding
+        self.channels = channels
+        self.learnable_initial_state = learnable_initial_state
 
-        self.total_channels = channels
-        all_filters = torch.stack((identity, sobel_x, sobel_y))
-        all_filters_batch = all_filters.repeat(self.total_channels, 1, 1).unsqueeze(1)
-        all_filters_batch = nn.Parameter(all_filters_batch, requires_grad=False)
-
-        self.message_channels = channels
-        self.visual_channels = visual_channels
-        self.all_filters_batch = all_filters_batch
-        self.rule = nn.Sequential(
-            nn.Conv2d(3 * self.total_channels, hidden_channels, kernel_size=1),
-            nn.ReLU(),
-            nn.Conv2d(hidden_channels, self.total_channels, kernel_size=1, bias=False),
-        )
         self.fire_rate = fire_rate
         self.alive_threshold = alive_threshold
         self.mass_conserving = mass_conserving
         self.padding_type = padding_type
+        self.read_only_dims = read_only_dims
 
-        assert mass_conserving in [
-            "no",
-            "normal",
-            "cross_channel",
-        ], "Bad mass_conserving option"
+        self.read_only_mask = nn.Parameter(
+            torch.ones(1, self.channels, 1, 1), requires_grad=False
+        )
+        for c in self.read_only_dims:
+            if c < 0:
+                c = self.channels + c  # -1 => 15
+            self.read_only_mask[:, c] = 0
+
+        self.perception = nn.Conv2d(
+            in_channels=self.channels,
+            out_channels=self.channels * num_perception_kernels,
+            kernel_size=self.kernel_size,
+            padding=self.kernel_size // 2,
+            padding_mode=self.padding_type,
+            groups=self.channels,
+        )
+
+        self.rule = nn.Sequential(
+            nn.Conv2d(
+                num_perception_kernels * self.channels, hidden_channels, kernel_size=1
+            ),
+            nn.ReLU(),
+            nn.Conv2d(hidden_channels, self.channels, kernel_size=1, bias=False),
+        )
+        if learnable_initial_state:
+            self.register_parameter("init_state", None)
 
         if zero_initialization:
             nn.init.zeros_(self.rule[-1].weight)
 
     def forward(self, x, steps):
+        if self.learnable_initial_state:
+            if self.init_state == None:
+                self.init_state = nn.Parameter(
+                    torch.rand(1, *x.shape[1:], device=self.device)
+                )
+            x += self.init_state
         seq = [x]
-        pad = self.kernel_size // 2
 
         for s in range(steps):
-            x_padded = F.pad(x, (pad,) * 4, self.padding_type)
-            pre_life_mask = self.alive(x_padded, self.alive_threshold)
+            pre_life_mask = self.alive(x)
 
-            delta = F.conv2d(
-                F.pad(x, (pad,) * 4, self.padding_type),
-                self.all_filters_batch,
-                groups=self.total_channels,
-            )
+            # delta = F.conv2d(
+            #     F.pad(x, (pad,) * 4, self.padding_type),
+            #     self.all_filters_batch,
+            #     groups=self.channels,
+            # )
+            delta = self.perception(x)
             delta = self.rule(delta)
-            if self.mass_conserving == "normal":
-                affinity = delta[:, :1]
-                q = x[:, :1]
-                q_next = mass_conserving_update(
-                    beta=self.beta,
-                    q=q,
-                    affinity=affinity,
-                    padding_type=self.padding_type,
-                    pad=pad,
-                )
-                x = torch.cat([q_next, x[:, 1:] + delta[:, 1:]], dim=1)
-            else:
-                x = x + delta
+            delta = delta * self.read_only_mask
 
-            torch.clip_(x, -2, 2)
-            post_life_mask = self.alive(
-                F.pad(x, (pad,) * 4, self.padding_type), self.alive_threshold
-            )
+            if self.alive_threshold > 0:
+                post_life_mask = self.alive(x)
+                life_mask = (pre_life_mask & post_life_mask).to(x.dtype)
+                delta = delta * life_mask
 
-            life_mask = (pre_life_mask & post_life_mask).to(x.dtype)
-            if self.alive_threshold > 0 and (self.mass_conserving == "no"):
-                x = x * life_mask
+            x = x + delta
+            torch.clip_(x, -10, 10)
 
             seq.append(x)
 
@@ -106,3 +105,18 @@ class NeuralCA(nn.Module):
         seq = seq.permute(1, 0, 2, 3, 4)
 
         return seq  # (batch, time, channels, height, width)
+
+    def alive(self, x):
+        pad = self.kernel_size // 2
+        x_padded = F.pad(x, (pad, pad, pad, pad), self.padding_type)
+        pooled = F.max_pool2d(
+            x_padded[:, :1, :, :],
+            kernel_size=self.kernel_size,
+            stride=1,
+            padding=0,
+        )
+        return pooled.amax(dim=1, keepdim=True) > self.alive_threshold
+
+    @property
+    def device(self):
+        return next(self.parameters()).device

@@ -1,8 +1,4 @@
-import torch
-from torch.nn import functional as F
-from ncpu.base_trainer import BaseTrainer
-from ncpu.nca import NeuralCA
-import numpy as np
+from typing import Optional
 
 import mediapy as media
 import numpy as np
@@ -10,12 +6,11 @@ import torch
 from IPython.display import display
 from matplotlib import pyplot as plt
 from torch.nn import functional as F
-
-from ncpu.nca import NeuralCA
-from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
 from torch.utils.data import DataLoader
 
-from typing import Optional
+from ncpu.base_trainer import BaseTrainer
+from ncpu.nca import NeuralCA
+from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
 
 
 class NCPUTrainer(BaseTrainer):
@@ -31,20 +26,19 @@ class NCPUTrainer(BaseTrainer):
     ):
         super().__init__()
         self.nca = nca
+        self.to(nca.device)
         self.dataloader = dataloader
         self.ds = dataloader.dataset
         self.dataset_iter = iter(self.dataloader)
-        self.optim = torch.optim.Adam(self.nca.parameters(), lr=lr)
         self.gaussian_noise = gaussian_noise
-
         self.stop_loss = stop_loss
+        self.lr = lr
+        self.output_mask = torch.tensor(self.ds.get_output_mask()).to(self.nca.device)
 
     def sanity_check(self):
         print("Sanity check...")
 
-        inp = torch.randn(2, self.nca.total_channels, self.ds.W, self.ds.H).to(
-            self.nca.device
-        )
+        inp = torch.randn(2, self.nca.channels, self.ds.W, self.ds.H).to(self.device)
         out = self.nca.forward(inp, steps=10)
 
         print("  forward:", inp.shape, "->", out.shape)
@@ -54,7 +48,7 @@ class NCPUTrainer(BaseTrainer):
         inp, out = batch
         print("  dataloader:", inp.shape, "->", out.shape)
 
-        first_state = self._implant_input(inp).to(self.nca.device)
+        first_state = self._implant_input(inp).to(self.device)
         print("  first_state:", first_state.shape)
 
         rollout = self.nca.forward(first_state, steps=10)
@@ -68,13 +62,14 @@ class NCPUTrainer(BaseTrainer):
 
     def _implant_input(self, inp):
         bs = inp.shape[0]
-        first_state = torch.zeros(bs, self.nca.total_channels, self.ds.H, self.ds.W)
+        first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
         first_state = first_state.to(self.nca.device)
         first_state[:, 0] = inp  # implant in the first channel
+        first_state[:, -1] = self.output_mask
         return first_state
 
     def optim_step(self, steps):
-        self.optim_steps += 1
+        optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
         batch = next(self.dataset_iter)
 
         inp, out = batch
@@ -85,8 +80,8 @@ class NCPUTrainer(BaseTrainer):
         if self.gaussian_noise > 0:
             inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
 
-        inp = inp.to(self.nca.device)
-        out = out.to(self.nca.device)
+        inp = inp.to(self.device)
+        out = out.to(self.device)
 
         first_state = self._implant_input(inp)
 
@@ -97,28 +92,30 @@ class NCPUTrainer(BaseTrainer):
         rollout = self.nca.forward(first_state, steps=forward_steps)
         nca_out = rollout[:, -1, 0]
 
-        white_mask = (out > 0.5).float()
-        black_mask = 1 - white_mask
+        # white_mask = (out > 0.5).float()
+        # black_mask = 1 - white_mask
 
-        batch_loss = F.mse_loss(nca_out, out, reduction="none")
-        white_loss = batch_loss * white_mask
-        black_loss = batch_loss * black_mask
+        # batch_loss = F.mse_loss(nca_out, out, reduction="none")
+        # white_loss = batch_loss * white_mask
+        # black_loss = batch_loss * black_mask
 
-        masks_sum = white_mask.sum() + black_mask.sum()
-        white_weight = black_mask.sum() / masks_sum
-        black_weight = white_mask.sum() / masks_sum
+        # masks_sum = white_mask.sum() + black_mask.sum()
+        # white_weight = black_mask.sum() / masks_sum
+        # black_weight = white_mask.sum() / masks_sum
 
-        loss = (white_loss * white_weight + black_loss * black_weight).mean()
+        # loss = (white_loss * white_weight + black_loss * black_weight).mean()
+        loss = F.mse_loss(nca_out * self.output_mask, out * self.output_mask)
 
         if torch.is_grad_enabled():
-            self.optim.zero_grad()
+            self.learning_step += 1
+            optim.zero_grad()
             loss.backward()
-            self.optim.step()
+            optim.step()
 
             self.log_metrics(
                 loss=loss.item(),
-                white_loss=white_loss.sum().item(),
-                black_loss=black_loss.sum().item(),
+                # white_loss=white_loss.sum().item(),
+                # black_loss=black_loss.sum().item(),
             )
 
         if hasattr(self.dataloader, "update"):
@@ -134,7 +131,7 @@ class NCPUTrainer(BaseTrainer):
 
         return info
 
-    def display_optim_step(self, info, display_size, to_show=8):
+    def display_optim_step(self, info, display_size=None, to_show=8):
         fig, ax = plt.subplots(figsize=(8, 3))
         loss = [h["loss"] for h in self.metrics]
         ax.scatter(range(len(loss)), loss, s=1)
@@ -150,10 +147,17 @@ class NCPUTrainer(BaseTrainer):
         out = info["out"][:to_show]
         nca_out = info["nca_out"][:to_show]
         rollout = info["rollout"][:to_show]
+        # read_only_channel = rollout[:to_show, -1, -1]
         io = torch.cat([inp, out, nca_out], dim=0)
+        if display_size is None:
+            display_size = inp.shape[1]
 
         media.show_images(
-            io.detach().cpu(), columns=to_show, width=display_size, height=display_size
+            io.detach().cpu(),
+            columns=to_show,
+            width=display_size,
+            height=display_size,
+            cmap="viridis",
         )
         sequence_batch_to_html_gifs(
             rollout, columns=to_show, width=display_size, height=display_size, fps=10

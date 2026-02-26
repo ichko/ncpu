@@ -1,11 +1,10 @@
 from collections import deque
+from typing import List
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
 from ncpu.utils import make_io_screen
-
-from typing import List
 
 
 def sample_4bit_adder(*args):
@@ -18,7 +17,9 @@ def sample_4bit_adder(*args):
     s_int = a_int + b_int
 
     out = torch.tensor(list(map(int, f"{s_int:05b}")))
-    inp = torch.cat([a, b])
+    # inp = torch.cat([a, b])
+    # Interlace bits
+    inp = torch.tensor([a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3]])
 
     return inp, out
 
@@ -65,6 +66,17 @@ class NCPUDataset(IterableDataset):
         self.balanced = config.balanced
         self.prev_class = 0
         self.class_neg = 0
+
+    def get_output_mask(self):
+        left, right = self.sampler()
+        return make_io_screen(
+            W=self.W,
+            H=self.H,
+            r=self.r,
+            spacing=self.spacing,
+            left_input=[],
+            right_input=torch.ones_like(right),
+        )
 
     def get_sample(self):
         left, right = self.sampler()
@@ -133,7 +145,6 @@ class ScheduledDataset(IterableDataset):
                 else self.ds_index
             )
 
-
         self.W = self.datasets[self.ds_index].W
         self.H = self.datasets[self.ds_index].H
         self.r = self.datasets[self.ds_index].r
@@ -151,6 +162,7 @@ class ScheduledDataset(IterableDataset):
             batch_size=batch_size,
             shuffle=False,  # can't shuffle IterableDataset
         )
+
 
 class PoolDataset(IterableDataset):
     def __init__(self, dataset, pool_size):
