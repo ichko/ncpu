@@ -85,6 +85,66 @@ def print_tensor(title, t):
     )
 
 
+import torch
+
+
+def add_progress_bar(
+    x,
+    pad_px: int,
+    bar_height: int,
+    progress_color,  # (3,) tuple
+    padding_color,  # (3,) tuple
+    passed_color,  # (3,) tuple
+):
+    """
+    x: (B, T, H, W, 3)
+    returns: (B, T, H + bar_height, W, 3)
+    """
+
+    B, T, H, W, C = x.shape
+    device = x.device
+    dtype = x.dtype
+
+    # Convert colors to tensors once
+    progress_color = torch.tensor(progress_color, device=device, dtype=dtype)
+    padding_color = torch.tensor(padding_color, device=device, dtype=dtype)
+    passed_color = torch.tensor(passed_color, device=device, dtype=dtype)
+
+    # --- Base bar filled with progress color ---
+    bar = torch.empty((B, T, bar_height, W, 3), device=device, dtype=dtype)
+    bar[:] = progress_color
+
+    # --- Padding (top + bottom inside bar) ---
+    if pad_px > 0:
+        bar[:, :, :pad_px] = padding_color
+        bar[:, :, -pad_px:] = padding_color
+
+    # --- Compute passed width per frame ---
+    # progress fraction per time step
+    progress = torch.linspace(0, 1, T, device=device, dtype=dtype).view(1, T, 1, 1)
+
+    passed_width = (progress * W).long()  # (1, T, 1, 1)
+
+    # Create width index grid once
+    w_idx = torch.arange(W, device=device).view(1, 1, 1, W)
+
+    # Mask where progress has passed
+    passed_mask = w_idx < passed_width  # (1, T, 1, W)
+
+    # Apply only to non-padding vertical region
+    if pad_px > 0:
+        bar[:, :, pad_px:-pad_px][
+            passed_mask.expand(B, T, bar_height - 2 * pad_px, W)
+        ] = passed_color
+    else:
+        bar[passed_mask.expand(B, T, bar_height, W)] = passed_color
+
+    # --- Concatenate to bottom ---
+    out = torch.cat([x, bar], dim=2)
+
+    return out
+
+
 def sequence_batch_to_html_gifs(
     tensor, width, height, return_html=False, columns=8, fps=20
 ):
@@ -125,13 +185,13 @@ def make_io_screen(H, W, r, spacing, left_input, right_input):
         v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
+        cv2.circle(screen, (x, y), r, 255 if bit else 50, -1)
 
     for i, bit in enumerate(right_input):
         x = W - side_spacing
         v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
+        cv2.circle(screen, (x, y), r, 255 if bit else 50, -1)
 
     return screen

@@ -12,7 +12,7 @@ from ncpu.const import PROJECT_ROOT
 class BaseTrainer(nn.Module):
     def __init__(self, checkpoint_path=f"{PROJECT_ROOT}/checkpoints"):
         super().__init__()
-        self.optim_steps = 0
+        self.learning_step = 0
         self.checkpoint_path = checkpoint_path
         self.name = (
             f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
@@ -37,7 +37,7 @@ class BaseTrainer(nn.Module):
         os.makedirs(root, exist_ok=True)
         torch.save(
             self.nca.state_dict(),
-            os.path.join(root, f"nca_{self.optim_steps:06d}.pt"),
+            os.path.join(root, f"nca_{self.learning_step:06d}.pt"),
         )
         with open(os.path.join(root, "self.pkl"), "wb") as f:
             pickle.dump(self, f)
@@ -79,3 +79,7 @@ class BaseTrainer(nn.Module):
 
     def model_checksum(model):
         return sum(p.abs().sum().item() for p in model.parameters())
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
