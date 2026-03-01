@@ -1,6 +1,7 @@
 import os
 
 import torch.nn.functional as F
+from torch import nn
 
 os.environ["CXX_RNG_USE_RDRND"] = "0"
 
@@ -149,7 +150,7 @@ def sequence_batch_to_html_gifs(
     tensor, width, height, return_html=False, columns=8, fps=20
 ):
     tensor = tensor[:, :, 0].detach().cpu().numpy()
-    tensor = media.to_rgb(tensor, cmap="viridis", vmin=0, vmax=1)
+    tensor = media.to_rgb(tensor, cmap="viridis", vmin=-1, vmax=1)
 
     return media.show_videos(
         tensor,
@@ -177,21 +178,54 @@ def add_gaussian_noise(img, mean=1.0, std=1.0):
 
 
 def make_io_screen(H, W, r, spacing, left_input, right_input):
-    screen = np.zeros((H, W), dtype=np.uint8)
+    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
     among_spacing, side_spacing = spacing
+    among_spacing = int(among_spacing)
+    side_spacing = int(side_spacing)
+    r = int(r)
+
+    n_left = len(left_input)
+    n_rows = int(np.ceil(n_left / 2))
+
+    v_size = n_rows * r * 2 + among_spacing * (n_rows - 1)
+    top_margin = (H - v_size) // 2
 
     for i, bit in enumerate(left_input):
-        x = side_spacing
-        v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
-        top_margin = (H - v_size) // 2
-        y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255 if bit else 50, -1)
+        col = i // n_rows  # 0 or 1
+        row = i % n_rows
 
+        x = side_spacing + col * (2 * r + among_spacing)
+        y = top_margin + r + row * (2 * r + among_spacing)
+
+        cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
+
+    # among_spacing = r + r // 4
     for i, bit in enumerate(right_input):
         x = W - side_spacing
         v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255 if bit else 50, -1)
+        cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
 
     return screen
+
+
+def conv_stack(layer_sizes, activation, **kwargs):
+    layers = []
+
+    for i in range(len(layer_sizes) - 1):
+        si, so = layer_sizes[i], layer_sizes[i + 1]
+        conv = nn.Conv2d(si, so, **kwargs)
+
+        layers.append(conv)
+        layers.append(activation())
+    layers.pop()  # remove last activation
+
+    return layers
+
+
+def meshgrid_xy(H: int, W: int, device=None, dtype=torch.float32):
+    x = torch.linspace(-1, 1, W, device=device, dtype=dtype)
+    y = torch.linspace(-1, 1, H, device=device, dtype=dtype)
+    yy, xx = torch.meshgrid(y, x, indexing="ij")  # (H, W)
+    return xx, yy

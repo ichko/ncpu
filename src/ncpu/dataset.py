@@ -17,9 +17,9 @@ def sample_4bit_adder(*args):
     s_int = a_int + b_int
 
     out = torch.tensor(list(map(int, f"{s_int:05b}")))
-    # inp = torch.cat([a, b])
+    inp = torch.cat([a, b])
     # Interlace bits
-    inp = torch.tensor([a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3]])
+    # inp = torch.tensor([a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3]])
 
     return inp, out
 
@@ -67,9 +67,17 @@ class NCPUDataset(IterableDataset):
         self.prev_class = 0
         self.class_neg = 0
 
-    def get_output_mask(self):
+    def get_io_mask(self):
         left, right = self.sampler()
-        return make_io_screen(
+        left_screen = make_io_screen(
+            W=self.W,
+            H=self.H,
+            r=self.r,
+            spacing=self.spacing,
+            left_input=[],
+            right_input=torch.ones_like(left),
+        )
+        right_screen = make_io_screen(
             W=self.W,
             H=self.H,
             r=self.r,
@@ -77,6 +85,7 @@ class NCPUDataset(IterableDataset):
             left_input=[],
             right_input=torch.ones_like(right),
         )
+        return left_screen, right_screen
 
     def get_sample(self):
         left, right = self.sampler()
@@ -93,6 +102,7 @@ class NCPUDataset(IterableDataset):
             r=self.r,
             spacing=self.spacing,
             left_input=left,
+            # right_input=torch.zeros_like(right),
             right_input=[],
         )
 
