@@ -10,7 +10,12 @@ from torch.utils.data import DataLoader
 
 from ncpu.base_trainer import BaseTrainer
 from ncpu.nca import NeuralCA
-from ncpu.utils import add_gaussian_noise, print_tensor, sequence_batch_to_html_gifs
+from ncpu.utils import (
+    add_gaussian_noise,
+    meshgrid_xy,
+    print_tensor,
+    sequence_batch_to_html_gifs,
+)
 
 
 class NCPUTrainer(BaseTrainer):
@@ -33,7 +38,10 @@ class NCPUTrainer(BaseTrainer):
         self.gaussian_noise = gaussian_noise
         self.stop_loss = stop_loss
         self.lr = lr
-        self.output_mask = torch.tensor(self.ds.get_output_mask()).to(self.nca.device)
+
+        left_mask, right_mask = self.ds.get_io_mask()
+        self.inp_mask = torch.tensor(left_mask).to(self.nca.device)
+        self.out_mask = torch.tensor(right_mask).to(self.nca.device)
 
     def sanity_check(self):
         print("Sanity check...")
@@ -65,7 +73,9 @@ class NCPUTrainer(BaseTrainer):
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
         first_state = first_state.to(self.nca.device)
         first_state[:, 0] = inp  # implant in the first channel
-        first_state[:, -1] = self.output_mask
+        xx, yy = meshgrid_xy(self.ds.H, self.ds.W, device=self.device)
+        first_state[:, -2] = xx
+        first_state[:, -1] = yy
         return first_state
 
     def optim_step(self, steps):
@@ -74,8 +84,8 @@ class NCPUTrainer(BaseTrainer):
 
         inp, out = batch
 
-        inp = inp / 255.0
-        out = out / 255.0
+        inp = inp / 128.0 - 1.0
+        out = out / 128.0 - 1.0
 
         if self.gaussian_noise > 0:
             inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
@@ -104,7 +114,15 @@ class NCPUTrainer(BaseTrainer):
         # black_weight = white_mask.sum() / masks_sum
 
         # loss = (white_loss * white_weight + black_loss * black_weight).mean()
-        loss = F.mse_loss(nca_out * self.output_mask, out * self.output_mask)
+
+        # loss = F.mse_loss(nca_out * self.output_mask, out * self.output_mask)
+
+        # loss = F.mse_loss(nca_out, out)
+
+        N = min(5, rollout.shape[1])
+        nca_outs = rollout[:, -N:, 0]
+        out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
+        loss = F.mse_loss(nca_outs, out_rep)
 
         if torch.is_grad_enabled():
             self.learning_step += 1
@@ -158,7 +176,65 @@ class NCPUTrainer(BaseTrainer):
             width=display_size,
             height=display_size,
             cmap="viridis",
+            vmin=-1,
+            vmax=1,
         )
         sequence_batch_to_html_gifs(
             rollout, columns=to_show, width=display_size, height=display_size, fps=10
         )
+
+    # def display_optim_step(self, info):
+    #     fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+    #     ax.scatter(
+    #         range(len(self.history)), [h["loss"] for h in self.history], s=1, alpha=0.9
+    #     )
+    #     ax.set_yscale("log")
+    #     plt.close()
+
+    #     to_show = 5
+    #     steps = info["rollout"].shape[1] - 1
+
+    #     # rollout: (B, T, C, H, W)
+
+    #     rollout = info["rollout"][:to_show, :, : self.config.visual_channels]
+    #     # rollout = impact_frames(rollout, ts=[0, steps], ns=[5, 20])
+    #     # rollout = rollout[:, :, :self.config.visual_channels]
+    #     rollout = rollout[
+    #         :, :, : self.config.visual_channels
+    #     ]  # only show first 3 channels for visualization
+
+    #     stats = f"""
+    #         ```
+    #         optim step: {self.learning_steps}
+    #         frame  : {tensor_summary(info["rollout"])}
+    #         weights: {tensor_summary(self.parameters())}
+    #         grads  : {tensor_summary(info["grads"])}
+    #         mass: {info['final_frame'].sum().item():.4f}
+    #         ```
+    #         """
+
+    #     return pn.Row(
+    #         pn.Column(
+    #             pn.pane.Matplotlib(
+    #                 fig, format="svg", width=500, height=250, tight=True
+    #             ),
+    #             pn.pane.HTML(
+    #                 sequence_batch_to_html_gifs(
+    #                     rollout,
+    #                     columns=8,
+    #                     width=120,
+    #                     height=120,
+    #                     fps=20,
+    #                     return_html=True,
+    #                 )
+    #             ),
+    #             image_row([f[:to_show] for f in info["frames"]], columns=to_show),
+    #             image_row(
+    #                 [f[:to_show] for f in info["noised_frames"]], columns=to_show
+    #             ),
+    #         ),
+    #         pn.Column(
+    #             stats,
+    #             self.display_mass(info),
+    #         ),
+    #     )

@@ -8,9 +8,11 @@ import torch.nn as nn
 
 from ncpu.const import PROJECT_ROOT
 
+DEFAULT_CHECKPOINTS_PATH = f"{PROJECT_ROOT}/checkpoints"
+
 
 class BaseTrainer(nn.Module):
-    def __init__(self, checkpoint_path=f"{PROJECT_ROOT}/checkpoints"):
+    def __init__(self, checkpoint_path=DEFAULT_CHECKPOINTS_PATH):
         super().__init__()
         self.learning_step = 0
         self.checkpoint_path = checkpoint_path
@@ -68,7 +70,7 @@ class BaseTrainer(nn.Module):
         return trainer
 
     @classmethod
-    def load_last_trainer(cls, checkpoint_path):
+    def load_last_trainer(cls, checkpoint_path=DEFAULT_CHECKPOINTS_PATH):
         nca_dirs = sorted([d for d in os.listdir(checkpoint_path)])
         latest_dir = max(
             nca_dirs,
