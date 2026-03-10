@@ -15,7 +15,8 @@ from ncpu.nca_utils import (
 
 class NeuralCAv1(nn.Module):
     def alive(self, x):
-        return F.max_pool2d(x[:, :1, :, :], kernel_size=3, stride=1, padding=0) > 0.1
+        # return F.max_pool2d(x[:, :1, :, :], kernel_size=3, stride=1, padding=0) > 0.1
+        return F.max_pool2d(abs(0.5-x[:, :1, :, :]), kernel_size=3, stride=1, padding=0) > 0.1
 
     @property
     def device(self):
@@ -60,7 +61,7 @@ class NeuralCAv1(nn.Module):
         return delta
 
     def alive_masking(self, x, x_padded, pad_type):
-        if self.self.alive_masking_flag:
+        if self.alive_masking_flag:
             pre_life_mask = self.alive(x_padded)
             post_life_mask = self.alive(F.pad(x, (1, 1, 1, 1), pad_type))
             life_mask = (pre_life_mask & post_life_mask).to(x.dtype)

@@ -7,15 +7,16 @@ import torch
 import torch.nn as nn
 
 from ncpu.const import PROJECT_ROOT
+from ncpu.checkpoints import CheckpointTracker
 
 DEFAULT_CHECKPOINTS_PATH = f"{PROJECT_ROOT}/checkpoints"
-
 
 class BaseTrainer(nn.Module):
     def __init__(self, checkpoint_path=DEFAULT_CHECKPOINTS_PATH):
         super().__init__()
         self.learning_step = 0
         self.checkpoint_path = checkpoint_path
+        self.checkpointer = CheckpointTracker(self.checkpoint_path, 10)
         self.name = (
             f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         )
