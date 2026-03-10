@@ -153,6 +153,9 @@ class DynamicDataset(IterableDataset):
         self.stage = 0
         self.stages = stages
 
+    def get_io_mask(self):
+        return self.dataset.get_io_mask()
+
     def get_sample(self):
         if self.counter >= self.steps and self.stage < self.stages:
             self.counter = 0
@@ -203,7 +206,7 @@ class ScheduledDataset(IterableDataset):
             self.counter = 0
             self.ds_index = (
                 self.ds_index + 1
-                if self.ds_index < len(self.datasets)
+                if self.ds_index <(len(self.datasets) - 1)
                 else self.ds_index
             )
 

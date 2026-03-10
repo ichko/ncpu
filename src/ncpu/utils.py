@@ -164,20 +164,20 @@ def sequence_batch_to_html_gifs(
     )
 
 
-def add_gaussian_noise(img, mean=1.0, std=1.0):
+def add_gaussian_noise(img, mean=1.0, std=1.0, min_image = 0, max_image = 255):
     if isinstance(img, torch.Tensor):
         noise = torch.randn_like(img) * std + mean
         noisy = img + noise
-        return torch.clamp(noisy, 0, 255)
+        return torch.clamp(noisy, min_image, max_image)
     elif isinstance(img, np.ndarray):
         noise = np.random.normal(mean, std, img.shape).astype(img.dtype)
         noisy = img + noise
-        return np.clip(noisy, 0, 255).astype(img.dtype)
+        return np.clip(noisy, min_image, max_image).astype(img.dtype)
     else:
         raise TypeError("Input must be torch.Tensor or np.ndarray")
 
 def make_io_screen(H, W, r, spacing, left_input, right_input):
-    screen = np.zeros((H, W), dtype=np.uint8)
+    screen = np.ones((H, W), dtype=np.uint8) * 128
     among_spacing, side_spacing = spacing
 
     for i, bit in enumerate(left_input):
@@ -185,14 +185,15 @@ def make_io_screen(H, W, r, spacing, left_input, right_input):
         v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
+        # cv2.circle(screen, (x, y), r, 256, -1 if bit else 1)
+        cv2.circle(screen, (x, y), r, 256 if bit else 0, -1)
 
     for i, bit in enumerate(right_input):
         x = W - side_spacing
         v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
+        cv2.circle(screen, (x, y), r, 256 if bit else 0, -1)
 
     return screen
 
