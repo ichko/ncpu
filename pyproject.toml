@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
-    { name = "Iliya Zhechev", email = "iliya.zhechev@gmail.com" }
+    { name = "Iliya Zhechev", email = "iliya.zhechev@gmail.com" },
+    { name = "Piotr Walas", email = "piotr.walas@pw.edu" }
 ]
 requires-python = ">=3.13"
 dependencies = [
@@ -16,14 +17,14 @@ dependencies = [
     "numpy>=2.2.6",
     "opencv-python>=4.12.0.88",
     "panel>=1.8.3",
-    "torch>=2.9.1",
-    "torchvision>=0.24.1",
+    "torch>=2.7.1",
+    "torchvision>=0.22.1",
     "tqdm>=4.67.1",
     "autoflake>=2.3.1",
     "black>=26.1.0",
     "flake8>=7.3.0",
+    "nbstripout>=0.9.1",
 ]
-
 
 [project.scripts]
 ncpu = "ncpu:main"
@@ -36,3 +37,13 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.0.2",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu118" }
+torchvision = { index = "pytorch-cu118" }
+torchaudio = { index = "pytorch-cu118" }

@@ -1,0 +1,87 @@
+import os
+import pickle
+import uuid
+from datetime import datetime
+
+import torch
+import torch.nn as nn
+
+from ncpu.const import PROJECT_ROOT
+
+DEFAULT_CHECKPOINTS_PATH = f"{PROJECT_ROOT}/checkpoints"
+
+
+class BaseTrainer(nn.Module):
+    def __init__(self, checkpoint_path=DEFAULT_CHECKPOINTS_PATH):
+        super().__init__()
+        self.learning_step = 0
+        self.checkpoint_path = checkpoint_path
+        self.name = (
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        )
+        self.metrics = []
+
+    def __getstate__(self):
+        return {
+            k: v for k, v in self.__dict__.items() if k not in self._exclude_from_pickle
+        }
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        for k in self._exclude_from_pickle:
+            setattr(self, k, None)
+
+    def log_metrics(self, **metrics_kwargs):
+        self.metrics.append(metrics_kwargs)
+
+    def save_checkpoint(self):
+        root = os.path.join(self.checkpoint_path, self.name)
+        os.makedirs(root, exist_ok=True)
+        torch.save(
+            self.nca.state_dict(),
+            os.path.join(root, f"nca_{self.learning_step:06d}.pt"),
+        )
+        with open(os.path.join(root, "self.pkl"), "wb") as f:
+            pickle.dump(self, f)
+
+    def load_checkpoint(self, learning_step):
+        root = os.path.join(self.checkpoint_path, self.name)
+        self.nca.load_state_dict(
+            torch.load(os.path.join(root, f"nca_{learning_step:06d}.pt"))
+        )
+
+    def load_last_checkpoint(self):
+        root = os.path.join(self.checkpoint_path, self.name)
+        nca_files = [
+            f for f in os.listdir(root) if f.startswith("nca_") and f.endswith(".pt")
+        ]
+        latest_file = max(
+            nca_files,
+            key=lambda x: int(x.split("_")[1].split(".")[0]),
+        )
+        learning_step = int(latest_file.split("_")[1].split(".")[0])
+        self.load_checkpoint(learning_step)
+
+    @staticmethod
+    def load_trainer(root):
+        with open(os.path.join(root, "self.pkl"), "rb") as f:
+            trainer = pickle.load(f)
+        # trainer.load_last_checkpoint()
+        return trainer
+
+    @classmethod
+    def load_last_trainer(cls, checkpoint_path=DEFAULT_CHECKPOINTS_PATH):
+        nca_dirs = sorted([d for d in os.listdir(checkpoint_path)])
+        latest_dir = max(
+            nca_dirs,
+            key=lambda x: os.path.getmtime(os.path.join(checkpoint_path, x)),
+        )
+        root = os.path.join(checkpoint_path, latest_dir)
+        return cls.load_trainer(root)
+
+    def model_checksum(model):
+        return sum(p.abs().sum().item() for p in model.parameters())
+
+    @property
+    def device(self):
+        return next(self.parameters()).device

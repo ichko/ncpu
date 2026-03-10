@@ -1,171 +1,144 @@
+from typing import Literal
+
 import torch
-import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 
+from ncpu.nca_utils import (
+    AliveMasking,
+    LazyLearnableInitialState,
+    LearnableNCAPerception,
+    NCARule,
+    ReadOnlyChannels,
+    SobelPerception,
+)
 
-class NCA(nn.Module):
+class NeuralCAv1(nn.Module):
+    def alive(self, x):
+        return F.max_pool2d(x[:, :1, :, :], kernel_size=3, stride=1, padding=0) > 0.1
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
     def __init__(
         self,
-        n_channels: int = 16,
-        hidden_channels: int = 128,
-        fire_rate: float = 0.5,
-        life_masking: bool = True,
-        lmc: int = 3,
-        set_to_zero: bool = True,
-        device: str = "cpu",
-    ):
-        super(NCA, self).__init__()
+        channels,
+        hidden_channels,
+        fire_rate,
+        alive_masking,
+        zero_initialization,
+    ) -> None:
+        super().__init__()
+        sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]) / 8
+        sobel_y = torch.tensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]]) / 8
+        identity = torch.tensor([[0, 0, 0], [0, 1, 0], [0, 0, 0]])
 
-        self.device = device
-        self.fire_rate = fire_rate
-        self.n_channels = n_channels
+        all_filters = torch.stack((identity, sobel_x, sobel_y))
+        all_filters_batch = all_filters.repeat(channels, 1, 1).unsqueeze(1)
+        all_filters_batch = nn.Parameter(all_filters_batch, requires_grad=False)
 
-        filter_ = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
-        scalar = 8.0
-        filter_x = filter_ / scalar
-        filter_y = filter_.t() / scalar
-
-        identity = torch.tensor([[0, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=torch.float32)
-        kernel = torch.stack([identity, filter_x, filter_y], dim=0)
-        kernel = kernel.repeat((n_channels, 1, 1))[:, None, ...]
-        self.kernel = kernel.to(self.device)
-
-        # padding = 0
-        self.update_module = nn.Sequential(
-            nn.Conv2d(
-                3 * n_channels,
-                hidden_channels,
-                kernel_size=1,  # (1, 1)
-                device=self.device,
-            ),
+        self.channels = channels
+        self.all_filters_batch = all_filters_batch
+        self.rule = nn.Sequential(
+            nn.Conv2d(3 * channels, hidden_channels, kernel_size=1),
             nn.ReLU(),
-            nn.Conv2d(
-                hidden_channels,
-                n_channels,
-                kernel_size=1,
-                bias=False,
-                device=self.device,
-            ),
+            nn.Conv2d(hidden_channels, channels, kernel_size=1, bias=False),
         )
+        self.fire_rate = fire_rate
+        self.alive_masking = alive_masking
 
-        # lmc - life masking channel:
-        self.lmc = lmc
-        self.life_masking = life_masking
-        if set_to_zero:
-            with torch.no_grad():
-                self.update_module[2].weight.zero_()
-        self.to(self.device)
+        if zero_initialization:
+            nn.init.zeros_(self.rule[-1].weight)
 
-    def perceive(self, x):
-        """
-        Perceive information from neighboring cells.
+    def forward(self, x, steps):
+        seq = [x]
 
-        Args:
-            x (torch.Tensor): current grid of shape (n_samples, n_channels, grid_size, grid_size)
+        # pad_type = "circular"
+        pad_type = "constant"
 
-        Returns:
-            (torch.Tensor): perceived grid of shape (n_samples, 3 * n_channels, grid_size, grid_size)
-        """
-        return nn.functional.conv2d(x, self.kernel, padding=1, groups=self.n_channels)
+        for _ in range(steps):
+            x_padded = F.pad(x, (1, 1, 1, 1), pad_type)
+            pre_life_mask = self.alive(x_padded)
 
-    def update(self, x):
-        """
-        Update cell grid.
+            delta = F.conv2d(
+                F.pad(x, (1, 1, 1, 1), pad_type),
+                self.all_filters_batch,
+                groups=self.channels,
+            )
+            delta = self.rule(delta)
+            x = x + delta
 
-        Args:
-            x (torch.Tensor): current grid of shape (n_samples, n_channels, grid_size, grid_size)
+            post_life_mask = self.alive(F.pad(x, (1, 1, 1, 1), pad_type))
+            life_mask = (pre_life_mask & post_life_mask).to(x.dtype)
+            if self.alive_masking:
+                x = x * life_mask
 
-        Returns:
-            (torch.Tensor): updated grid of shape (n_samples, n_channels, grid_size, grid_size)
-        """
+            seq.append(x)
 
-        # get living cells
-        pre_life_mask = self.get_alive(x)
+        seq = torch.stack(seq)
+        seq = seq.permute(1, 0, 2, 3, 4)
+        return seq
 
-        # perceive step
-        y = self.perceive(x)
-        # update step
-        dx = self.update_module(y)
-        # stochastic update
-        device = dx.device
-        mask = (torch.rand(x[:, :1, :, :].shape) <= self.fire_rate).to(
-            device, torch.float32
+class NeuralCAv2(nn.Module):
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    def __init__(
+        self,
+        channels,
+        hidden_channels,
+        fire_rate,
+        alive_threshold,
+        zero_initialization,
+        kernel_size,
+        perception: Literal["static_sobel", "learnable"] = "static_sobel",
+        num_perception_kernels=3,  # only used for learnable perception
+        learnable_initial_state=False,
+        padding_type="circular",
+        read_only_dims=[],
+    ) -> None:
+        super().__init__()
+        self.learnable_initial_state = learnable_initial_state
+        self.fire_rate = fire_rate
+        self.read_only_dims = read_only_dims
+        self.channels = channels
+
+        if perception == "static_sobel":
+            self.perception = SobelPerception(kernel_size, channels, padding_type)
+        elif perception == "learnable":
+            self.perception = LearnableNCAPerception(
+                num_perception_kernels, channels, kernel_size, padding_type
+            )
+
+        self.rule = NCARule(
+            num_perception_kernels * channels,
+            hidden_channels,
+            channels,
+            zero_initialization,
         )
-        dx = dx * mask
-        # add updated value
-        new_x = x + dx
-        # new_x = dx
+        self.alive_masking = AliveMasking(kernel_size, alive_threshold, padding_type)
+        self.read_only_channels = ReadOnlyChannels(channels, read_only_dims)
+        if self.learnable_initial_state:
+            self.add_initial_state = LazyLearnableInitialState()
 
-        # check which cells are alive before and after
-        post_life_mask = self.get_alive(new_x)
-        life_mask = (pre_life_mask & post_life_mask).to(torch.float32)
-        return new_x * life_mask
-        # return new_x
+    def forward(self, x, steps):
+        if self.learnable_initial_state:
+            x = self.add_initial_state(x)
+        seq = [x]
 
-    # @staticmethod
-    def get_alive(self, x):
-        """
-        Check which cells are alive.
+        for _ in range(steps):
+            delta = self.perception(x)
+            delta = self.rule(delta)
+            delta = self.read_only_channels(delta)
+            delta = self.alive_masking(x, delta)
 
-        Args:
-            x (torch.Tensor): current grid of shape (n_samples, n_channels, grid_size, grid_size)
+            x = x + delta
+            torch.clip_(x, -10, 10)
+            seq.append(x)
 
-        Returns:
-            (torch.Tensor): tensor with boolean values of shape (n_samples, 1, grid_size, grid_size)
-        """
-        return nn.functional.max_pool2d(
-            x[:, self.lmc : self.lmc + 1, :, :], kernel_size=3, stride=1, padding=1
-        ) > (
-            0.1 - (self.life_masking * 100)
-        )  # why do I have magic 100 value here? /Piotr
+        seq = torch.stack(seq)
+        seq = seq.permute(1, 0, 2, 3, 4)
 
-    def forward(self, x):
-        """
-        Forward pass.
-
-        Args:
-
-            x (torch.Tensor): current grid of shape (n_samples, n_channels, grid_size, grid_size)
-
-        Returns:
-            (torch.Tensor): updated grid of shape (n_samples, n_channels, grid_size, grid_size)
-        """
-        ret_np = False
-        squeeze_count = 0
-        if isinstance(x, np.ndarray):
-            x = torch.tensor(x)
-            x = x.to(torch.float)
-            ret_np = True
-
-        while len(x.shape) < 4:
-            x = x.unsqueeze(0)
-            squeeze_count += 1
-
-        updated_x = self.update(x)
-
-        while squeeze_count > 0:
-            updated_x = updated_x.squeeze(0)
-            squeeze_count -= 1
-
-        if ret_np:
-            return updated_x.detach().cpu().numpy()
-        return updated_x
-
-    def get(self):
-        w_1 = self.update_module[0].weight.detach().cpu().numpy()
-        w_2 = self.update_module[2].weight.detach().cpu().numpy()
-        b_1 = self.update_module[0].bias.detach().cpu().numpy()
-        # b_2 = self.update_module[2].bias.detach().cpu().numpy()
-        return [w_1, w_2, b_1]
-
-    def set(self, weights):
-        with torch.no_grad():
-            w_1, w_2, b_1 = weights  # Unpacking
-
-            self.update_module[0].weight.data.copy_(
-                torch.from_numpy(w_1).to(self.device)
-            )
-            self.update_module[2].weight.data.copy_(
-                torch.from_numpy(w_2).to(self.device)
-            )
-            self.update_module[0].bias.data.copy_(torch.from_numpy(b_1).to(self.device))
+        return seq  # (batch, time, channels, height, width)

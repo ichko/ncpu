@@ -1,12 +1,11 @@
 from collections import deque
+from typing import List
 
 import sys
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
 from ncpu.utils import make_io_screen
-
-from typing import List
 
 
 def sample_4bit_adder(*args):
@@ -20,6 +19,8 @@ def sample_4bit_adder(*args):
 
     out = torch.tensor(list(map(int, f"{s_int:05b}")))
     inp = torch.cat([a, b])
+    # Interlace bits
+    # inp = torch.tensor([a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3]])
 
     return inp, out
 
@@ -67,6 +68,26 @@ class NCPUDataset(IterableDataset):
         self.prev_class = 0
         self.class_neg = 0
 
+    def get_io_mask(self):
+        left, right = self.sampler()
+        left_screen = make_io_screen(
+            W=self.W,
+            H=self.H,
+            r=self.r,
+            spacing=self.spacing,
+            left_input=[],
+            right_input=torch.ones_like(left),
+        )
+        right_screen = make_io_screen(
+            W=self.W,
+            H=self.H,
+            r=self.r,
+            spacing=self.spacing,
+            left_input=[],
+            right_input=torch.ones_like(right),
+        )
+        return left_screen, right_screen
+
     def get_sample(self):
         left, right = self.sampler()
 
@@ -82,6 +103,7 @@ class NCPUDataset(IterableDataset):
             r=self.r,
             spacing=self.spacing,
             left_input=left,
+            # right_input=torch.zeros_like(right),
             right_input=[],
         )
 
@@ -173,6 +195,9 @@ class ScheduledDataset(IterableDataset):
         self.H = datasets[self.ds_index].H
         self.r = datasets[self.ds_index].r
 
+    def get_io_mask(self):
+        return self.datasets[self.ds_index].get_io_mask()
+
     def get_sample(self):
         if self.counter >= self.steps:
             self.counter = 0
@@ -181,7 +206,6 @@ class ScheduledDataset(IterableDataset):
                 if self.ds_index < len(self.datasets)
                 else self.ds_index
             )
-
 
         self.W = self.datasets[self.ds_index].W
         self.H = self.datasets[self.ds_index].H
@@ -200,6 +224,7 @@ class ScheduledDataset(IterableDataset):
             batch_size=batch_size,
             shuffle=False,  # can't shuffle IterableDataset
         )
+
 
 class PoolDataset(IterableDataset):
     def __init__(self, dataset, pool_size):

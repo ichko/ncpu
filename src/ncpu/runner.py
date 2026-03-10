@@ -1,73 +1,23 @@
-from ncpu.dataset import NCPUDataset, PoolDataset, ScheduledDataset, DynamicDataset
-from ncpu.model import NeuralCA
+from typing import List, Optional
+
+from ncpu.dataset import NCPUDataset, PoolDataset, ScheduledDataset
+from ncpu.nca import NeuralCAv2
 from ncpu.trainer import NCPUTrainer
-from typing import Optional, List
 
-from typing import Callable
-
-def setup_scheduled_trainer(configs : List = [], steps = 2_000):
-    primary_config = configs[0]
-    datasets = [NCPUDataset(config) for config in configs] 
-    dataset = ScheduledDataset(
-        datasets, 
-        steps = steps * primary_config.batch_size # this will make shift after N optim_step instead of N/batch_size optim_steps
-    )
-
-    nca = NeuralCA(
-        channels=primary_config.channels,
-        hidden_channels=primary_config.hidden_channels,
-        fire_rate=primary_config.fire_rate,
-        alive_masking=primary_config.alive_masking,
-        zero_initialization=primary_config.zero_initialization,
-    ).to(primary_config.device)
-
-    trainer = NCPUTrainer(
-        nca,
-        dataset.get_dataloader(batch_size=primary_config.batch_size),
-        lr=primary_config.lr,
-        gaussian_noise=primary_config.gaussian_noise,
-    )
-    trainer.sanity_check()
-
-    return trainer
-
-def setup_dynamic_trainer(config, **kwargs):
-    dataset = DynamicDataset(config, **kwargs)
-    if config.pool_size > 0:
-        dataset = PoolDataset(dataset, pool_size=config.pool_size)
-
-    nca = NeuralCA(
-        channels=config.channels,
-        hidden_channels=config.hidden_channels,
-        fire_rate=config.fire_rate,
-        alive_masking=config.alive_masking,
-        zero_initialization=config.zero_initialization,
-    ).to(config.device)
-
-    trainer = NCPUTrainer(
-        nca,
-        dataset.get_dataloader(batch_size=config.batch_size),
-        lr=config.lr,
-        gaussian_noise=config.gaussian_noise,
-    )
-    trainer.sanity_check()
-
-    return trainer
-
-
-def setup_trainer(config):
+def setup_trainer(base_model, config):
     dataset = NCPUDataset(config)
     if config.pool_size > 0:
         dataset = PoolDataset(dataset, pool_size=config.pool_size)
 
-    nca = NeuralCA(
+    nca = NeuralCAv2(
         channels=config.channels,
         hidden_channels=config.hidden_channels,
         fire_rate=config.fire_rate,
-        alive_masking=config.alive_masking,
+        alive_threshold=config.alive_threshold,
         zero_initialization=config.zero_initialization,
     ).to(config.device)
 
+    nca = base_model
     trainer = NCPUTrainer(
         nca,
         dataset.get_dataloader(batch_size=config.batch_size),
@@ -77,75 +27,3 @@ def setup_trainer(config):
     trainer.sanity_check()
 
     return trainer
-
-
-class TrainRunnerUI:
-    def __init__(self, config):
-        self.config = config
-        self.trainer = setup_trainer(config)
-
-    def render(self):
-        is_training = False
-        start_pause_training_btn = pn.widgets.Button(
-            name="Start training", button_type="primary"
-        )
-        training_progress_bar = pn.widgets.Progress(
-            name="Training progress", value=0, width=200, align="end"
-        )
-
-        def toggle_training(event=None):
-            start_pause_training_btn.name = "Pause training"
-
-        def training():
-            while is_training:
-                info = self.trainer.optim_step(steps=40)
-                loss = info["loss"].item()
-                training_progress_bar.value = training_progress_bar.value + 1
-                pn.io.push_notebook(hard=True)
-                time.sleep(0.01)
-
-        # training_thread = threading.Thread(target=training)
-        # training_thread.daemon = True
-        # training_thread.start()
-
-        start_pause_training_btn.on_click(toggle_training)
-
-        return pn.Column(
-            pn.Row(start_pause_training_btn, training_progress_bar),
-        )
-
-    def generate_pred_plots(self):
-        pbar = tqdm(range(self.config.its))
-        for i in pbar:
-            info = self.trainer.optim_step(steps=self.config.nca_steps)
-            loss = info["loss"].item()
-            pbar.set_description(f"loss={loss:.6f}")
-
-            if i % 250 == 0:
-                clear_output(wait=False)
-                display(pbar.container)
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.scatter(range(len(self.trainer.history)), self.trainer.history, s=1)
-                ax.set_yscale("log")
-                plt.close(fig)
-                display(fig)
-
-                print_tensor("inp    ", info["inp"])
-                print_tensor("out    ", info["out"])
-                print_tensor("nca_out", info["nca_out"])
-
-                to_show = 8
-                inp = info["inp"][:to_show]
-                out = info["out"][:to_show]
-                nca_out = info["nca_out"][:to_show]
-                rollout = info["rollout"][:to_show]
-                io = torch.cat([inp, out, nca_out], dim=0)
-
-                media.show_images(
-                    io.detach().cpu(), columns=to_show, width=100, height=100
-                )
-                sequence_batch_to_html_gifs(rollout, columns=to_show, fps=10)
-
-                it = len(self.trainer.history)
-                path = f"notebooks/checkpoints/ncpu_{it}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth"
-                torch.save(self.trainer.nca.state_dict(), path)
