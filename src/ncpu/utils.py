@@ -176,38 +176,57 @@ def add_gaussian_noise(img, mean=1.0, std=1.0):
     else:
         raise TypeError("Input must be torch.Tensor or np.ndarray")
 
-
 def make_io_screen(H, W, r, spacing, left_input, right_input):
-    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
+    screen = np.zeros((H, W), dtype=np.uint8)
     among_spacing, side_spacing = spacing
-    among_spacing = int(among_spacing)
-    side_spacing = int(side_spacing)
-    r = int(r)
-
-    n_left = len(left_input)
-    n_rows = int(np.ceil(n_left / 2))
-
-    v_size = n_rows * r * 2 + among_spacing * (n_rows - 1)
-    top_margin = (H - v_size) // 2
 
     for i, bit in enumerate(left_input):
-        col = i // n_rows  # 0 or 1
-        row = i % n_rows
+        x = side_spacing
+        v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
+        top_margin = (H - v_size) // 2
+        y = top_margin + r + i * (among_spacing + r * 2)
+        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
 
-        x = side_spacing + col * (2 * r + among_spacing)
-        y = top_margin + r + row * (2 * r + among_spacing)
-
-        cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
-
-    # among_spacing = r + r // 4
     for i, bit in enumerate(right_input):
         x = W - side_spacing
         v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
+        cv2.circle(screen, (x, y), r, 255, -1 if bit else 1)
 
     return screen
+
+# def make_io_screen(H, W, r, spacing, left_input, right_input):
+    # screen = np.full((H, W), fill_value=128, dtype=np.uint8)
+    # among_spacing, side_spacing = spacing
+    # among_spacing = int(among_spacing)
+    # side_spacing = int(side_spacing)
+    # r = int(r)
+
+    # n_left = len(left_input)
+    # n_rows = int(np.ceil(n_left / 2))
+
+    # v_size = n_rows * r * 2 + among_spacing * (n_rows - 1)
+    # top_margin = (H - v_size) // 2
+
+    # for i, bit in enumerate(left_input):
+    #     col = i // n_rows  # 0 or 1
+    #     row = i % n_rows
+
+    #     x = side_spacing + col * (2 * r + among_spacing)
+    #     y = top_margin + r + row * (2 * r + among_spacing)
+
+    #     cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
+
+    # # among_spacing = r + r // 4
+    # for i, bit in enumerate(right_input):
+    #     x = W - side_spacing
+    #     v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
+    #     top_margin = (H - v_size) // 2
+    #     y = top_margin + r + i * (among_spacing + r * 2)
+    #     cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
+
+    # return screen
 
 
 def conv_stack(layer_sizes, activation, **kwargs):

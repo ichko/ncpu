@@ -145,8 +145,10 @@ class ScheduledDataset(IterableDataset):
         self.H = datasets[self.ds_index].H
         self.r = datasets[self.ds_index].r
 
+    def get_io_mask(self):
+        return self.datasets[self.ds_index].get_io_mask()
+
     def get_sample(self):
-        print(f"here: {self}")
         if self.counter >= self.steps:
             self.counter = 0
             self.ds_index = (
