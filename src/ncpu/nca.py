@@ -26,7 +26,7 @@ class NeuralCAv1(nn.Module):
         channels,
         hidden_channels,
         fire_rate,
-        alive_masking,
+        alive_masking_flag,
         zero_initialization,
     ) -> None:
         super().__init__()
@@ -46,12 +46,28 @@ class NeuralCAv1(nn.Module):
             nn.Conv2d(hidden_channels, channels, kernel_size=1, bias=False),
         )
         self.fire_rate = fire_rate
-        self.alive_masking = alive_masking
+        self.alive_masking_flag = alive_masking_flag
 
         if zero_initialization:
             nn.init.zeros_(self.rule[-1].weight)
 
-    def forward(self, x, steps):
+    def perception(self, x, pad_type):
+        delta = F.conv2d(
+            F.pad(x, (1, 1, 1, 1), pad_type),
+            self.all_filters_batch,
+            groups=self.channels,
+        )
+        return delta
+
+    def alive_masking(self, x, x_padded, pad_type):
+        if self.self.alive_masking_flag:
+            pre_life_mask = self.alive(x_padded)
+            post_life_mask = self.alive(F.pad(x, (1, 1, 1, 1), pad_type))
+            life_mask = (pre_life_mask & post_life_mask).to(x.dtype)
+            x = x * life_mask
+        return x
+
+    def forward(self, x, steps = 1):
         seq = [x]
 
         # pad_type = "circular"
@@ -59,20 +75,10 @@ class NeuralCAv1(nn.Module):
 
         for _ in range(steps):
             x_padded = F.pad(x, (1, 1, 1, 1), pad_type)
-            pre_life_mask = self.alive(x_padded)
-
-            delta = F.conv2d(
-                F.pad(x, (1, 1, 1, 1), pad_type),
-                self.all_filters_batch,
-                groups=self.channels,
-            )
+            delta = self.perception(x, pad_type)
             delta = self.rule(delta)
             x = x + delta
-
-            post_life_mask = self.alive(F.pad(x, (1, 1, 1, 1), pad_type))
-            life_mask = (pre_life_mask & post_life_mask).to(x.dtype)
-            if self.alive_masking:
-                x = x * life_mask
+            x = self.alive_masking(x, x_padded, pad_type)
 
             seq.append(x)
 
