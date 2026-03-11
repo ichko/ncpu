@@ -35,6 +35,15 @@ class BaseTrainer(nn.Module):
     def log_metrics(self, **metrics_kwargs):
         self.metrics.append(metrics_kwargs)
 
+    # Piotr: I think having external separate file/checkpoint manager
+    #        is bit cleaner as we can implement checkpoint-only related
+    #        functionalities and cleanly garbage collect checkpoints.
+    #        However I am not replacing it yet.
+    # def save_checkpoint(self, name : str = "", timestamp = True) -> str:
+    #     name = f"{name}"
+    #     path = self.checkpointer.make(custom_string = name, timestamp = timestamp)
+    #     torch.save(self.nca.state_dict(), path)
+
     def save_checkpoint(self):
         root = os.path.join(self.checkpoint_path, self.name)
         os.makedirs(root, exist_ok=True)
