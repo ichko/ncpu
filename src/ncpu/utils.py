@@ -1,7 +1,11 @@
 import os
+import re
+from typing import Tuple
 
+import panel as pn
 import torch.nn.functional as F
-from torch import nn
+from torch import Tensor, nn
+from torchvision.utils import make_grid
 
 os.environ["CXX_RNG_USE_RDRND"] = "0"
 
@@ -9,8 +13,21 @@ import cv2
 import mediapy as media
 import numpy as np
 import torch
+import matplotlib.cm as cm
+import tempfile
+from pathlib import Path
 
 EPS = 1e-8
+
+
+def git_info():
+    import subprocess
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        dirty = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
+        return {"commit": commit, "dirty": bool(dirty)}
+    except Exception:
+        return {"commit": None, "dirty": None}
 
 
 def mass_conserving_update(beta, q, affinity, padding_type, pad):
@@ -210,6 +227,79 @@ def make_io_screen(H, W, r, spacing, left_input, right_input):
     return screen
 
 
+def make_alu_screen(H, W, r, side, among,
+                    a=None, b=None, carry_in=None, opcode=None,
+                    result=None, flags=None):
+    """Draw an ALU input/output screen.
+
+    Layout (left→right):
+        col 0  opcode           (3 bits, vertically centered)
+        col 1  A operand        (8 bits, full height)
+        col 2  B operand        (8 bits, full height)
+        col 3  carry-in         (1 bit,  top-aligned with A/B)
+        [4r gap]
+        col 4  result           (8 bits, full height)
+        col 5  flags            (4 bits, vertically centered)
+            flags order: carry-out, overflow, zero, negative
+
+    Args:
+        H, W   : grid size
+        r      : circle radius
+        side   : left/right margin (px)
+        among  : spacing between circle edges within a column
+        a, b   : list of 8 ints (bits), or None
+        carry_in: list of 1 int, or None
+        opcode : list of 3 ints, or None
+        result : list of 8 ints, or None
+        flags  : list of 4 ints [carry_out, overflow, zero, negative], or None
+    """
+    screen = np.full((H, W), 128, dtype=np.uint8)
+    step = 2 * r + among  # center-to-center distance between consecutive bits
+
+    # vertical origin for 8-bit columns
+    col8_h = 8 * 2 * r + 7 * among
+    top8 = (H - col8_h) // 2
+
+    def col_x(col_idx):
+        return side + col_idx * step
+
+    def draw_col(bits, cx, top_y):
+        for i, bit in enumerate(bits):
+            cy = top_y + r + i * step
+            cv2.circle(screen, (cx, cy), r, 255 if bit else 0, -1)
+
+    # col 0: opcode (3 bits, vertically centered)
+    if opcode is not None:
+        op_h = 3 * 2 * r + 2 * among
+        op_top = (H - op_h) // 2
+        draw_col(opcode, col_x(0), op_top)
+    # col 1: A
+    if a is not None:
+        draw_col(a, col_x(1), top8)
+    # col 2: B
+    if b is not None:
+        draw_col(b, col_x(2), top8)
+    # col 3: carry-in (top-aligned with A/B)
+    if carry_in is not None:
+        cy = top8 + r
+        cv2.circle(screen, (col_x(3), cy), r, 255 if carry_in[0] else 0, -1)
+
+    # gap = 4r edge-to-edge between col 3 and result
+    result_cx = col_x(3) + r + 4 * r + r  # = col_x(3) + 6r
+    flags_cx  = result_cx + step
+
+    # result: 8 bits, full height
+    if result is not None:
+        draw_col(result, result_cx, top8)
+    # flags: 4 bits, vertically centered
+    if flags is not None:
+        flags_h = 4 * 2 * r + 3 * among
+        flags_top = (H - flags_h) // 2
+        draw_col(flags, flags_cx, flags_top)
+
+    return screen
+
+
 def conv_stack(layer_sizes, activation, **kwargs):
     layers = []
 
@@ -229,3 +319,139 @@ def meshgrid_xy(H: int, W: int, device=None, dtype=torch.float32):
     y = torch.linspace(-1, 1, H, device=device, dtype=dtype)
     yy, xx = torch.meshgrid(y, x, indexing="ij")  # (H, W)
     return xx, yy
+
+
+def make_grid(
+    tensor: Tensor,  # (B, T, H, W, 3)
+    nrow: int = 8,
+    padding: int = 2,
+    pad_value: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> Tensor:  # (T, H_grid, W_grid, 3)
+    B, T, H, W, C = tensor.shape
+
+    xmaps = min(nrow, B)
+    ymaps = -(-B // xmaps)
+    grid_h = H * ymaps + padding * (ymaps + 1)
+    grid_w = W * xmaps + padding * (xmaps + 1)
+
+    grid = (
+        tensor.new_tensor(pad_value)
+        .view(1, 1, 1, 3)
+        .expand(T, grid_h, grid_w, 3)
+        .clone()
+    )
+
+    for k in range(B):
+        y, x = divmod(k, xmaps)
+        y0 = padding + y * (H + padding)
+        x0 = padding + x * (W + padding)
+        grid[:, y0 : y0 + H, x0 : x0 + W, :] = tensor[k]
+
+    return grid
+
+
+def rolling_temp_path(prefix: str, suffix: str, deque_cap: int) -> Path:
+    TMPDIR = Path.home() / ".cache"
+    TMPDIR.mkdir(exist_ok=True)
+
+    pattern = re.compile(rf"^{re.escape(prefix)}_(?P<idx>\d{{5}}){re.escape(suffix)}$")
+    indices = [
+        int(m.group("idx")) for f in TMPDIR.iterdir() if (m := pattern.match(f.name))
+    ]
+    next_idx = (max(indices) + 1) % deque_cap if indices else 0
+    return TMPDIR / f"{prefix}_{next_idx:05d}{suffix}"
+
+
+def tensor_to_video_pane(
+    tensor: torch.Tensor,
+    fps: int = 10,
+    nrow: int = 8,
+    padding: int = 4,
+    bg_color=(0, 0, 0),
+    channel: int = 0,
+    cmap: str = "viridis",
+    vmin=None,
+    vmax=None,
+    deque_cap=5,
+    zoom=1,
+    format: str = "mp4",
+):
+    """Convert (B, T, C, H, W) video tensor to a gridded Panel Video/GIF pane."""
+    tensor = tensor[:, :, channel]  # (B, T, H, W)
+    tensor = media.to_rgb(tensor, vmin=vmin, vmax=vmax, cmap=cmap)  # (B, T, H, W, 3)
+    tensor = make_grid(
+        torch.from_numpy(tensor), nrow=nrow, padding=padding, pad_value=bg_color
+    )
+    T, H, W, _3 = tensor.shape
+    W = int(zoom * W)
+    H = int(zoom * H)
+
+    if format == "gif":
+        path = rolling_temp_path("video", ".gif", deque_cap=deque_cap)
+        media.write_video(str(path), tensor.cpu().numpy(), fps=fps, codec="gif")
+        return pn.pane.GIF(
+            str(path), width=W, height=H, styles={"image-rendering": "pixelated"}
+        )
+    else:
+        path = rolling_temp_path("video", ".mp4", deque_cap=deque_cap)
+        media.write_video(str(path), tensor.cpu().numpy(), fps=fps, codec="h264")
+        return pn.pane.Video(
+            str(path),
+            autoplay=True,
+            loop=True,
+            muted=True,
+            width=W,
+            height=H,
+            styles={"image-rendering": "pixelated"},
+        )
+
+
+def freeze_frame(frames, timesteps, repeat):
+    """Repeat specific frames to create a pause effect in a video tensor.
+
+    Args:
+        frames:    (T, ...) tensor — time on axis 0
+        timesteps: list of frame indices to freeze (negative indices supported)
+        repeat:    how many times to repeat each specified frame
+    """
+    T = frames.shape[0]
+    frozen = {i % T for i in timesteps}
+
+    chunks = []
+    for i in range(T):
+        f = frames[i : i + 1]
+        n = repeat if i in frozen else 1
+        chunks.append(f.expand(n, *frames.shape[1:]))
+
+    return torch.cat(chunks, dim=0)
+
+
+def save_grid_image(path, rows, nrow=8, padding=2, vmin=-1, vmax=1, cmap="viridis",
+                    row_vmin=None, row_vmax=None):
+    """Save a multi-row grid of images as a PNG without any interpolation.
+
+    Args:
+        path: output file path
+        rows: list of (B, H, W) float tensors, one per row (e.g. [inputs, outputs])
+        nrow: max items per row
+        padding: pixels between items
+        vmin/vmax/cmap: colour mapping passed to mediapy.to_rgb
+        row_vmin/row_vmax: optional per-row overrides (lists, None entries fall back to vmin/vmax)
+    """
+    row_grids = []
+    for i, batch in enumerate(rows):
+        rv_min = (row_vmin[i] if row_vmin and row_vmin[i] is not None else vmin)
+        rv_max = (row_vmax[i] if row_vmax and row_vmax[i] is not None else vmax)
+        n = min(nrow, batch.shape[0])
+        rgb = torch.from_numpy(
+            media.to_rgb(batch[:n].numpy(), vmin=rv_min, vmax=rv_max, cmap=cmap)
+        ).unsqueeze(1)  # (n, 1, H, W, 3)
+        row_grids.append(make_grid(rgb, nrow=n, padding=padding).squeeze(0))  # (H, W, 3)
+
+    # Each row has `padding` on all sides; strip top padding from rows after the first
+    # to avoid double-thickness gaps between rows.
+    full = torch.cat(
+        [row_grids[0]] + [r[padding:] for r in row_grids[1:]],
+        dim=0,
+    )
+    media.write_image(str(path), full.numpy())
