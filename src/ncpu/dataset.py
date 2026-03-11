@@ -4,7 +4,17 @@ from typing import List
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
-from ncpu.utils import make_io_screen
+from ncpu.utils import make_alu_screen, make_io_screen
+
+
+def sample_8bit_adder(*args):
+    a = torch.randint(0, 2, size=(8,))
+    b = torch.randint(0, 2, size=(8,))
+    a_int = int("".join(map(str, a.tolist())), 2)
+    b_int = int("".join(map(str, b.tolist())), 2)
+    s_int = a_int + b_int
+    out = torch.tensor(list(map(int, f"{s_int:09b}")))
+    return torch.cat([a, b]), out
 
 
 def sample_4bit_adder(*args):
@@ -86,6 +96,24 @@ class NCPUDataset(IterableDataset):
             right_input=torch.ones_like(right),
         )
         return left_screen, right_screen
+
+    def get_output_bit_masks(self):
+        """Returns (n_bits, H, W) float tensor — one binary mask per output circle."""
+        _, right = self.sampler()
+        n_bits = len(right)
+        masks = []
+        for i in range(n_bits):
+            one_hot = [1 if j == i else 0 for j in range(n_bits)]
+            screen = make_io_screen(
+                W=self.W,
+                H=self.H,
+                r=self.r,
+                spacing=self.spacing,
+                left_input=[],
+                right_input=one_hot,
+            )
+            masks.append(torch.from_numpy(screen > 200).float())
+        return torch.stack(masks)  # (n_bits, H, W)
 
     def get_sample(self):
         left, right = self.sampler()
@@ -217,6 +245,119 @@ class PoolDataset(IterableDataset):
             batch_size=batch_size,
             shuffle=False,  # can't shuffle IterableDataset
         )
+
+
+def _int_to_bits(n, width):
+    return [int(b) for b in f"{n:0{width}b}"]
+
+
+def _compute_alu(a_int, b_int, cin, op):
+    """Compute 8-bit ALU result and flags.
+
+    Opcodes:
+        0: ADD   A + B + cin
+        1: SUB   A - B - cin  (carry = NOT borrow)
+        2: AND   A & B
+        3: OR    A | B
+        4: XOR   A ^ B
+        5: NOT   ~A
+        6: SHL   A << 1, cin → LSB
+        7: SHR   A >> 1, cin → MSB
+
+    Returns (result_int, [carry_out, overflow, zero, negative])
+    """
+    overflow = 0
+    carry_out = 0
+
+    if op == 0:  # ADD
+        full = a_int + b_int + cin
+        result = full & 0xFF
+        carry_out = int(full > 0xFF)
+        overflow = int(((a_int ^ result) & (b_int ^ result) & 0x80) != 0)
+    elif op == 1:  # SUB
+        full = a_int - b_int - cin
+        result = full & 0xFF
+        carry_out = int(full >= 0)  # carry = NOT borrow
+        overflow = int(((a_int ^ b_int) & (a_int ^ result) & 0x80) != 0)
+    elif op == 2:  # AND
+        result = a_int & b_int
+    elif op == 3:  # OR
+        result = a_int | b_int
+    elif op == 4:  # XOR
+        result = a_int ^ b_int
+    elif op == 5:  # NOT A
+        result = (~a_int) & 0xFF
+    elif op == 6:  # SHL
+        carry_out = (a_int >> 7) & 1
+        result = ((a_int << 1) | cin) & 0xFF
+    else:          # SHR
+        carry_out = a_int & 1
+        result = ((cin << 7) | (a_int >> 1)) & 0xFF
+
+    zero = int(result == 0)
+    negative = (result >> 7) & 1
+    return result, [carry_out, overflow, zero, negative]
+
+
+class ALUDataset(IterableDataset):
+    """8-bit ALU dataset using the make_alu_screen layout."""
+
+    def __init__(self, config):
+        self.W = config.W
+        self.H = config.H
+        self.r = config.r
+        self.side = config.side
+        self.among = config.among
+
+    def _make_screen(self, a=None, b=None, carry_in=None, opcode=None,
+                     result=None, flags=None):
+        return make_alu_screen(self.H, self.W, self.r, self.side, self.among,
+                               a=a, b=b, carry_in=carry_in, opcode=opcode,
+                               result=result, flags=flags)
+
+    def get_io_mask(self):
+        inp = self._make_screen(a=[1]*8, b=[1]*8, carry_in=[1], opcode=[1]*3)
+        out = self._make_screen(result=[1]*8, flags=[1]*4)
+        return inp, out
+
+    def get_output_bit_masks(self):
+        """Returns (12, H, W) tensor — one mask per output bit (8 result + 4 flags)."""
+        masks = []
+        for i in range(8):
+            s = self._make_screen(result=[1 if j == i else 0 for j in range(8)])
+            masks.append(torch.from_numpy(s > 200).float())
+        for i in range(4):
+            s = self._make_screen(flags=[1 if j == i else 0 for j in range(4)])
+            masks.append(torch.from_numpy(s > 200).float())
+        return torch.stack(masks)  # (12, H, W)
+
+    def get_sample(self):
+        a_int = torch.randint(0, 256, ()).item()
+        b_int = torch.randint(0, 256, ()).item()
+        cin   = torch.randint(0, 2,   ()).item()
+        op    = torch.randint(0, 8,   ()).item()
+
+        result_int, flags = _compute_alu(a_int, b_int, cin, op)
+
+        inp = self._make_screen(
+            a=_int_to_bits(a_int, 8),
+            b=_int_to_bits(b_int, 8),
+            carry_in=[cin],
+            opcode=_int_to_bits(op, 3),
+        )
+        out = self._make_screen(
+            result=_int_to_bits(result_int, 8),
+            flags=flags,
+        )
+        return (torch.from_numpy(inp).float(),
+                torch.from_numpy(out).float())
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
+
+    def get_dataloader(self, batch_size):
+        return DataLoader(self, batch_size=batch_size, shuffle=False)
 
 
 class PoolLoader(DataLoader):
