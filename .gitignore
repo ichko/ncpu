@@ -4,3 +4,4 @@ checkpoints/
 .ipynb_checkpoints/
 training_history/
 .vscode
+runs
