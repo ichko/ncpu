@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from ncpu.base_trainer import BaseTrainer
 from ncpu.loss import output_masked_rollout_loss
-from ncpu.nca import NeuralCAv2
+from ncpu.nca import NeuralCA
 from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.utils import (
     add_gaussian_noise,
@@ -28,7 +28,7 @@ class NCPUTrainer(BaseTrainer):
 
     def __init__(
         self,
-        nca: NeuralCAv2,
+        nca: NeuralCA,
         dataloader: DataLoader,
         lr: float,
         gaussian_noise: float,
@@ -47,8 +47,6 @@ class NCPUTrainer(BaseTrainer):
             )
         )
         self.nca = nca
-        self.clip_max = clip_max
-        self.clip_min = clip_min
         self.to(nca.device)
         self.dataloader = dataloader
         self.ds = dataloader.dataset
