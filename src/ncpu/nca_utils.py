@@ -26,12 +26,14 @@ class NCARule(nn.Module):
         return self.rule(x)
 
 
+
 class SobelPerception(nn.Module):
     def __init__(self, kernel_size, channels, padding_type):
         super().__init__()
         self.kernel_size = kernel_size
         self.channels = channels
-        self.padding_type = padding_type
+        # F.pad uses "constant" for zero-padding; nn.Conv2d calls it "zeros"
+        self.padding_type = "constant" if padding_type == "zeros" else padding_type
 
         identity, sobel_x, sobel_y = make_sobel_kernels(kernel_size)
         all_filters = torch.stack((identity, sobel_x, sobel_y))
@@ -72,7 +74,8 @@ class AliveMasking(nn.Module):
         super().__init__()
         self.kernel_size = kernel_size
         self.alive_threshold = alive_threshold
-        self.padding_type = padding_type
+        # F.pad uses "constant" for zero-padding; nn.Conv2d calls it "zeros"
+        self.padding_type = "constant" if padding_type == "zeros" else padding_type
 
     def alive(self, x):
         x = torch.abs(x)

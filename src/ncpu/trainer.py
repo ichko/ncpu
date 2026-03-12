@@ -33,6 +33,7 @@ class NCPUTrainer(BaseTrainer):
         stop_loss: Optional[float] = None,
         checkpoint_pattern: Optional[str] = None,
         loss_fn=output_masked_rollout_loss,
+        input_implant_type="first",
     ):
         super().__init__(
             **(
@@ -60,6 +61,7 @@ class NCPUTrainer(BaseTrainer):
         # per-bit masks: (n_bits, H, W)
         self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
         self.loss_fn = loss_fn
+        self.input_implant_type = input_implant_type
 
     def sanity_check(self):
         print("Sanity check...")
@@ -88,14 +90,15 @@ class NCPUTrainer(BaseTrainer):
 
     def _implant_input(self, inp):
         bs = inp.shape[0]
-        first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
+        if self.input_implant_type == "all":
+            first_state = inp.unsqueeze(1).expand(bs, self.nca.channels, self.ds.H, self.ds.W).clone()
+        else:
+            first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
+            first_state[:, 0] = inp
         first_state = first_state.to(self.nca.device)
-        first_state[:, 0] = inp  # writable output channel
-        # read-only input memory (kept fixed via read_only_dims)
-        first_state[:, 1] = inp
         return first_state
 
-    def optim_step(self, steps):
+    def optim_step(self, steps, return_rollout=False):
         batch = next(self.dataset_iter)
 
         inp, out = batch
@@ -117,7 +120,7 @@ class NCPUTrainer(BaseTrainer):
 
         rollout = self.nca.forward(first_state, steps=forward_steps)
         nca_out = rollout[:, -1, 0]
-        loss = self.loss_fn(rollout, out, mask=self.out_mask_binary)
+        loss = self.loss_fn(rollout, out, inp=inp, mask=self.out_mask_binary)
 
         # num_valid_bits: mean correct bits per sample (out of n_bits)
         with torch.no_grad():
@@ -160,7 +163,7 @@ class NCPUTrainer(BaseTrainer):
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
-            "rollout": rollout.detach().cpu(),
+            "rollout": rollout.detach().cpu() if return_rollout else None,
         }
 
         return info

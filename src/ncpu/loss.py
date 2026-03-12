@@ -36,3 +36,12 @@ def output_masked_rollout_loss(rollout, out, mask, **kwargs):
     nca_outs = rollout[:, 1:, 0]
     out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
     return ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)
+
+
+def fullscreen_rollout_loss(rollout, out, inp, **kwargs):
+    """MSE over all rollout steps across the entire screen, target includes input."""
+    B = rollout.shape[0]
+    T = rollout.shape[1] - 1
+    nca_outs = rollout[:, 1:, 0]
+    out_rep = (out + inp).unsqueeze(1).expand(B, T, *out.shape[1:])
+    return F.mse_loss(nca_outs, out_rep)
