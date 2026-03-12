@@ -1419,8 +1419,8 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.12.0.88" },
     { name = "panel", specifier = ">=1.8.3" },
     { name = "streamlit", specifier = ">=1.55.0" },
-    { name = "torch", specifier = ">=2.9.1" },
-    { name = "torchvision", specifier = ">=0.24.1" },
+    { name = "torch", specifier = ">=2.7.1", index = "https://download.pytorch.org/whl/cu118" },
+    { name = "torchvision", specifier = ">=0.22.1", index = "https://download.pytorch.org/whl/cu118" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
