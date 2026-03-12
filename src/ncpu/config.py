@@ -28,10 +28,10 @@ class _TwoArgSmallGridMixinClose:
 
 @dataclass(frozen=True)
 class _TwoArgSmallGridMixinFarAway:
-    W = 32
-    H = 32
+    W = 64
+    H = 64
     r = 4
-    spacing = (2, 6)
+    spacing = (6, 16)
 
 
 @dataclass(frozen=True)

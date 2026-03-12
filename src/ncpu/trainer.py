@@ -196,6 +196,7 @@ class NCPUTrainer(BaseTrainer):
         out = info["out"][:to_show]
         nca_out = info["nca_out"][:to_show]
         rollout = info["rollout"][:to_show]
+        print(f"rollout.shape: {rollout.shape} to_show: {to_show}")
         # read_only_channel = rollout[:to_show, -1, -1]
         io = torch.cat([inp, out, nca_out], dim=0)
 
@@ -209,7 +210,12 @@ class NCPUTrainer(BaseTrainer):
             vmin=-1,
             vmax=1,
         )
+
         vid = tensor_to_video_pane(
             rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
         )
         return pn.Column(vid)
+        # Piotr not yet sure
+        # sequence_batch_to_html_gifs(
+        #     rollout, columns=to_show, width=display_size, height=display_size, fps=10, channels=[chn for chn in range(rollout.shape[2])]
+        # )

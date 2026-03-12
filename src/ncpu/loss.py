@@ -2,6 +2,13 @@ import torch
 from torch.nn import functional as F
 
 
+def loss_mse_whole_seq(rollout, out, **kwargs):
+    N = rollout.shape[1]
+    nca_outs = rollout[:, -N:, 0]
+    out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
+    loss = F.mse_loss(nca_outs, out_rep)
+    return loss
+
 def loss_mse_rollout(rollout, out, **kwargs):
     N = min(5, rollout.shape[1])
     nca_outs = rollout[:, -N:, 0]

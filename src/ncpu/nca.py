@@ -31,6 +31,7 @@ class NeuralCAv1(nn.Module):
         fire_rate,
         alive_masking_flag,
         zero_initialization,
+        kernel_size = 5,
     ) -> None:
         super().__init__()
         sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]) / 8
@@ -41,6 +42,7 @@ class NeuralCAv1(nn.Module):
         all_filters_batch = all_filters.repeat(channels, 1, 1).unsqueeze(1)
         all_filters_batch = nn.Parameter(all_filters_batch, requires_grad=False)
 
+        self.kernel_size = kernel_size
         self.channels = channels
         self.all_filters_batch = all_filters_batch
         self.rule = nn.Sequential(
@@ -54,35 +56,63 @@ class NeuralCAv1(nn.Module):
         if zero_initialization:
             nn.init.zeros_(self.rule[-1].weight)
 
+        self.padding = (self.kernel_size - 1) // 2
+
     def perception(self, x, pad_type):
         delta = F.conv2d(
-            F.pad(x, (1, 1, 1, 1), pad_type),
+            F.pad(x, (self.padding+1,) * 4, pad_type),
             self.all_filters_batch,
             groups=self.channels,
         )
         return delta
 
-    def alive_masking(self, x, x_padded, pad_type):
-        if self.alive_masking_flag:
-            pre_life_mask = self.alive(x_padded)
-            post_life_mask = self.alive(F.pad(x, (1, 1, 1, 1), pad_type))
+    def alive(self, x):
+        x = torch.abs(x)
+        pooled = F.max_pool2d(
+            x[:, :1, :, :],
+            kernel_size=self.kernel_size,
+            stride=1,
+            padding=0,
+        )
+        pooled = pooled.amax(dim=1, keepdim=True) > 0.1
+        return pooled
+
+    def alive_masking(self, x, delta):
+        if self.alive_masking_flag > 0:
+            pre_life_mask = self.alive(x)
+            post_life_mask = self.alive(x + delta)
             life_mask = (pre_life_mask & post_life_mask).to(x.dtype)
-            x = x * life_mask
-        return x
+            print("after max pool: ",pre_life_mask.shape, post_life_mask.shape)
+            delta = delta * life_mask
+        return delta
+
+    def stochastic_update(self, delta):
+        if self.fire_rate >= 1.0:
+            return delta
+        fire_mask = (
+            torch.rand(delta.shape[0], 1, delta.shape[2], delta.shape[3], device=delta.device)
+            < self.fire_rate
+        ).to(delta.dtype)
+        return delta * fire_mask
 
     def forward(self, x, steps = 1):
         seq = [x]
 
         # pad_type = "circular"
         pad_type = "constant"
-
         for _ in range(steps):
-            x_padded = F.pad(x, (1, 1, 1, 1), pad_type)
+            x_before = F.pad(x, (self.padding, ) * 4, pad_type)
             delta = self.perception(x, pad_type)
+            print("1: ", delta.shape, x.shape, (self.padding, ) * 4)
             delta = self.rule(delta)
-            x = x + delta
-            x = self.alive_masking(x, x_padded, pad_type)
-
+            print("2: ", delta.shape, x_before.shape)
+            delta = self.alive_masking(x_before, delta)
+            print("3: ", delta.shape)
+            delta = self.stochastic_update(delta)
+            print("4: ", delta.shape)
+            x = x + delta[:, :, 1:-1, 1:-1]
+            print(x)
+            
             seq.append(x)
 
         seq = torch.stack(seq)

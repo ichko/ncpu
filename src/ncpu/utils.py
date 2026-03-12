@@ -235,21 +235,22 @@ def add_progress_bar(
 
 
 def sequence_batch_to_html_gifs(
-    tensor, width, height, return_html=False, columns=8, fps=20
+    tensor, width, height, return_html=False, columns=8, fps=20, channels=[0],
 ):
-    tensor = tensor[:, :, 0].detach().cpu().numpy()
-    tensor = media.to_rgb(tensor, cmap="viridis", vmin=-1, vmax=1)
-
-    return media.show_videos(
-        tensor,
-        titles=[f"#{i}" for i in range(tensor.shape[0])],
-        fps=fps,
-        codec="gif",
-        columns=columns,
-        width=width,
-        height=height,
-        return_html=return_html,
-    )
+    for chn in channels:
+        np_tensor = tensor[:, :, chn].detach().cpu().numpy()
+        np_tensor = media.to_rgb(np_tensor, cmap="viridis", vmin=-1, vmax=1)
+        media.show_videos(
+            np_tensor,
+            titles=[f"#{i}:{chn}" for i in range(np_tensor.shape[0])],
+            fps=fps,
+            codec="gif",
+            columns=columns,
+            width=width,
+            height=height,
+            return_html=return_html,
+        )
+    print("------------------------------------------------------")
 
 
 def add_gaussian_noise(img, mean=1.0, std=1.0, min_image = 0, max_image = 255):
