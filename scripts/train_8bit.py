@@ -33,9 +33,60 @@ from argparse import Namespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from ncpu.dataset import NCPUDataset, sample_8bit_adder
+from ncpu.loss import fullscreen_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
 from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+
+
+# ── Media helpers ─────────────────────────────────────────────────────────────
+
+def make_rollout_gif(rollout):
+    B, T, C, H, W = rollout.shape
+    gif_b = min(B, 4)
+    gif_t = rollout[:gif_b, ::2]
+    frames = gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
+    frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
+    grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
+    return freeze_frame(grid, timesteps=[0, -1], repeat=8)
+
+
+def save_snapshot_latest(run_dir, inp, out, nca_out):
+    snap_b = min(inp.shape[0], 4)
+    diff = (nca_out[:snap_b] - out[:snap_b]).abs()
+    save_grid_image(
+        run_dir / "snapshot_latest.png",
+        [inp[:snap_b].cpu(), out[:snap_b].cpu(),
+         nca_out[:snap_b].detach().cpu(), diff.detach().cpu()],
+        row_vmin=[None, None, None, 0],
+        row_vmax=[None, None, None, 2],
+    )
+
+
+def save_rollout_latest(run_dir, rollout):
+    grid = make_rollout_gif(rollout)
+    media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
+
+
+def save_media(step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, rollout):
+    B, T, C, H, W = rollout.shape
+
+    snap_b = min(B, 4)
+    diff = (nca_out[:snap_b] - out[:snap_b]).abs()
+    snap_path = snapshots_dir / f"snapshot_{step:07d}.png"
+    save_grid_image(
+        snap_path,
+        [inp[:snap_b].cpu(), out[:snap_b].cpu(),
+         nca_out[:snap_b].detach().cpu(), diff.detach().cpu()],
+        row_vmin=[None, None, None, 0],
+        row_vmax=[None, None, None, 2],
+    )
+    grid = make_rollout_gif(rollout)
+    gif_path = rollouts_dir / f"rollout_{step:07d}.gif"
+    media.write_video(str(gif_path), grid.numpy(), fps=10, codec="gif")
+    shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+
+    print(f"  → saved: snapshot_{step:07d}.png, rollout_{step:07d}.gif")
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -49,6 +100,7 @@ from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
 DEVICE = "cuda"
 TOTAL_STEPS = 200_000
 PLOT_EVERY = 500
+MEDIA_EVERY = 5000
 
 ds_config = Namespace(
     W=80,
@@ -67,7 +119,8 @@ nca_config = Namespace(
     zero_initialization=False,
     kernel_size=5,
     num_perception_kernels=3,
-    read_only_dims=[1],
+    read_only_dims=[],
+    padding_type="zeros",
 )
 
 optim_config = Namespace(
@@ -123,6 +176,7 @@ trainer = NCPUTrainer(
     gaussian_noise=optim_config.gaussian_noise,
     grad_clip=optim_config.grad_clip,
     checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
+    loss_fn=fullscreen_rollout_loss,
 )
 
 trainer.sanity_check()
@@ -135,7 +189,7 @@ print(f"{'─'*60}\n")
 pbar = tqdm(range(TOTAL_STEPS), ncols=100)
 
 for step in pbar:
-    info = trainer.optim_step(steps=(optim_config.steps_min, optim_config.steps_max))
+    info = trainer.optim_step(steps=(optim_config.steps_min, optim_config.steps_max), return_rollout=(step % PLOT_EVERY == 0))
     loss = info["loss"]
     num_valid_bits = info["num_valid_bits"]
 
@@ -162,7 +216,7 @@ for step in pbar:
         continue
 
     # ── Periodic reporting ────────────────────────────────────────────────
-    rollout = info["rollout"]  # (B, T, C, H, W) on CPU
+    rollout = info["rollout"]  # (B, T, C, H, W) already detached
     nca_out = info["nca_out"]  # (B, H, W)
     out = info["out"]  # (B, H, W)
     inp = info["inp"]  # (B, H, W)
@@ -180,23 +234,6 @@ for step in pbar:
 
     # ── Checkpoint ────────────────────────────────────────────────────────
     trainer.save_checkpoint()
-
-    # ── IO snapshot (4 rows: input, target, nca_out, |nca_out - target|) ─
-    snap_b = min(B, 4)
-    diff = (nca_out[:snap_b] - out[:snap_b]).abs()
-    snap_path = snapshots_dir / f"snapshot_{step:07d}.png"
-    save_grid_image(
-        snap_path,
-        [
-            inp[:snap_b].cpu(),
-            out[:snap_b].cpu(),
-            nca_out[:snap_b].detach().cpu(),
-            diff.detach().cpu(),
-        ],
-        row_vmin=[None, None, None, 0],
-        row_vmax=[None, None, None, 2],
-    )
-    shutil.copy(snap_path, run_dir / "snapshot_latest.png")
 
     # ── Loss curve ────────────────────────────────────────────────────────
     losses = [m["loss"] for m in trainer.metrics]
@@ -222,19 +259,10 @@ for step in pbar:
     fig.savefig(run_dir / "bits_curve.png", dpi=120)
     plt.close(fig)
 
-    # ── Rollout GIF — cap batch and subsample frames to keep memory sane ──
-    gif_b = min(B, 4)
-    gif_t = rollout[:gif_b, ::2]  # every other frame
-    gif_t_len = gif_t.shape[1]
-    frames = gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t_len, H, W).numpy()
-    frames_rgb = torch.from_numpy(
-        media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis")
-    )  # (C*gif_b, gif_t_len, H, W, 3)
-    grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
-    grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
+    save_snapshot_latest(run_dir, inp, out, nca_out)
+    save_rollout_latest(run_dir, rollout)
 
-    gif_path = rollouts_dir / f"rollout_{step:07d}.gif"
-    media.write_video(str(gif_path), grid.numpy(), fps=10, codec="gif")
-    shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+    if step % MEDIA_EVERY == 0:
+        save_media(step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, rollout)
 
-    print(f"  → saved: loss_curve.png, rollout_{step:07d}.gif, snapshot_{step:07d}.png")
+    print(f"  → saved: loss_curve.png, bits_curve.png")
