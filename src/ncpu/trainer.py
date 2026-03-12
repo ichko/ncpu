@@ -35,7 +35,9 @@ class NCPUTrainer(BaseTrainer):
         grad_clip: Optional[float] = 1.0,
         stop_loss: Optional[float] = None,
         checkpoint_pattern: Optional[str] = None,
-        loss_fn=output_masked_rollout_loss,
+        loss_fn : Callable = output_masked_rollout_loss,
+        clip_max : int = 128, 
+        clip_min : int = -128
     ):
         super().__init__(
             **(
@@ -45,6 +47,8 @@ class NCPUTrainer(BaseTrainer):
             )
         )
         self.nca = nca
+        self.clip_max = clip_max
+        self.clip_min = clip_min
         self.to(nca.device)
         self.dataloader = dataloader
         self.ds = dataloader.dataset
@@ -99,7 +103,7 @@ class NCPUTrainer(BaseTrainer):
         first_state[:, 1] = inp
         return first_state
 
-    def optim_step(self, steps : Union[int, Sequence[int]], clip_max : int  = 128, clip_min : int = -128, loss : Callable = lambda rollout, target : F.mse_loss(rollout[:, -1, 0], target, reduction="none").mean()):
+    def optim_step(self, steps : Union[int, Sequence[int]]):
         batch = next(self.dataset_iter)
         inp, out = batch
 
@@ -121,14 +125,12 @@ class NCPUTrainer(BaseTrainer):
         first_state = self._implant_input(inp)
         rollout = self.nca.forward(first_state, steps=forward_steps)
 
+        nca_out = rollout[:, -1, 0]
         # Piotr: if we are going to change loss, then lets do it in proper way
         #        so we can document different losses as lambdas/functions/classes 
         #        no strong feelings which one we should use, but definitelly we should 
         #        avoid changing trainer if not necessary
         #        LETS DO NOT WORK AGAINST THE CODE, BUT MAKE THE CODE WORK FOR US 
-        loss = loss(rollout, out)
-
-        nca_out = rollout[:, -1, 0]
         loss = self.loss_fn(rollout, out, mask=self.out_mask_binary)
 
         # num_valid_bits: mean correct bits per sample (out of n_bits)
