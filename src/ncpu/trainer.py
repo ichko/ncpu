@@ -47,6 +47,8 @@ class NCPUTrainer(BaseTrainer):
             )
         )
         self.nca = nca
+        self.clip_max = clip_max
+        self.clip_min = clip_min
         self.to(nca.device)
         self.dataloader = dataloader
         self.ds = dataloader.dataset
