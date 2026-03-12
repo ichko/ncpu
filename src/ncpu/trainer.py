@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from ncpu.base_trainer import BaseTrainer
+from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.utils import (
     add_gaussian_noise,
@@ -31,6 +32,7 @@ class NCPUTrainer(BaseTrainer):
         grad_clip: Optional[float] = 1.0,
         stop_loss: Optional[float] = None,
         checkpoint_pattern: Optional[str] = None,
+        loss_fn=output_masked_rollout_loss,
     ):
         super().__init__(
             **(
@@ -57,6 +59,7 @@ class NCPUTrainer(BaseTrainer):
         self.out_mask_binary = (self.out_mask > 128).float()
         # per-bit masks: (n_bits, H, W)
         self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
+        self.loss_fn = loss_fn
 
     def sanity_check(self):
         print("Sanity check...")
@@ -88,9 +91,8 @@ class NCPUTrainer(BaseTrainer):
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
         first_state = first_state.to(self.nca.device)
         first_state[:, 0] = inp  # writable output channel
-        first_state[:, 1] = (
-            inp  # read-only input memory (kept fixed via read_only_dims)
-        )
+        # read-only input memory (kept fixed via read_only_dims)
+        first_state[:, 1] = inp
         return first_state
 
     def optim_step(self, steps):
@@ -115,32 +117,7 @@ class NCPUTrainer(BaseTrainer):
 
         rollout = self.nca.forward(first_state, steps=forward_steps)
         nca_out = rollout[:, -1, 0]
-
-        # white_mask = (out > 0.5).float()
-        # black_mask = 1 - white_mask
-
-        # batch_loss = F.mse_loss(nca_out, out, reduction="none")
-        # white_loss = batch_loss * white_mask
-        # black_loss = batch_loss * black_mask
-
-        # masks_sum = white_mask.sum() + black_mask.sum()
-        # white_weight = black_mask.sum() / masks_sum
-        # black_weight = white_mask.sum() / masks_sum
-
-        # loss = (white_loss * white_weight + black_loss * black_weight).mean()
-
-        # loss = F.mse_loss(nca_out * self.output_mask, out * self.output_mask)
-
-        # loss = F.mse_loss(nca_out, out)
-
-        # Loss over every step (skip step 0 = initial state), masked to output positions only.
-        # Proper mean over the masked region rather than the full H×W grid.
-        B = rollout.shape[0]
-        T = rollout.shape[1] - 1  # number of NCA steps (excluding initial state)
-        nca_outs = rollout[:, 1:, 0]  # (B, T, H, W)
-        out_rep = out.unsqueeze(1).repeat(1, T, 1, 1)  # (B, T, H, W)
-        mask = self.out_mask_binary  # (H, W)
-        loss = ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)
+        loss = self.loss_fn(rollout, out, mask=self.out_mask_binary)
 
         # num_valid_bits: mean correct bits per sample (out of n_bits)
         with torch.no_grad():

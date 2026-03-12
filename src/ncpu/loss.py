@@ -2,7 +2,7 @@ import torch
 from torch.nn import functional as F
 
 
-def loss_mse_rollout(rollout, out):
+def loss_mse_rollout(rollout, out, **kwargs):
     N = min(5, rollout.shape[1])
     nca_outs = rollout[:, -N:, 0]
     out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
@@ -10,7 +10,7 @@ def loss_mse_rollout(rollout, out):
     return loss
 
 
-def loss_white_black(rollout, out):
+def loss_white_black(rollout, out, **kwargs):
     nca_out = rollout[:, -1, 0]
 
     # print(out.shape, out.dtype, out.min(), out.max())
@@ -29,15 +29,10 @@ def loss_white_black(rollout, out):
     return loss
 
 
-def full_rollout_out_mask_loss(rollout, out):
-    nca_out = rollout[:, -1, 0]
-    # Loss over every step (skip step 0 = initial state), masked to output positions only.
-    # Proper mean over the masked region rather than the full H×W grid.
+def output_masked_rollout_loss(rollout, out, mask, **kwargs):
+    """MSE over all rollout steps, restricted to output-circle pixels."""
     B = rollout.shape[0]
-    T = rollout.shape[1] - 1  # number of NCA steps (excluding initial state)
-    nca_outs = rollout[:, 1:, 0]  # (B, T, H, W)
-    out_rep = out.unsqueeze(1).repeat(1, T, 1, 1)  # (B, T, H, W)
-    mask = self.out_mask_binary  # (H, W)
-    loss = ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)
-
-    return loss
+    T = rollout.shape[1] - 1
+    nca_outs = rollout[:, 1:, 0]
+    out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
+    return ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)
