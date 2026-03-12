@@ -11,7 +11,8 @@ from torch.utils.data import DataLoader
 
 from ncpu.base_trainer import BaseTrainer
 from ncpu.loss import output_masked_rollout_loss
-from ncpu.nca import NeuralCA
+from ncpu.nca import NeuralCAv2
+from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.utils import (
     add_gaussian_noise,
     print_tensor,
@@ -19,13 +20,15 @@ from ncpu.utils import (
     tensor_to_video_pane,
 )
 
+from typing import Optional, Callable, Sequence, Union
+
 
 class NCPUTrainer(BaseTrainer):
     _exclude_from_pickle = {"dataloader", "ds", "dataset_iter", "optim"}
 
     def __init__(
         self,
-        nca: NeuralCA,
+        nca: NeuralCAv2,
         dataloader: DataLoader,
         lr: float,
         gaussian_noise: float,
@@ -34,6 +37,7 @@ class NCPUTrainer(BaseTrainer):
         checkpoint_pattern: Optional[str] = None,
         loss_fn=output_masked_rollout_loss,
         input_implant_type="first",
+        normalize_fn=normalize_neg1_to_1,
     ):
         super().__init__(
             **(
@@ -53,6 +57,7 @@ class NCPUTrainer(BaseTrainer):
         self.grad_clip = grad_clip
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
 
+        self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
         left_mask, right_mask = self.ds.get_io_mask()
         self.inp_mask = torch.tensor(left_mask).to(self.nca.device)
         self.out_mask = torch.tensor(right_mask).to(self.nca.device)
@@ -62,6 +67,7 @@ class NCPUTrainer(BaseTrainer):
         self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
         self.loss_fn = loss_fn
         self.input_implant_type = input_implant_type
+        self.normalize_fn = normalize_fn
 
     def sanity_check(self):
         print("Sanity check...")
@@ -91,7 +97,11 @@ class NCPUTrainer(BaseTrainer):
     def _implant_input(self, inp):
         bs = inp.shape[0]
         if self.input_implant_type == "all":
-            first_state = inp.unsqueeze(1).expand(bs, self.nca.channels, self.ds.H, self.ds.W).clone()
+            first_state = (
+                inp.unsqueeze(1)
+                .expand(bs, self.nca.channels, self.ds.H, self.ds.W)
+                .clone()
+            )
         else:
             first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
             first_state[:, 0] = inp
@@ -100,11 +110,10 @@ class NCPUTrainer(BaseTrainer):
 
     def optim_step(self, steps, return_rollout=False):
         batch = next(self.dataset_iter)
-
         inp, out = batch
 
-        inp = inp / 128.0 - 1.0
-        out = out / 128.0 - 1.0
+        inp = self.normalize_fn(inp)
+        out = self.normalize_fn(out)
 
         if self.gaussian_noise > 0:
             inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
@@ -112,13 +121,13 @@ class NCPUTrainer(BaseTrainer):
         inp = inp.to(self.device)
         out = out.to(self.device)
 
-        first_state = self._implant_input(inp)
-
         forward_steps = steps
         if isinstance(steps, (tuple, list)):
             forward_steps = np.random.randint(steps[0], steps[1])
 
+        first_state = self._implant_input(inp)
         rollout = self.nca.forward(first_state, steps=forward_steps)
+
         nca_out = rollout[:, -1, 0]
         loss = self.loss_fn(rollout, out, inp=inp, mask=self.out_mask_binary)
 
@@ -150,12 +159,7 @@ class NCPUTrainer(BaseTrainer):
                 loss=loss.item(),
                 grad_norm=grad_norm.item() if grad_norm is not None else None,
                 num_valid_bits=num_valid_bits,
-                # white_loss=white_loss.sum().item(),
-                # black_loss=black_loss.sum().item(),
             )
-
-        if hasattr(self.dataloader, "update"):
-            self.dataloader.update((nca_out, out.detach()), loss)
 
         info = {
             "loss": loss.item(),
@@ -168,7 +172,7 @@ class NCPUTrainer(BaseTrainer):
 
         return info
 
-    def display_optim_step(self, info, display_size=None, to_show=8):
+    def display_optim_step(self, info, display_size=64, to_show=8):
         fig, ax = plt.subplots(figsize=(8, 3))
         loss = [h["loss"] for h in self.metrics]
         ax.scatter(range(len(loss)), loss, s=1)
@@ -186,9 +190,8 @@ class NCPUTrainer(BaseTrainer):
         rollout = info["rollout"][:to_show]
         # read_only_channel = rollout[:to_show, -1, -1]
         io = torch.cat([inp, out, nca_out], dim=0)
-        if display_size is None:
-            display_size = inp.shape[1]
 
+        print(f"display size: {(display_size,display_size)}")
         media.show_images(
             io.detach().cpu(),
             columns=to_show,
