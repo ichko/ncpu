@@ -193,7 +193,6 @@ class NCPUTrainer(BaseTrainer):
         inp = info["inp"][:to_show]
         out = info["out"][:to_show]
         nca_out = info["nca_out"][:to_show]
-        rollout = info["rollout"][:to_show]
         # read_only_channel = rollout[:to_show, -1, -1]
         io = torch.cat([inp, out, nca_out], dim=0)
 
@@ -207,7 +206,11 @@ class NCPUTrainer(BaseTrainer):
             vmin=-1,
             vmax=1,
         )
-        vid = tensor_to_video_pane(
-            rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
-        )
-        return pn.Column(vid)
+
+        rollout = info["rollout"]
+        if rollout:
+            rollout = rollout[:to_show]
+            vid = tensor_to_video_pane(
+                rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
+            )
+            return pn.Column(vid)
