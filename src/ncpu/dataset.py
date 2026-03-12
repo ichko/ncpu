@@ -1,5 +1,6 @@
 from collections import deque
 from typing import List
+import sys
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset
@@ -179,7 +180,7 @@ class ScheduledDataset(IterableDataset):
             self.counter = 0
             self.ds_index = (
                 self.ds_index + 1
-                if self.ds_index < len(self.datasets)
+                if self.ds_index < (len(self.datasets) - 1)
                 else self.ds_index
             )
 
@@ -189,6 +190,9 @@ class ScheduledDataset(IterableDataset):
         ret = self.datasets[self.ds_index].get_sample()
         self.counter += 1
         return ret
+
+    def get_io_mask(self):
+        return self.datasets[self.ds_index].get_io_mask()
 
     def __iter__(self):
         while True:
@@ -290,7 +294,7 @@ def _compute_alu(a_int, b_int, cin, op):
     elif op == 6:  # SHL
         carry_out = (a_int >> 7) & 1
         result = ((a_int << 1) | cin) & 0xFF
-    else:          # SHR
+    else:  # SHR
         carry_out = a_int & 1
         result = ((cin << 7) | (a_int >> 1)) & 0xFF
 
@@ -309,15 +313,26 @@ class ALUDataset(IterableDataset):
         self.side = config.side
         self.among = config.among
 
-    def _make_screen(self, a=None, b=None, carry_in=None, opcode=None,
-                     result=None, flags=None):
-        return make_alu_screen(self.H, self.W, self.r, self.side, self.among,
-                               a=a, b=b, carry_in=carry_in, opcode=opcode,
-                               result=result, flags=flags)
+    def _make_screen(
+        self, a=None, b=None, carry_in=None, opcode=None, result=None, flags=None
+    ):
+        return make_alu_screen(
+            self.H,
+            self.W,
+            self.r,
+            self.side,
+            self.among,
+            a=a,
+            b=b,
+            carry_in=carry_in,
+            opcode=opcode,
+            result=result,
+            flags=flags,
+        )
 
     def get_io_mask(self):
-        inp = self._make_screen(a=[1]*8, b=[1]*8, carry_in=[1], opcode=[1]*3)
-        out = self._make_screen(result=[1]*8, flags=[1]*4)
+        inp = self._make_screen(a=[1] * 8, b=[1] * 8, carry_in=[1], opcode=[1] * 3)
+        out = self._make_screen(result=[1] * 8, flags=[1] * 4)
         return inp, out
 
     def get_output_bit_masks(self):
@@ -334,8 +349,8 @@ class ALUDataset(IterableDataset):
     def get_sample(self):
         a_int = torch.randint(0, 256, ()).item()
         b_int = torch.randint(0, 256, ()).item()
-        cin   = torch.randint(0, 2,   ()).item()
-        op    = torch.randint(0, 8,   ()).item()
+        cin = torch.randint(0, 2, ()).item()
+        op = torch.randint(0, 8, ()).item()
 
         result_int, flags = _compute_alu(a_int, b_int, cin, op)
 
@@ -349,8 +364,7 @@ class ALUDataset(IterableDataset):
             result=_int_to_bits(result_int, 8),
             flags=flags,
         )
-        return (torch.from_numpy(inp).float(),
-                torch.from_numpy(out).float())
+        return (torch.from_numpy(inp).float(), torch.from_numpy(out).float())
 
     def __iter__(self):
         while True:
@@ -367,3 +381,64 @@ class PoolLoader(DataLoader):
     def update(self, batch, losses):
         self.dataset.update(batch, losses)
         self.dataset.update(batch, losses)
+
+
+class DynamicDataset(IterableDataset):
+    def __init__(
+        self,
+        config,
+        update_y: int,
+        update_x: int,
+        steps: int,
+        stages: int = sys.maxsize,
+    ):
+        self.steps = steps
+        self.counter = 0
+        self.dataset = NCPUDataset(config)
+        self.spacing = self.dataset.spacing
+        self.W = self.dataset.W
+        self.H = self.dataset.H
+        self.r = self.dataset.r
+        self.update_y = update_y
+        self.update_x = update_x
+
+        self.stage = 0
+        self.stages = stages
+
+    def get_io_mask(self):
+        return self.dataset.get_io_mask()
+
+    def get_output_bit_masks(self):
+        return self.dataset.get_output_bit_masks()
+
+    def get_sample(self):
+        if self.counter >= self.steps and self.stage < self.stages:
+            self.counter = 0
+            spacing = self.spacing
+            spacing_x = max(
+                spacing[0] - self.update_x, self.r
+            )  # stop points from moving outside the board
+            spacing_y = max(
+                spacing[1] - self.update_y, self.r + 2
+            )  # stop points from moving outside the board
+            self.spacing = (spacing_x, spacing_y)
+            self.stage += 1
+
+        self.dataset.W = self.W
+        self.dataset.H = self.H
+        self.dataset.r = self.r
+        self.dataset.spacing = self.spacing
+        ret = self.dataset.get_sample()
+        self.counter += 1
+        return ret
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
+
+    def get_dataloader(self, batch_size):
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=False,  # can't shuffle IterableDataset
+        )
