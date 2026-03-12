@@ -108,7 +108,6 @@ class NCPUTrainer(BaseTrainer):
         inp, out = batch
 
         norm_mean = torch.round((inp/clip_max).max()) # Piotr: this is not the best, it assumes that we pass max value in input 
-        print((inp / clip_max).max() , norm_mean, torch.floor(norm_mean / 2))
         inp = inp / clip_max - torch.floor(norm_mean / 2)
         out = out / clip_max - torch.floor(norm_mean / 2)
 
