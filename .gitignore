@@ -5,3 +5,5 @@ checkpoints/
 training_history/
 .vscode
 runs
+CLAUDE.md
+docs/
