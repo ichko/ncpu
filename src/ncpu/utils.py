@@ -251,16 +251,18 @@ def sequence_batch_to_html_gifs(
         return_html=return_html,
     )
 
-
-def add_gaussian_noise(img, mean=1.0, std=1.0, min_image = 0, max_image = 255):
+def add_gaussian_noise(img, mean=0.0, std=1.0):
+    img_max_int = torch.round(img.max()).int()
+    img_min_int = torch.round(img.min()).int()
     if isinstance(img, torch.Tensor):
         noise = torch.randn_like(img) * std + mean
         noisy = img + noise
-        return torch.clamp(noisy, min_image, max_image)
+        noisy = torch.clip(noisy, img_min_int, img_max_int)
+        return noisy
     elif isinstance(img, np.ndarray):
         noise = np.random.normal(mean, std, img.shape).astype(img.dtype)
         noisy = img + noise
-        return np.clip(noisy, min_image, max_image).astype(img.dtype)
+        return np.clip(noisy, img_min_int, img_max_int).astype(img.dtype)
     else:
         raise TypeError("Input must be torch.Tensor or np.ndarray")
 
