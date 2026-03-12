@@ -2,6 +2,7 @@ from typing import Optional
 
 import mediapy as media
 import numpy as np
+import panel as pn
 import torch
 from IPython.display import display
 from matplotlib import pyplot as plt
@@ -9,17 +10,18 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from ncpu.base_trainer import BaseTrainer
+from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.utils import (
     add_gaussian_noise,
-    meshgrid_xy,
     print_tensor,
     sequence_batch_to_html_gifs,
+    tensor_to_video_pane,
 )
 
 
 class NCPUTrainer(BaseTrainer):
-    _exclude_from_pickle = {"dataloader", "ds", "dataset_iter"}
+    _exclude_from_pickle = {"dataloader", "ds", "dataset_iter", "optim"}
 
     def __init__(
         self,
@@ -27,9 +29,18 @@ class NCPUTrainer(BaseTrainer):
         dataloader: DataLoader,
         lr: float,
         gaussian_noise: float,
+        grad_clip: Optional[float] = 1.0,
         stop_loss: Optional[float] = None,
+        checkpoint_pattern: Optional[str] = None,
+        loss_fn=output_masked_rollout_loss,
     ):
-        super().__init__()
+        super().__init__(
+            **(
+                {}
+                if checkpoint_pattern is None
+                else {"checkpoint_pattern": checkpoint_pattern}
+            )
+        )
         self.nca = nca
         self.to(nca.device)
         self.dataloader = dataloader
@@ -38,10 +49,17 @@ class NCPUTrainer(BaseTrainer):
         self.gaussian_noise = gaussian_noise
         self.stop_loss = stop_loss
         self.lr = lr
+        self.grad_clip = grad_clip
+        self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
 
         left_mask, right_mask = self.ds.get_io_mask()
         self.inp_mask = torch.tensor(left_mask).to(self.nca.device)
         self.out_mask = torch.tensor(right_mask).to(self.nca.device)
+        # binary float mask: 1.0 at output circle pixels, 0.0 elsewhere
+        self.out_mask_binary = (self.out_mask > 128).float()
+        # per-bit masks: (n_bits, H, W)
+        self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
+        self.loss_fn = loss_fn
 
     def sanity_check(self):
         print("Sanity check...")
@@ -72,14 +90,12 @@ class NCPUTrainer(BaseTrainer):
         bs = inp.shape[0]
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
         first_state = first_state.to(self.nca.device)
-        first_state[:, 0] = inp  # implant in the first channel
-        xx, yy = meshgrid_xy(self.ds.H, self.ds.W, device=self.device)
-        first_state[:, -2] = xx
-        first_state[:, -1] = yy
+        first_state[:, 0] = inp  # writable output channel
+        # read-only input memory (kept fixed via read_only_dims)
+        first_state[:, 1] = inp
         return first_state
 
     def optim_step(self, steps):
-        optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
         batch = next(self.dataset_iter)
 
         inp, out = batch
@@ -101,37 +117,36 @@ class NCPUTrainer(BaseTrainer):
 
         rollout = self.nca.forward(first_state, steps=forward_steps)
         nca_out = rollout[:, -1, 0]
+        loss = self.loss_fn(rollout, out, mask=self.out_mask_binary)
 
-        # white_mask = (out > 0.5).float()
-        # black_mask = 1 - white_mask
-
-        # batch_loss = F.mse_loss(nca_out, out, reduction="none")
-        # white_loss = batch_loss * white_mask
-        # black_loss = batch_loss * black_mask
-
-        # masks_sum = white_mask.sum() + black_mask.sum()
-        # white_weight = black_mask.sum() / masks_sum
-        # black_weight = white_mask.sum() / masks_sum
-
-        # loss = (white_loss * white_weight + black_loss * black_weight).mean()
-
-        # loss = F.mse_loss(nca_out * self.output_mask, out * self.output_mask)
-
-        # loss = F.mse_loss(nca_out, out)
-
-        N = min(5, rollout.shape[1])
-        nca_outs = rollout[:, -N:, 0]
-        out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
-        loss = F.mse_loss(nca_outs, out_rep)
+        # num_valid_bits: mean correct bits per sample (out of n_bits)
+        with torch.no_grad():
+            bm = self.bit_masks  # (n_bits, H, W)
+            bm_sum = bm.sum(dim=(-1, -2))  # (n_bits,)
+            # mean activation per bit circle: (B, n_bits)
+            nca_bit = (nca_out.unsqueeze(1) * bm.unsqueeze(0)).sum(
+                dim=(-1, -2)
+            ) / bm_sum
+            tgt_bit = (out.unsqueeze(1) * bm.unsqueeze(0)).sum(dim=(-1, -2)) / bm_sum
+            num_valid_bits = (
+                ((nca_bit > 0) == (tgt_bit > 0)).float().sum(dim=1).mean().item()
+            )
 
         if torch.is_grad_enabled():
             self.learning_step += 1
-            optim.zero_grad()
+            self.optim.zero_grad()
             loss.backward()
-            optim.step()
+            grad_norm = (
+                torch.nn.utils.clip_grad_norm_(self.nca.parameters(), self.grad_clip)
+                if self.grad_clip is not None
+                else None
+            )
+            self.optim.step()
 
             self.log_metrics(
                 loss=loss.item(),
+                grad_norm=grad_norm.item() if grad_norm is not None else None,
+                num_valid_bits=num_valid_bits,
                 # white_loss=white_loss.sum().item(),
                 # black_loss=black_loss.sum().item(),
             )
@@ -141,10 +156,11 @@ class NCPUTrainer(BaseTrainer):
 
         info = {
             "loss": loss.item(),
+            "num_valid_bits": num_valid_bits,
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
-            "rollout": rollout,
+            "rollout": rollout.detach().cpu(),
         }
 
         return info
@@ -179,62 +195,7 @@ class NCPUTrainer(BaseTrainer):
             vmin=-1,
             vmax=1,
         )
-        sequence_batch_to_html_gifs(
-            rollout, columns=to_show, width=display_size, height=display_size, fps=10
+        vid = tensor_to_video_pane(
+            rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
         )
-
-    # def display_optim_step(self, info):
-    #     fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-    #     ax.scatter(
-    #         range(len(self.history)), [h["loss"] for h in self.history], s=1, alpha=0.9
-    #     )
-    #     ax.set_yscale("log")
-    #     plt.close()
-
-    #     to_show = 5
-    #     steps = info["rollout"].shape[1] - 1
-
-    #     # rollout: (B, T, C, H, W)
-
-    #     rollout = info["rollout"][:to_show, :, : self.config.visual_channels]
-    #     # rollout = impact_frames(rollout, ts=[0, steps], ns=[5, 20])
-    #     # rollout = rollout[:, :, :self.config.visual_channels]
-    #     rollout = rollout[
-    #         :, :, : self.config.visual_channels
-    #     ]  # only show first 3 channels for visualization
-
-    #     stats = f"""
-    #         ```
-    #         optim step: {self.learning_steps}
-    #         frame  : {tensor_summary(info["rollout"])}
-    #         weights: {tensor_summary(self.parameters())}
-    #         grads  : {tensor_summary(info["grads"])}
-    #         mass: {info['final_frame'].sum().item():.4f}
-    #         ```
-    #         """
-
-    #     return pn.Row(
-    #         pn.Column(
-    #             pn.pane.Matplotlib(
-    #                 fig, format="svg", width=500, height=250, tight=True
-    #             ),
-    #             pn.pane.HTML(
-    #                 sequence_batch_to_html_gifs(
-    #                     rollout,
-    #                     columns=8,
-    #                     width=120,
-    #                     height=120,
-    #                     fps=20,
-    #                     return_html=True,
-    #                 )
-    #             ),
-    #             image_row([f[:to_show] for f in info["frames"]], columns=to_show),
-    #             image_row(
-    #                 [f[:to_show] for f in info["noised_frames"]], columns=to_show
-    #             ),
-    #         ),
-    #         pn.Column(
-    #             stats,
-    #             self.display_mass(info),
-    #         ),
-    #     )
+        return pn.Column(vid)

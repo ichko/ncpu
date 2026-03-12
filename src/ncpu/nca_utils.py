@@ -96,6 +96,41 @@ class AliveMasking(nn.Module):
         return delta
 
 
+class BorderMask(nn.Module):
+    """Zeroes the delta on the 1-pixel border so border zero-padding never
+    influences the interior computation."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("mask", None)
+
+    def forward(self, delta):
+        H, W = delta.shape[2], delta.shape[3]
+        if self.mask is None or self.mask.shape[-2:] != (H, W):
+            mask = torch.ones(1, 1, H, W, device=delta.device, dtype=delta.dtype)
+            mask[:, :, 0, :] = 0    # top row
+            mask[:, :, -1, :] = 0   # bottom row
+            mask[:, :, :, 0] = 0    # left col
+            mask[:, :, :, -1] = 0   # right col
+            self.mask = mask
+        return delta * self.mask
+
+
+class StochasticUpdate(nn.Module):
+    def __init__(self, fire_rate):
+        super().__init__()
+        self.fire_rate = fire_rate
+
+    def forward(self, delta):
+        if self.fire_rate >= 1.0:
+            return delta
+        fire_mask = (
+            torch.rand(delta.shape[0], 1, delta.shape[2], delta.shape[3], device=delta.device)
+            < self.fire_rate
+        ).to(delta.dtype)
+        return delta * fire_mask
+
+
 class LazyLearnableInitialState(nn.Module):
     def __init__(self):
         super().__init__()
