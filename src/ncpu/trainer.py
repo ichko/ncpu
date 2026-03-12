@@ -9,9 +9,10 @@ from matplotlib import pyplot as plt
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
+from ncpu.checkpoints import CheckpointTracker
 from ncpu.base_trainer import BaseTrainer
 from ncpu.loss import output_masked_rollout_loss
-from ncpu.nca import NeuralCA
+from ncpu.nca import NeuralCAv2
 from ncpu.utils import (
     add_gaussian_noise,
     print_tensor,
@@ -19,13 +20,15 @@ from ncpu.utils import (
     tensor_to_video_pane,
 )
 
+from typing import Optional, Callable, Sequence, Union
+
 
 class NCPUTrainer(BaseTrainer):
     _exclude_from_pickle = {"dataloader", "ds", "dataset_iter", "optim"}
 
     def __init__(
         self,
-        nca: NeuralCA,
+        nca: NeuralCAv2,
         dataloader: DataLoader,
         lr: float,
         gaussian_noise: float,
@@ -52,6 +55,7 @@ class NCPUTrainer(BaseTrainer):
         self.grad_clip = grad_clip
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
 
+        self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
         left_mask, right_mask = self.ds.get_io_mask()
         self.inp_mask = torch.tensor(left_mask).to(self.nca.device)
         self.out_mask = torch.tensor(right_mask).to(self.nca.device)
@@ -95,27 +99,35 @@ class NCPUTrainer(BaseTrainer):
         first_state[:, 1] = inp
         return first_state
 
-    def optim_step(self, steps):
+    def optim_step(self, steps : Union[int, Sequence[int]], clip_max : int  = 128, clip_min : int = -128, loss : Callable = lambda rollout, target : F.mse_loss(rollout[:, -1, 0], target, reduction="none").mean()):
         batch = next(self.dataset_iter)
-
         inp, out = batch
 
-        inp = inp / 128.0 - 1.0
-        out = out / 128.0 - 1.0
+        norm_mean = torch.round((inp/clip_max).max()) # Piotr: this is not the best, it assumes that we pass max value in input 
+        print((inp / clip_max).max() , norm_mean, torch.floor(norm_mean / 2))
+        inp = inp / clip_max - torch.floor(norm_mean / 2)
+        out = out / clip_max - torch.floor(norm_mean / 2)
 
         if self.gaussian_noise > 0:
-            inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+            inp = add_gaussian_noise(inp, 0, self.gaussian_noise, clip_min, clip_max)
 
         inp = inp.to(self.device)
         out = out.to(self.device)
-
-        first_state = self._implant_input(inp)
 
         forward_steps = steps
         if isinstance(steps, (tuple, list)):
             forward_steps = np.random.randint(steps[0], steps[1])
 
+        first_state = self._implant_input(inp)
         rollout = self.nca.forward(first_state, steps=forward_steps)
+
+        # Piotr: if we are going to change loss, then lets do it in proper way
+        #        so we can document different losses as lambdas/functions/classes 
+        #        no strong feelings which one we should use, but definitelly we should 
+        #        avoid changing trainer if not necessary
+        #        LETS DO NOT WORK AGAINST THE CODE, BUT MAKE THE CODE WORK FOR US 
+        loss = loss(rollout, out)
+
         nca_out = rollout[:, -1, 0]
         loss = self.loss_fn(rollout, out, mask=self.out_mask_binary)
 
@@ -151,9 +163,6 @@ class NCPUTrainer(BaseTrainer):
                 # black_loss=black_loss.sum().item(),
             )
 
-        if hasattr(self.dataloader, "update"):
-            self.dataloader.update((nca_out, out.detach()), loss)
-
         info = {
             "loss": loss.item(),
             "num_valid_bits": num_valid_bits,
@@ -165,7 +174,11 @@ class NCPUTrainer(BaseTrainer):
 
         return info
 
-    def display_optim_step(self, info, display_size=None, to_show=8):
+    def load_checkpoint(self, name : str = "") -> None:
+        path = self.checkpointer.get(name)
+        self.nca.load_state_dict(torch.load(path))
+
+    def display_optim_step(self, info, display_size=64, to_show=8):
         fig, ax = plt.subplots(figsize=(8, 3))
         loss = [h["loss"] for h in self.metrics]
         ax.scatter(range(len(loss)), loss, s=1)
@@ -183,9 +196,8 @@ class NCPUTrainer(BaseTrainer):
         rollout = info["rollout"][:to_show]
         # read_only_channel = rollout[:to_show, -1, -1]
         io = torch.cat([inp, out, nca_out], dim=0)
-        if display_size is None:
-            display_size = inp.shape[1]
 
+        print(f"display size: {(display_size,display_size)}")
         media.show_images(
             io.detach().cpu(),
             columns=to_show,

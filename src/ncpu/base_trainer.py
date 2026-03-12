@@ -6,7 +6,6 @@ import torch.nn as nn
 
 DEFAULT_CHECKPOINT_PATTERN = "checkpoints/nca_{step:06d}.pt"
 
-
 class BaseTrainer(nn.Module):
     def __init__(self, checkpoint_pattern=DEFAULT_CHECKPOINT_PATTERN):
         super().__init__()
@@ -29,6 +28,14 @@ class BaseTrainer(nn.Module):
 
     def _checkpoint_path(self, step):
         return Path(self.checkpoint_pattern.format(step=step))
+    # Piotr: I think having external separate file/checkpoint manager
+    #        is bit cleaner as we can implement checkpoint-only related
+    #        functionalities and cleanly garbage collect checkpoints.
+    #        However I am not replacing it yet.
+    # def save_checkpoint(self, name : str = "", timestamp = True) -> str:
+    #     name = f"{name}"
+    #     path = self.checkpointer.make(custom_string = name, timestamp = timestamp)
+    #     torch.save(self.nca.state_dict(), path)
 
     def save_checkpoint(self):
         path = self._checkpoint_path(self.learning_step)
