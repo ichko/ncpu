@@ -9,10 +9,10 @@ from matplotlib import pyplot as plt
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
-from ncpu.checkpoints import CheckpointTracker
 from ncpu.base_trainer import BaseTrainer
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCAv2
+from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.utils import (
     add_gaussian_noise,
     print_tensor,
@@ -35,9 +35,9 @@ class NCPUTrainer(BaseTrainer):
         grad_clip: Optional[float] = 1.0,
         stop_loss: Optional[float] = None,
         checkpoint_pattern: Optional[str] = None,
-        loss_fn : Callable = output_masked_rollout_loss,
-        clip_max : int = 128, 
-        clip_min : int = -128
+        loss_fn=output_masked_rollout_loss,
+        input_implant_type="first",
+        normalize_fn=normalize_neg1_to_1,
     ):
         super().__init__(
             **(
@@ -68,6 +68,8 @@ class NCPUTrainer(BaseTrainer):
         # per-bit masks: (n_bits, H, W)
         self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
         self.loss_fn = loss_fn
+        self.input_implant_type = input_implant_type
+        self.normalize_fn = normalize_fn
 
     def sanity_check(self):
         print("Sanity check...")
@@ -96,23 +98,27 @@ class NCPUTrainer(BaseTrainer):
 
     def _implant_input(self, inp):
         bs = inp.shape[0]
-        first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
+        if self.input_implant_type == "all":
+            first_state = (
+                inp.unsqueeze(1)
+                .expand(bs, self.nca.channels, self.ds.H, self.ds.W)
+                .clone()
+            )
+        else:
+            first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
+            first_state[:, 0] = inp
         first_state = first_state.to(self.nca.device)
-        first_state[:, 0] = inp  # writable output channel
-        # read-only input memory (kept fixed via read_only_dims)
-        first_state[:, 1] = inp
         return first_state
 
-    def optim_step(self, steps : Union[int, Sequence[int]]):
+    def optim_step(self, steps, return_rollout=False):
         batch = next(self.dataset_iter)
         inp, out = batch
 
-        norm_mean = torch.round((inp/clip_max).max()) # Piotr: this is not the best, it assumes that we pass max value in input 
-        inp = inp / clip_max - torch.floor(norm_mean / 2)
-        out = out / clip_max - torch.floor(norm_mean / 2)
+        inp = self.normalize_fn(inp)
+        out = self.normalize_fn(out)
 
         if self.gaussian_noise > 0:
-            inp = add_gaussian_noise(inp, 0, self.gaussian_noise, clip_min, clip_max)
+            inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
 
         inp = inp.to(self.device)
         out = out.to(self.device)
@@ -125,12 +131,13 @@ class NCPUTrainer(BaseTrainer):
         rollout = self.nca.forward(first_state, steps=forward_steps)
 
         nca_out = rollout[:, -1, 0]
+
         # Piotr: if we are going to change loss, then lets do it in proper way
         #        so we can document different losses as lambdas/functions/classes 
         #        no strong feelings which one we should use, but definitelly we should 
         #        avoid changing trainer if not necessary
-        #        LETS DO NOT WORK AGAINST THE CODE, BUT MAKE THE CODE WORK FOR US 
-        loss = self.loss_fn(rollout, out, mask=self.out_mask_binary)
+        #        LETS DO NOT WORK AGAINST THE CODE, BUT MAKE THE CODE WORK FOR US
+        loss = self.loss_fn(rollout, out, inp=inp, mask=self.out_mask_binary)
 
         # num_valid_bits: mean correct bits per sample (out of n_bits)
         with torch.no_grad():
@@ -160,8 +167,6 @@ class NCPUTrainer(BaseTrainer):
                 loss=loss.item(),
                 grad_norm=grad_norm.item() if grad_norm is not None else None,
                 num_valid_bits=num_valid_bits,
-                # white_loss=white_loss.sum().item(),
-                # black_loss=black_loss.sum().item(),
             )
 
         info = {
@@ -170,14 +175,10 @@ class NCPUTrainer(BaseTrainer):
             "inp": inp,
             "out": out,
             "nca_out": nca_out,
-            "rollout": rollout.detach().cpu(),
+            "rollout": rollout.detach().cpu() if return_rollout else None,
         }
 
         return info
-
-    def load_checkpoint(self, name : str = "") -> None:
-        path = self.checkpointer.get(name)
-        self.nca.load_state_dict(torch.load(path))
 
     def display_optim_step(self, info, display_size=64, to_show=8):
         fig, ax = plt.subplots(figsize=(8, 3))
