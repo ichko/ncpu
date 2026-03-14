@@ -47,8 +47,6 @@ class NCPUTrainer(BaseTrainer):
             )
         )
         self.nca = nca
-        self.clip_max = clip_max
-        self.clip_min = clip_min
         self.to(nca.device)
         self.dataloader = dataloader
         self.ds = dataloader.dataset
@@ -195,8 +193,11 @@ class NCPUTrainer(BaseTrainer):
         inp = info["inp"][:to_show]
         out = info["out"][:to_show]
         nca_out = info["nca_out"][:to_show]
+<<<<<<< HEAD
         rollout = info["rollout"][:to_show]
         print(f"rollout.shape: {rollout.shape} to_show: {to_show}")
+=======
+>>>>>>> main
         # read_only_channel = rollout[:to_show, -1, -1]
         io = torch.cat([inp, out, nca_out], dim=0)
 
@@ -211,6 +212,7 @@ class NCPUTrainer(BaseTrainer):
             vmax=1,
         )
 
+<<<<<<< HEAD
         vid = tensor_to_video_pane(
             rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
         )
@@ -219,3 +221,12 @@ class NCPUTrainer(BaseTrainer):
         # sequence_batch_to_html_gifs(
         #     rollout, columns=to_show, width=display_size, height=display_size, fps=10, channels=[chn for chn in range(rollout.shape[2])]
         # )
+=======
+        rollout = info["rollout"]
+        if rollout:
+            rollout = rollout[:to_show]
+            vid = tensor_to_video_pane(
+                rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
+            )
+            return pn.Column(vid)
+>>>>>>> main
