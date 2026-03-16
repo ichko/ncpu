@@ -24,7 +24,7 @@ from typing import Optional, Callable, Sequence, Union
 
 
 class NCPUTrainer(BaseTrainer):
-    _exclude_from_pickle = {"dataloader", "ds", "dataset_iter", "optim"}
+    _exclude_from_pickle = {"dataloader", "ds", "dataset_iter", "optim", "pool"}
 
     def __init__(
         self,
@@ -36,7 +36,7 @@ class NCPUTrainer(BaseTrainer):
         stop_loss: Optional[float] = None,
         checkpoint_pattern: Optional[str] = None,
         loss_fn=output_masked_rollout_loss,
-        input_implant_type="first",
+        input_dims=(1,),
         normalize_fn=normalize_neg1_to_1,
     ):
         super().__init__(
@@ -63,11 +63,13 @@ class NCPUTrainer(BaseTrainer):
         self.out_mask = torch.tensor(right_mask).to(self.nca.device)
         # binary float mask: 1.0 at output circle pixels, 0.0 elsewhere
         self.out_mask_binary = (self.out_mask > 128).float()
+        self.inp_mask_binary = (self.inp_mask > 128).float()
         # per-bit masks: (n_bits, H, W)
         self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
         self.loss_fn = loss_fn
-        self.input_implant_type = input_implant_type
+        self.input_dims = list(input_dims)
         self.normalize_fn = normalize_fn
+        self.pool = None  # set externally to enable state-pool training
 
     def sanity_check(self):
         print("Sanity check...")
@@ -96,40 +98,44 @@ class NCPUTrainer(BaseTrainer):
 
     def _implant_input(self, inp):
         bs = inp.shape[0]
-        if self.input_implant_type == "all":
-            first_state = (
-                inp.unsqueeze(1)
-                .expand(bs, self.nca.channels, self.ds.H, self.ds.W)
-                .clone()
-            )
-        else:
-            first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
-            first_state[:, 0] = inp
+        first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
+        for dim in self.input_dims:
+            first_state[:, dim] = inp
         first_state = first_state.to(self.nca.device)
         return first_state
 
     def optim_step(self, steps, return_rollout=False):
-        batch = next(self.dataset_iter)
-        inp, out = batch
-
-        inp = self.normalize_fn(inp)
-        out = self.normalize_fn(out)
-
-        if self.gaussian_noise > 0:
-            inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
-
-        inp = inp.to(self.device)
-        out = out.to(self.device)
-
         forward_steps = steps
         if isinstance(steps, (tuple, list)):
             forward_steps = np.random.randint(steps[0], steps[1])
 
-        first_state = self._implant_input(inp)
+        if self.pool is not None:
+            inp, out, first_state, pool_indices = self.pool.sample(self.device)
+        else:
+            batch = next(self.dataset_iter)
+            inp, out = batch
+            inp = self.normalize_fn(inp)
+            out = self.normalize_fn(out)
+            if self.gaussian_noise > 0:
+                inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+            inp = inp.to(self.device)
+            out = out.to(self.device)
+            first_state = self._implant_input(inp)
+            pool_indices = None
+
         rollout = self.nca.forward(first_state, steps=forward_steps)
 
+        if self.pool is not None:
+            self.pool.update(pool_indices, rollout[:, -1].detach())
+
         nca_out = rollout[:, -1, 0]
-        loss = self.loss_fn(rollout, out, inp=inp, mask=self.out_mask_binary)
+        loss = self.loss_fn(
+            rollout,
+            out,
+            inp=inp,
+            mask=self.out_mask_binary,
+            inp_mask=self.inp_mask_binary,
+        )
 
         # num_valid_bits: mean correct bits per sample (out of n_bits)
         with torch.no_grad():

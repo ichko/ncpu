@@ -148,6 +148,52 @@ class LazyLearnableInitialState(nn.Module):
         return x
 
 
+class CompassChannels(nn.Module):
+    """
+    Stamps a static compass field into two channels of the NCA initial state.
+    Each pixel contains a unit vector pointing toward the nearest target circle.
+
+    Args:
+        H, W:           grid dimensions
+        circle_centers: list of (cy, cx) pairs (row, col order)
+        channel_x:      channel index for the x (horizontal) component
+        channel_y:      channel index for the y (vertical) component
+    """
+
+    def __init__(self, H: int, W: int, circle_centers, channel_x: int = 2, channel_y: int = 3):
+        super().__init__()
+        self.channel_x = channel_x
+        self.channel_y = channel_y
+        compass = self._compute(H, W, circle_centers)  # (2, H, W)
+        self.register_buffer("compass", compass)
+
+    @staticmethod
+    def _compute(H, W, circle_centers):
+        ys = torch.arange(H).float()
+        xs = torch.arange(W).float()
+        grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")  # (H, W)
+
+        centers = torch.tensor(circle_centers).float()  # (N, 2)
+        dy = centers[:, 0].view(-1, 1, 1) - grid_y.unsqueeze(0)  # (N, H, W)
+        dx = centers[:, 1].view(-1, 1, 1) - grid_x.unsqueeze(0)  # (N, H, W)
+        dist = (dx ** 2 + dy ** 2).sqrt().clamp(min=1e-6)
+
+        nearest = dist.argmin(dim=0)  # (H, W)
+        hi = torch.arange(H).view(-1, 1).expand(H, W)
+        wi = torch.arange(W).view(1, -1).expand(H, W)
+
+        nd  = dist[nearest, hi, wi]
+        ndx = dx[nearest, hi, wi] / nd
+        ndy = dy[nearest, hi, wi] / nd
+        return torch.stack([ndx, ndy])  # (2, H, W)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """Stamp compass into state (B, C, H, W) and return it."""
+        state[:, self.channel_x] = self.compass[0]
+        state[:, self.channel_y] = self.compass[1]
+        return state
+
+
 class ReadOnlyChannels(nn.Module):
     def __init__(
         self, num_channels, read_only_dims

@@ -1,5 +1,5 @@
 import torch
-from torch.nn import functional as F
+import torch.nn.functional as F
 
 
 def loss_mse_rollout(rollout, out, **kwargs):
@@ -36,6 +36,89 @@ def output_masked_rollout_loss(rollout, out, mask, **kwargs):
     nca_outs = rollout[:, 1:, 0]
     out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
     return ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)
+
+
+def _dilate_mask(mask, radius):
+    """Binary dilation of a (H, W) mask via max_pool2d."""
+    k = 2 * radius + 1
+    return (
+        F.max_pool2d(
+            mask.unsqueeze(0).unsqueeze(0), kernel_size=k, stride=1, padding=radius
+        )
+        .squeeze(0)
+        .squeeze(0)
+        .clamp(0, 1)
+    )
+
+
+def io_rollout_background_last_loss(
+    rollout, out, mask, inp_mask, inp, dilation_radius=2, **kwargs
+):
+    """
+    - Input + output circles: supervised on every rollout step.
+    - Dilated halo around io circles: supervised on last step only.
+
+    Args:
+        mask:             (H, W) — output circle pixels
+        inp_mask:         (H, W) — input circle pixels
+        inp:              (B, H, W) — normalized input screen
+        dilation_radius:  pixels to dilate the io mask for the background halo
+    """
+    B = rollout.shape[0]
+    T = rollout.shape[1] - 1
+    nca_outs = rollout[:, 1:, 0]  # (B, T, H, W)
+    last = rollout[:, -1, 0]  # (B, H, W)
+
+    io_mask = (mask + inp_mask).clamp(0, 1)
+    halo_mask = (
+        _dilate_mask(io_mask, dilation_radius) - io_mask
+    )  # ring around io, not io itself
+
+    # target: input pixels from inp, output pixels from out
+    target = out * mask + inp * inp_mask  # (B, H, W)
+
+    # io loss over all steps
+    target_rep = target.unsqueeze(1).expand(B, T, *out.shape[1:])
+    io_loss = ((nca_outs - target_rep) ** 2 * io_mask).sum() / (io_mask.sum() * B * T)
+
+    # halo loss on last frame only
+    halo_loss = ((last - target) ** 2 * halo_mask).sum() / (halo_mask.sum() * B)
+
+    return io_loss
+
+
+def output_rollout_input_last_loss(rollout, out, mask, inp_mask, inp, **kwargs):
+    """
+    - Output circle pixels: supervised on every rollout step.
+    - Input circle pixels: supervised on last frame only.
+    """
+    B = rollout.shape[0]
+    T = rollout.shape[1] - 1
+    nca_outs = rollout[:, 1:, 0]  # (B, T, H, W)
+    last = rollout[:, -1, 0]      # (B, H, W)
+
+    out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
+    out_loss = ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)
+    inp_loss = ((last - inp) ** 2 * inp_mask).sum() / (inp_mask.sum() * B)
+
+    return out_loss + inp_loss
+
+
+def output_halo_rollout_loss(rollout, out, mask, dilation_radius=2, **kwargs):
+    """MSE over all rollout steps at output circles + a small dilated halo."""
+    B = rollout.shape[0]
+    T = rollout.shape[1] - 1
+    nca_outs = rollout[:, 1:, 0]
+    out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
+    halo_mask = _dilate_mask(mask, dilation_radius)
+    return ((nca_outs - out_rep) ** 2 * halo_mask).sum() / (halo_mask.sum() * B * T)
+
+
+def output_masked_last_loss(rollout, out, mask, **kwargs):
+    """MSE on the last rollout frame, restricted to output-circle pixels."""
+    B = rollout.shape[0]
+    last = rollout[:, -1, 0]
+    return ((last - out) ** 2 * mask).sum() / (mask.sum() * B)
 
 
 def fullscreen_rollout_loss(rollout, out, **kwargs):

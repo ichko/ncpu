@@ -25,9 +25,14 @@ EPS = 1e-8
 
 def git_info():
     import subprocess
+
     try:
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-        dirty = subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip()
+        dirty = subprocess.check_output(
+            ["git", "status", "--porcelain"], text=True
+        ).strip()
         return {"commit": commit, "dirty": bool(dirty)}
     except Exception:
         return {"commit": None, "dirty": None}
@@ -97,6 +102,7 @@ def make_sobel_kernels(size: int):
     identity[size // 2, size // 2] = 1.0
 
     return identity, sobel_x, sobel_y
+
 
 EPS = 1e-8
 
@@ -252,7 +258,7 @@ def sequence_batch_to_html_gifs(
     )
 
 
-def add_gaussian_noise(img, mean=1.0, std=1.0, min_image = 0, max_image = 255):
+def add_gaussian_noise(img, mean=1.0, std=1.0, min_image=0, max_image=255):
     if isinstance(img, torch.Tensor):
         noise = torch.randn_like(img) * std + mean
         noisy = img + noise
@@ -264,129 +270,121 @@ def add_gaussian_noise(img, mean=1.0, std=1.0, min_image = 0, max_image = 255):
     else:
         raise TypeError("Input must be torch.Tensor or np.ndarray")
 
+
 def make_io_screen(H, W, r, spacing, left_input, right_input):
-    screen = np.ones((H, W), dtype=np.uint8) * 128
+    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
     among_spacing, side_spacing = spacing
+    among_spacing = int(among_spacing)
+    side_spacing = int(side_spacing)
+    r = int(r)
+
+    n_left = len(left_input)
+    n_rows = int(np.ceil(n_left / 2))
+
+    v_size = n_rows * r * 2 + among_spacing * (n_rows - 1)
+    top_margin = (H - v_size) // 2
 
     for i, bit in enumerate(left_input):
-        x = side_spacing
-        v_size = len(left_input) * r * 2 + among_spacing * (len(left_input) - 1)
-        top_margin = (H - v_size) // 2
-        y = top_margin + r + i * (among_spacing + r * 2)
-        # cv2.circle(screen, (x, y), r, 256, -1 if bit else 1)
-        cv2.circle(screen, (x, y), r, 256 if bit else 0, -1)
+        col = i // n_rows  # 0 or 1
+        row = i % n_rows
 
+        x = side_spacing + col * (2 * r + among_spacing)
+        y = top_margin + r + row * (2 * r + among_spacing)
+
+        cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
+
+    # among_spacing = r + r // 4
     for i, bit in enumerate(right_input):
         x = W - side_spacing
         v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
         top_margin = (H - v_size) // 2
         y = top_margin + r + i * (among_spacing + r * 2)
-        cv2.circle(screen, (x, y), r, 256 if bit else 0, -1)
+        cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
 
     return screen
 
-# def make_io_screen(H, W, r, spacing, left_input, right_input):
-    # screen = np.full((H, W), fill_value=128, dtype=np.uint8)
-    # among_spacing, side_spacing = spacing
-    # among_spacing = int(among_spacing)
-    # side_spacing = int(side_spacing)
-    # r = int(r)
 
-    # n_left = len(left_input)
-    # n_rows = int(np.ceil(n_left / 2))
+def make_io_screen_cols1(H, W, r, spacing, left_input, right_input):
+    """Like make_io_screen but inputs and outputs are each a single column."""
+    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
+    among_spacing, side_spacing = spacing
+    among_spacing = int(among_spacing)
+    side_spacing = int(side_spacing)
+    r = int(r)
 
-    # v_size = n_rows * r * 2 + among_spacing * (n_rows - 1)
-    # top_margin = (H - v_size) // 2
+    for bits, x in [
+        (left_input,  side_spacing),
+        (right_input, W - side_spacing),
+    ]:
+        n = len(bits)
+        v_size = n * r * 2 + among_spacing * (n - 1)
+        top_margin = (H - v_size) // 2
+        for i, bit in enumerate(bits):
+            y = top_margin + r + i * (2 * r + among_spacing)
+            cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
 
-    # for i, bit in enumerate(left_input):
-    #     col = i // n_rows  # 0 or 1
-    #     row = i % n_rows
-
-    #     x = side_spacing + col * (2 * r + among_spacing)
-    #     y = top_margin + r + row * (2 * r + among_spacing)
-
-    #     cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
-
-    # # among_spacing = r + r // 4
-    # for i, bit in enumerate(right_input):
-    #     x = W - side_spacing
-    #     v_size = len(right_input) * r * 2 + among_spacing * (len(right_input) - 1)
-    #     top_margin = (H - v_size) // 2
-    #     y = top_margin + r + i * (among_spacing + r * 2)
-    #     cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
-
-    # return screen
+    return screen
 
 
-def make_alu_screen(H, W, r, side, among,
-                    a=None, b=None, carry_in=None, opcode=None,
-                    result=None, flags=None):
-    """Draw an ALU input/output screen.
+def make_alu_screen(
+    H,
+    W,
+    r,
+    a=None,
+    b=None,
+    carry_in=None,
+    opcode=None,
+    result=None,
+    carry_out=None,
+):
+    """Draw an ALU input/output screen with concentric circular layout.
 
-    Layout (left→right):
-        col 0  opcode           (3 bits, vertically centered)
-        col 1  A operand        (8 bits, full height)
-        col 2  B operand        (8 bits, full height)
-        col 3  carry-in         (1 bit,  top-aligned with A/B)
-        [4r gap]
-        col 4  result           (8 bits, full height)
-        col 5  flags            (4 bits, vertically centered)
-            flags order: carry-out, overflow, zero, negative
+    Layout:
+        Outer ring (20): A[0-7], B[0-7], carry_in, opcode[0-2]
+        Middle ring (8): result bits
+        Center      (1): carry_out
 
     Args:
-        H, W   : grid size
-        r      : circle radius
-        side   : left/right margin (px)
-        among  : spacing between circle edges within a column
-        a, b   : list of 8 ints (bits), or None
-        carry_in: list of 1 int, or None
-        opcode : list of 3 ints, or None
-        result : list of 8 ints, or None
-        flags  : list of 4 ints [carry_out, overflow, zero, negative], or None
+        H, W      : grid size
+        r         : circle radius
+        a, b      : list of 8 ints (bits), or None
+        carry_in  : list of 1 int, or None
+        opcode    : list of 3 ints, or None
+        result    : list of 8 ints, or None
+        carry_out : list of 1 int, or None
     """
     screen = np.full((H, W), 128, dtype=np.uint8)
-    step = 2 * r + among  # center-to-center distance between consecutive bits
+    cy0, cx0 = H // 2, W // 2
+    outer_r  = min(H, W) // 2 - r - 6
+    result_r = min(H, W) // 4 - 2
 
-    # vertical origin for 8-bit columns
-    col8_h = 8 * 2 * r + 7 * among
-    top8 = (H - col8_h) // 2
+    def ring_centers(n, ring_radius):
+        return [
+            (
+                int(round(cy0 + ring_radius * np.sin(2 * np.pi * i / n - np.pi / 2))),
+                int(round(cx0 + ring_radius * np.cos(2 * np.pi * i / n - np.pi / 2))),
+            )
+            for i in range(n)
+        ]
 
-    def col_x(col_idx):
-        return side + col_idx * step
-
-    def draw_col(bits, cx, top_y):
-        for i, bit in enumerate(bits):
-            cy = top_y + r + i * step
+    def draw_group(bits, centers):
+        for bit, (cy, cx) in zip(bits, centers):
             cv2.circle(screen, (cx, cy), r, 255 if bit else 0, -1)
 
-    # col 0: opcode (3 bits, vertically centered)
-    if opcode is not None:
-        op_h = 3 * 2 * r + 2 * among
-        op_top = (H - op_h) // 2
-        draw_col(opcode, col_x(0), op_top)
-    # col 1: A
-    if a is not None:
-        draw_col(a, col_x(1), top8)
-    # col 2: B
-    if b is not None:
-        draw_col(b, col_x(2), top8)
-    # col 3: carry-in (top-aligned with A/B)
-    if carry_in is not None:
-        cy = top8 + r
-        cv2.circle(screen, (col_x(3), cy), r, 255 if carry_in[0] else 0, -1)
+    # outer ring: A[0-7]=0-7, B[0-7]=8-15, cin=16, opcode[0-2]=17-19
+    outer = ring_centers(20, outer_r)
+    if a        is not None: draw_group(a,        outer[0:8])
+    if b        is not None: draw_group(b,        outer[8:16])
+    if carry_in is not None: draw_group(carry_in, outer[16:17])
+    if opcode   is not None: draw_group(opcode,   outer[17:20])
 
-    # gap = 4r edge-to-edge between col 3 and result
-    result_cx = col_x(3) + r + 4 * r + r  # = col_x(3) + 6r
-    flags_cx  = result_cx + step
-
-    # result: 8 bits, full height
+    # middle ring: result bits
     if result is not None:
-        draw_col(result, result_cx, top8)
-    # flags: 4 bits, vertically centered
-    if flags is not None:
-        flags_h = 4 * 2 * r + 3 * among
-        flags_top = (H - flags_h) // 2
-        draw_col(flags, flags_cx, flags_top)
+        draw_group(result, ring_centers(8, result_r))
+
+    # center: carry_out
+    if carry_out is not None:
+        cv2.circle(screen, (cx0, cy0), r, 255 if carry_out[0] else 0, -1)
 
     return screen
 
@@ -403,6 +401,7 @@ def conv_stack(layer_sizes, activation, **kwargs):
     layers.pop()  # remove last activation
 
     return layers
+
 
 
 def meshgrid_xy(H: int, W: int, device=None, dtype=torch.float32):
@@ -517,8 +516,17 @@ def freeze_frame(frames, timesteps, repeat):
     return torch.cat(chunks, dim=0)
 
 
-def save_grid_image(path, rows, nrow=8, padding=2, vmin=-1, vmax=1, cmap="viridis",
-                    row_vmin=None, row_vmax=None):
+def save_grid_image(
+    path,
+    rows,
+    nrow=8,
+    padding=2,
+    vmin=-1,
+    vmax=1,
+    cmap="viridis",
+    row_vmin=None,
+    row_vmax=None,
+):
     """Save a multi-row grid of images as a PNG without any interpolation.
 
     Args:
@@ -531,13 +539,17 @@ def save_grid_image(path, rows, nrow=8, padding=2, vmin=-1, vmax=1, cmap="viridi
     """
     row_grids = []
     for i, batch in enumerate(rows):
-        rv_min = (row_vmin[i] if row_vmin and row_vmin[i] is not None else vmin)
-        rv_max = (row_vmax[i] if row_vmax and row_vmax[i] is not None else vmax)
+        rv_min = row_vmin[i] if row_vmin and row_vmin[i] is not None else vmin
+        rv_max = row_vmax[i] if row_vmax and row_vmax[i] is not None else vmax
         n = min(nrow, batch.shape[0])
         rgb = torch.from_numpy(
             media.to_rgb(batch[:n].numpy(), vmin=rv_min, vmax=rv_max, cmap=cmap)
-        ).unsqueeze(1)  # (n, 1, H, W, 3)
-        row_grids.append(make_grid(rgb, nrow=n, padding=padding).squeeze(0))  # (H, W, 3)
+        ).unsqueeze(
+            1
+        )  # (n, 1, H, W, 3)
+        row_grids.append(
+            make_grid(rgb, nrow=n, padding=padding).squeeze(0)
+        )  # (H, W, 3)
 
     # Each row has `padding` on all sides; strip top padding from rows after the first
     # to avoid double-thickness gaps between rows.
