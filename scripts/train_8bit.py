@@ -28,12 +28,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mediapy as media
 from tqdm import tqdm
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from ncpu.dataset import NCPUDataset, sample_8bit_adder
-from ncpu.loss import fullscreen_rollout_loss
+from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
 from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
@@ -41,11 +41,14 @@ from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
 
 # ── Media helpers ─────────────────────────────────────────────────────────────
 
+
 def make_rollout_gif(rollout):
     B, T, C, H, W = rollout.shape
     gif_b = min(B, 4)
     gif_t = rollout[:gif_b, ::2]
-    frames = gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
+    frames = (
+        gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
+    )
     frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
     grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
     return freeze_frame(grid, timesteps=[0, -1], repeat=8)
@@ -56,8 +59,12 @@ def save_snapshot_latest(run_dir, inp, out, nca_out):
     diff = (nca_out[:snap_b] - out[:snap_b]).abs()
     save_grid_image(
         run_dir / "snapshot_latest.png",
-        [inp[:snap_b].cpu(), out[:snap_b].cpu(),
-         nca_out[:snap_b].detach().cpu(), diff.detach().cpu()],
+        [
+            inp[:snap_b].cpu(),
+            out[:snap_b].cpu(),
+            nca_out[:snap_b].detach().cpu(),
+            diff.detach().cpu(),
+        ],
         row_vmin=[None, None, None, 0],
         row_vmax=[None, None, None, 2],
     )
@@ -65,7 +72,9 @@ def save_snapshot_latest(run_dir, inp, out, nca_out):
 
 def save_rollout_latest(run_dir, rollout):
     grid = make_rollout_gif(rollout)
-    media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
+    media.write_video(
+        str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif"
+    )
 
 
 def save_media(step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, rollout):
@@ -76,8 +85,12 @@ def save_media(step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, ro
     snap_path = snapshots_dir / f"snapshot_{step:07d}.png"
     save_grid_image(
         snap_path,
-        [inp[:snap_b].cpu(), out[:snap_b].cpu(),
-         nca_out[:snap_b].detach().cpu(), diff.detach().cpu()],
+        [
+            inp[:snap_b].cpu(),
+            out[:snap_b].cpu(),
+            nca_out[:snap_b].detach().cpu(),
+            diff.detach().cpu(),
+        ],
         row_vmin=[None, None, None, 0],
         row_vmax=[None, None, None, 2],
     )
@@ -101,6 +114,17 @@ DEVICE = "cuda"
 TOTAL_STEPS = 200_000
 PLOT_EVERY = 500
 MEDIA_EVERY = 5000
+_parser = ArgumentParser()
+_parser.add_argument("--resume", type=str, default=None, help="Run name to resume, or 'last'")
+_args = _parser.parse_args()
+
+if _args.resume == "last":
+    _runs = sorted([d.name for d in Path("runs").iterdir() if (d / "checkpoints" / "trainer.pkl").exists()])
+    if not _runs:
+        raise RuntimeError("No resumable runs found in runs/")
+    RESUME_RUN = _runs[-1]
+else:
+    RESUME_RUN = _args.resume
 
 ds_config = Namespace(
     W=80,
@@ -117,7 +141,7 @@ nca_config = Namespace(
     fire_rate=0.5,
     alive_threshold=0,
     zero_initialization=False,
-    kernel_size=5,
+    kernel_size=7,
     num_perception_kernels=3,
     read_only_dims=[],
     padding_type="zeros",
@@ -133,63 +157,86 @@ optim_config = Namespace(
 )
 
 # ── Run directory ─────────────────────────────────────────────────────────────
-run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_dir = Path("runs") / run_name
-run_dir.mkdir(parents=True, exist_ok=True)
+if RESUME_RUN is not None:
+    run_name = RESUME_RUN
+    run_dir = Path("runs") / run_name
+    if not run_dir.exists():
+        raise FileNotFoundError(f"Run directory not found: {run_dir}")
+else:
+    run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = Path("runs") / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with open(run_dir / "config.json", "w") as f:
+        json.dump(
+            {
+                "run": {
+                    "name": run_name,
+                    "total_steps": TOTAL_STEPS,
+                    "plot_every": PLOT_EVERY,
+                    "device": DEVICE,
+                },
+                "ds": {**vars(ds_config), "sampler": ds_config.sampler.__name__},
+                "nca": vars(nca_config),
+                "optim": vars(optim_config),
+                "env": {
+                    "python": sys.version,
+                    "torch": torch.__version__,
+                    "git": git_info(),
+                },
+            },
+            f,
+            indent=2,
+        )
+
 rollouts_dir = run_dir / "rollouts"
-rollouts_dir.mkdir()
+rollouts_dir.mkdir(exist_ok=True)
 snapshots_dir = run_dir / "snapshots"
-snapshots_dir.mkdir()
+snapshots_dir.mkdir(exist_ok=True)
 
 print(f"Device : {DEVICE}")
 print(f"Run dir: {run_dir}\n")
 
-with open(run_dir / "config.json", "w") as f:
-    json.dump(
-        {
-            "run": {
-                "name": run_name,
-                "total_steps": TOTAL_STEPS,
-                "plot_every": PLOT_EVERY,
-                "device": DEVICE,
-            },
-            "ds": {**vars(ds_config), "sampler": ds_config.sampler.__name__},
-            "nca": vars(nca_config),
-            "optim": vars(optim_config),
-            "env": {
-                "python": sys.version,
-                "torch": torch.__version__,
-                "git": git_info(),
-            },
-        },
-        f,
-        indent=2,
-    )
-
 # ── Model & trainer ───────────────────────────────────────────────────────────
 dataset = NCPUDataset(ds_config)
-nca = NeuralCA(**vars(nca_config)).to(DEVICE)
-trainer = NCPUTrainer(
-    nca,
-    dataset.get_dataloader(batch_size=optim_config.batch_size),
-    lr=optim_config.lr,
-    gaussian_noise=optim_config.gaussian_noise,
-    grad_clip=optim_config.grad_clip,
-    checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
-    loss_fn=fullscreen_rollout_loss,
-)
 
-trainer.sanity_check()
+
+dataloader = dataset.get_dataloader(batch_size=optim_config.batch_size)
+
+if RESUME_RUN is not None:
+    trainer = NCPUTrainer.load_trainer(run_dir / "checkpoints")
+    trainer.dataloader = dataloader
+    trainer.ds = dataset
+    trainer.dataset_iter = iter(dataloader)
+    trainer.optim = torch.optim.Adam(trainer.nca.parameters(), lr=optim_config.lr)
+    trainer.nca.to(DEVICE)
+    trainer.to(DEVICE)
+    print(f"Resumed from step {trainer.learning_step}")
+else:
+    nca = NeuralCA(**vars(nca_config)).to(DEVICE)
+    trainer = NCPUTrainer(
+        nca,
+        dataloader,
+        lr=optim_config.lr,
+        gaussian_noise=optim_config.gaussian_noise,
+        grad_clip=optim_config.grad_clip,
+        checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
+        loss_fn=output_masked_rollout_loss,
+    )
+    trainer.sanity_check()
 
 log_path = run_dir / "log.jsonl"
 print(f"\nLogging to: {log_path}")
 print(f"{'─'*60}\n")
 
 # ── Training loop ─────────────────────────────────────────────────────────────
-pbar = tqdm(range(TOTAL_STEPS), ncols=100)
+start_step = trainer.learning_step
+pbar = tqdm(range(start_step, start_step + TOTAL_STEPS), ncols=100)
 
 for step in pbar:
-    info = trainer.optim_step(steps=(optim_config.steps_min, optim_config.steps_max), return_rollout=(step % PLOT_EVERY == 0))
+    info = trainer.optim_step(
+        steps=(optim_config.steps_min, optim_config.steps_max),
+        return_rollout=(step % PLOT_EVERY == 0),
+    )
     loss = info["loss"]
     num_valid_bits = info["num_valid_bits"]
 
@@ -207,6 +254,7 @@ for step in pbar:
                     "loss": loss,
                     "num_valid_bits": num_valid_bits,
                     "grad_norm": grad_norm,
+                    "ts": datetime.now().isoformat(),
                 }
             )
             + "\n"
@@ -263,6 +311,8 @@ for step in pbar:
     save_rollout_latest(run_dir, rollout)
 
     if step % MEDIA_EVERY == 0:
-        save_media(step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, rollout)
+        save_media(
+            step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, rollout
+        )
 
     print(f"  → saved: loss_curve.png, bits_curve.png")

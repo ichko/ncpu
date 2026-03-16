@@ -20,7 +20,7 @@ python3 -m src.learn_pattern
 ## Dev setup
 
 ```bash
-ub run nbstripout --install --attributes .gitattributes
+uv run nbstripout --install --attributes .gitattributes
 ```
 
 ## Stup and project config

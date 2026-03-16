@@ -7,3 +7,5 @@ training_history/
 runs
 CLAUDE.md
 docs/
+*.ignore.*
+results

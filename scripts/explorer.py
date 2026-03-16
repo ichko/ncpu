@@ -6,6 +6,7 @@ Usage:
     uv run streamlit run scripts/explorer.py
 """
 
+import io
 import json
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from argparse import Namespace
 from pathlib import Path
 
 import cv2
+import matplotlib.pyplot as plt
 import mediapy as media
 import numpy as np
 import streamlit as st
@@ -20,7 +22,11 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from ncpu.dataset import ALUDataset, NCPUDataset, sample_4bit_adder, sample_8bit_adder
+from ncpu.dataset import (
+    ALUDataset, NCPUDataset,
+    sample_4bit_adder, sample_8bit_adder,
+    sample_AND_gate, sample_OR_gate, sample_NOR_gate, sample_NAND_gate, sample_XOR_gate,
+)
 from ncpu.nca import NeuralCA
 from ncpu.utils import freeze_frame, make_alu_screen, make_grid, make_io_screen
 
@@ -28,14 +34,24 @@ RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 SAMPLER_MAP = {
     "sample_4bit_adder": sample_4bit_adder,
     "sample_8bit_adder": sample_8bit_adder,
+    "sample_AND_gate": sample_AND_gate,
+    "sample_OR_gate": sample_OR_gate,
+    "sample_NOR_gate": sample_NOR_gate,
+    "sample_NAND_gate": sample_NAND_gate,
+    "sample_XOR_gate": sample_XOR_gate,
 }
 ALU_OPCODES = ["ADD", "SUB", "AND", "OR", "XOR", "NOT", "SHL", "SHR"]
 
 st.set_page_config(page_title="NCA Explorer", layout="wide")
 st.markdown("""
 <style>
-    .block-container { padding-top: 4rem; padding-bottom: 0.5rem; }
-    img { image-rendering: pixelated; image-rendering: crisp-edges; }
+    .block-container {
+        padding-top: 4rem;
+        padding-bottom: 0.5rem;
+        max-width: 1200px;
+    }
+    .pixelated img { image-rendering: pixelated; image-rendering: crisp-edges; }
+    img { border-radius: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -52,6 +68,7 @@ def _build_nca(nca_cfg):
         kernel_size=nca_cfg["kernel_size"],
         num_perception_kernels=nca_cfg["num_perception_kernels"],
         read_only_dims=nca_cfg.get("read_only_dims", []),
+        padding_type=nca_cfg.get("padding_type", "circular"),
     )
     return nca
 
@@ -82,7 +99,6 @@ def load_alu_run(run_name: str, checkpoint_name: str):
 
     dataset = ALUDataset(Namespace(
         W=ds_cfg["W"], H=ds_cfg["H"], r=ds_cfg["r"],
-        side=ds_cfg["side"], among=ds_cfg["among"],
     ))
     nca = _build_nca(nca_cfg)
     nca.load_state_dict(torch.load(run_dir / "checkpoints" / checkpoint_name, map_location="cpu"))
@@ -108,11 +124,17 @@ def zoom_nearest(arr: np.ndarray, factor: int = ZOOM) -> np.ndarray:
     return arr
 
 
+def st_image_pixelated(img, **kwargs):
+    """st.image wrapper that applies pixelated (nearest-neighbour) rendering."""
+    st.markdown('<div class="pixelated">', unsafe_allow_html=True)
+    st.image(img, **kwargs)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def _run_nca(nca, dataset, screen: np.ndarray, steps: int):
     inp = torch.from_numpy(screen).float() / 128.0 - 1.0
     state = torch.zeros(1, nca.channels, dataset.H, dataset.W)
-    state[0, 0] = inp
-    state[0, 1] = inp
+    state[0, 1] = inp  # channel 1 = read-only input
     with torch.no_grad():
         return nca(state, steps=steps)
 
@@ -178,17 +200,68 @@ def show_results(rollout, out_screen, dataset, bit_masks=None):
             ys, xs = np.where(mask.numpy() > 0)
             cy, cx = int(ys.mean()), int(xs.mean())
             cv2.circle(ann, (cx, cy), dataset.r + 1, (220, 50, 50), 2)
-        st.image(zoom_nearest(ann))
+        st_image_pixelated(zoom_nearest(ann))
     with act_col:
         st.caption("output activations")
-        st.image(zoom_nearest(output_only))
+        st_image_pixelated(zoom_nearest(output_only))
     with diff_col:
         diff_rgb = media.to_rgb(diff_frame[np.newaxis], vmin=0, vmax=2, cmap="viridis")[0]
         st.caption("|last − target|")
-        st.image(zoom_nearest(diff_rgb))
+        st_image_pixelated(zoom_nearest(diff_rgb))
 
     st.caption("all channels")
     st.image(ch_path, use_container_width=True, output_format="GIF")
+
+
+# ── Training monitor helpers ───────────────────────────────────────────────────
+
+
+MAX_PLOT_POINTS = 50_000
+
+
+def load_log(run_dir: Path):
+    log_path = run_dir / "log.jsonl"
+    if not log_path.exists():
+        return [], [], []
+    with open(log_path) as f:
+        lines = f.readlines()
+    n = len(lines)
+    step = max(1, n // MAX_PLOT_POINTS)
+    sampled = lines[::step]
+    if lines and lines[-1] not in sampled:
+        sampled.append(lines[-1])
+    steps, losses, bits = [], [], []
+    for line in sampled:
+        try:
+            d = json.loads(line)
+            steps.append(d["step"])
+            losses.append(d["loss"])
+            bits.append(d.get("num_valid_bits"))
+        except Exception:
+            pass
+    return steps, losses, bits
+
+
+def _loss_curve_fig(steps, losses):
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.scatter(steps, losses, s=0.5, alpha=0.4, color="steelblue")
+    ax.set_yscale("log")
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss")
+    ax.set_title(f"Loss  (step {steps[-1]})")
+    fig.tight_layout()
+    return fig
+
+
+def _bits_curve_fig(steps, bits, n_bits):
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.scatter(steps, bits, s=0.5, alpha=0.4, color="darkorange")
+    ax.set_ylim(0, n_bits)
+    ax.set_xlabel("step")
+    ax.set_ylabel("valid bits")
+    ax.set_title(f"Valid bits  (step {steps[-1]})")
+    fig.tight_layout()
+    return fig
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -197,191 +270,271 @@ if not RUNS_DIR.exists():
     st.error(f"No runs directory at {RUNS_DIR}")
     st.stop()
 
+def _run_mtime(name):
+    log = RUNS_DIR / name / "log.jsonl"
+    try:
+        return log.stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+
 runs = sorted(
     [d.name for d in RUNS_DIR.iterdir() if (d / "config.json").exists()],
+    key=_run_mtime,
     reverse=True,
 )
 if not runs:
     st.error("No completed runs found.")
     st.stop()
 
-# ── Run / checkpoint picker ───────────────────────────────────────────────────
-top_left, top_right, _ = st.columns([2, 2, 3])
-with top_left:
-    default_run = "20260310_234709"
-    default_idx = runs.index(default_run) if default_run in runs else 0
-    run_name = st.selectbox("Run", runs, index=default_idx, label_visibility="collapsed")
-with top_right:
-    ckpt_dir    = RUNS_DIR / run_name / "checkpoints"
+# ── Shared run selector ───────────────────────────────────────────────────────
+top_run_col, _ = st.columns([2, 5])
+with top_run_col:
+    run_name = st.selectbox("Run", runs, index=0, label_visibility="collapsed")
+
+run_dir = RUNS_DIR / run_name
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab_mon, tab_inf = st.tabs(["📊 Training Monitor", "🔬 Inference"])
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRAINING MONITOR TAB
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.fragment(run_every="15s")
+def _monitor_fragment(run_dir, run_name):
+    steps, losses, bits = load_log(run_dir)
+
+    if not losses:
+        st.info("No log.jsonl found yet — training may not have started.")
+        return
+
+    # infer n_bits from config
+    try:
+        _cfg = json.loads((run_dir / "config.json").read_text())
+        _ds_cfg = _cfg["ds"]
+        if is_alu_run(_cfg):
+            _ds_tmp = ALUDataset(Namespace(W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"]))
+        else:
+            _ds_tmp = NCPUDataset(Namespace(
+                W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"],
+                spacing=tuple(_ds_cfg["spacing"]),
+                sampler=SAMPLER_MAP[_ds_cfg["sampler"]],
+                balanced=False,
+            ))
+        n_bits = len(_ds_tmp.get_output_bit_masks())
+    except Exception:
+        n_bits = max(b for b in bits if b is not None) if bits else 1
+
+    bits_clean = [b for b in bits if b is not None]
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Steps logged", steps[-1] if steps else 0)
+    m2.metric("Last loss", f"{losses[-1]:.6f}")
+    if bits_clean:
+        m3.metric("Last valid bits", f"{bits_clean[-1]:.2f} / {n_bits}")
+
+    bits_steps = [s for s, b in zip(steps, bits) if b is not None]
+    curve_col, bits_col = st.columns(2)
+    with curve_col:
+        fig = _loss_curve_fig(steps, losses)
+        st.pyplot(fig, use_container_width=True)
+        plt.close(fig)
+    with bits_col:
+        if bits_clean:
+            fig = _bits_curve_fig(bits_steps, bits_clean, n_bits)
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
+        else:
+            st.info("No valid-bits data yet.")
+
+    gif_path  = run_dir / "rollout_latest.gif"
+    snap_path = run_dir / "snapshot_latest.png"
+
+    media_col1, media_col2 = st.columns(2)
+    with media_col1:
+        st.caption("rollout_latest.gif")
+        if gif_path.exists():
+            try:
+                st.image(str(gif_path), use_container_width=True)
+            except Exception:
+                st.caption("_(updating…)_")
+        else:
+            st.info("Not saved yet.")
+    with media_col2:
+        st.caption("snapshot_latest.png")
+        if snap_path.exists():
+            try:
+                st.image(str(snap_path), use_container_width=True)
+            except Exception:
+                st.caption("_(updating…)_")
+        else:
+            st.info("Not saved yet.")
+
+
+with tab_mon:
+    st.divider()
+    _monitor_fragment(run_dir, run_name)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INFERENCE TAB
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_inf:
+    ckpt_dir    = run_dir / "checkpoints"
     checkpoints = sorted([f.name for f in ckpt_dir.glob("nca_*.pt")], reverse=True)
     if not checkpoints:
         st.error("No checkpoints found.")
         st.stop()
-    checkpoint = st.selectbox("Checkpoint", checkpoints, label_visibility="collapsed")
 
-# detect task type before loading
-_peek = json.loads((RUNS_DIR / run_name / "config.json").read_text())
-_alu  = is_alu_run(_peek)
+    ckpt_col, _ = st.columns([2, 5])
+    with ckpt_col:
+        checkpoint = st.selectbox("Checkpoint", checkpoints, label_visibility="collapsed")
 
-if _alu:
-    nca, dataset, config = load_alu_run(run_name, checkpoint)
-else:
-    nca, dataset, config = load_adder_run(run_name, checkpoint)
+    # detect task type before loading
+    _peek = json.loads((run_dir / "config.json").read_text())
+    _alu  = is_alu_run(_peek)
 
-steps = config.get("optim", {}).get("steps_max", 64)
+    if _alu:
+        nca, dataset, config = load_alu_run(run_name, checkpoint)
+    else:
+        nca, dataset, config = load_adder_run(run_name, checkpoint)
 
-st.divider()
-left, right = st.columns([1, 2])
+    steps = config.get("optim", {}).get("steps_max", 64)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ALU UI
-# ═══════════════════════════════════════════════════════════════════════════════
-if _alu:
-    with left:
-        op_col, cin_col = st.columns([3, 1])
-        with op_col:
-            opcode_name = st.selectbox("Opcode", ALU_OPCODES)
-        with cin_col:
-            carry_in = st.number_input("Cin", min_value=0, max_value=1, value=0, step=1)
+    st.divider()
+    left, right = st.columns([1, 2])
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            a = st.number_input("A", min_value=0, max_value=255, value=42, step=1)
-            st.code(f"{int(a):08b}")
-        with col_b:
-            b = st.number_input("B", min_value=0, max_value=255, value=27, step=1)
-            st.code(f"{int(b):08b}")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ALU UI
+    # ═══════════════════════════════════════════════════════════════════════════
+    if _alu:
+        with left:
+            op_col, cin_col = st.columns([3, 1])
+            with op_col:
+                opcode_name = st.selectbox("Opcode", ALU_OPCODES)
+            with cin_col:
+                carry_in = st.number_input("Cin", min_value=0, max_value=1, value=0, step=1)
 
-        opcode_idx  = ALU_OPCODES.index(opcode_name)
-        inp_screen  = dataset._make_screen(
-            a=int_to_bits(int(a), 8), b=int_to_bits(int(b), 8),
-            carry_in=[int(carry_in)], opcode=int_to_bits(opcode_idx, 3),
-        )
-        # compute expected output for preview
-        from ncpu.dataset import _compute_alu
-        opcode_idx_preview = opcode_idx
-        exp_result_pre, exp_flags_pre = _compute_alu(int(a), int(b), int(carry_in), opcode_idx_preview)
-        exp_out_screen = dataset._make_screen(
-            result=int_to_bits(exp_result_pre, 8), flags=exp_flags_pre,
-        )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                a = st.number_input("A", min_value=0, max_value=255, value=42, step=1)
+                st.code(f"{int(a):08b}")
+            with col_b:
+                b = st.number_input("B", min_value=0, max_value=255, value=27, step=1)
+                st.code(f"{int(b):08b}")
 
-        img_col, out_col = st.columns(2)
-        with img_col:
-            st.markdown(f"`{int(a):08b}` **{opcode_name}** `{int(b):08b}`", unsafe_allow_html=True)
-            inp_rgb = media.to_rgb(inp_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]
-            st.image(zoom_nearest(inp_rgb))
-        with out_col:
-            carry_out_pre, overflow_pre, zero_pre, neg_pre = exp_flags_pre
-            st.markdown(f"`{exp_result_pre:08b}` = **{exp_result_pre}**", unsafe_allow_html=True)
-            exp_rgb = media.to_rgb(exp_out_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]
-            st.image(zoom_nearest(exp_rgb))
-            st.caption(
-                f"C={carry_out_pre} V={overflow_pre} Z={zero_pre} N={neg_pre}"
+            opcode_idx  = ALU_OPCODES.index(opcode_name)
+            inp_screen  = dataset._make_screen(
+                a=int_to_bits(int(a), 8), b=int_to_bits(int(b), 8),
+                carry_in=[int(carry_in)], opcode=int_to_bits(opcode_idx, 3),
+            )
+            from ncpu.dataset import _compute_alu
+            exp_result_pre, exp_carry_pre = _compute_alu(int(a), int(b), int(carry_in), opcode_idx)
+            exp_out_screen = dataset._make_screen(
+                result=int_to_bits(exp_result_pre, 8), carry_out=[exp_carry_pre],
             )
 
-        calculate = st.button("Calculate", type="primary", use_container_width=True)
+            img_col, out_col = st.columns(2)
+            with img_col:
+                st.markdown(f"`{int(a):08b}` **{opcode_name}** `{int(b):08b}`", unsafe_allow_html=True)
+                inp_rgb = media.to_rgb(inp_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]
+                st_image_pixelated(zoom_nearest(inp_rgb))
+            with out_col:
+                st.markdown(f"`{exp_result_pre:08b}` = **{exp_result_pre}**", unsafe_allow_html=True)
+                exp_rgb = media.to_rgb(exp_out_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]
+                st_image_pixelated(zoom_nearest(exp_rgb))
+                st.caption(f"carry_out={exp_carry_pre}")
 
-    with right:
-        if calculate:
-            with st.spinner(f"Running NCA ({steps} steps)…"):
-                rollout = _run_nca(nca, dataset, inp_screen, steps)
-                bits    = decode_bits(rollout, dataset)
+            calculate = st.button("Calculate", type="primary", use_container_width=True)
 
-            result_bits = bits[:8]
-            flag_bits   = bits[8:]
-            result_int  = int("".join(map(str, result_bits)), 2)
-            carry_out, overflow, zero, negative = flag_bits
+        with right:
+            if calculate:
+                with st.spinner(f"Running NCA ({steps} steps)…"):
+                    rollout = _run_nca(nca, dataset, inp_screen, steps)
+                    bits    = decode_bits(rollout, dataset)
 
-            # expected (software reference)
-            exp_result, exp_flags = _compute_alu(int(a), int(b), int(carry_in), opcode_idx)
-            exp_bits = int_to_bits(exp_result, 8) + exp_flags
-            valid    = sum(p == e for p, e in zip(bits, exp_bits))
+                result_bits = bits[:8]
+                pred_carry  = bits[8]
+                result_int  = int("".join(map(str, result_bits)), 2)
 
-            r1, r2, r3 = st.columns(3)
-            with r1:
-                st.metric("Result", result_int)
-            with r2:
-                st.metric("Expected", exp_result)
-            with r3:
-                st.metric("Valid bits", f"{valid} / 12")
+                exp_result, exp_carry = _compute_alu(int(a), int(b), int(carry_in), opcode_idx)
+                exp_bits = int_to_bits(exp_result, 8) + [exp_carry]
+                valid    = sum(p == e for p, e in zip(bits, exp_bits))
 
-            f1, f2, f3, f4 = st.columns(4)
-            for col, name, val, exp in zip(
-                [f1, f2, f3, f4],
-                ["carry", "overflow", "zero", "negative"],
-                flag_bits, exp_flags,
-            ):
-                col.metric(name, val, delta=None,
-                           help=f"expected {exp}" + (" ✓" if val == exp else " ✗"))
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("Result", result_int)
+                r2.metric("Expected", exp_result)
+                r3.metric("Valid bits", f"{valid} / 9")
+                r4.metric("carry_out", pred_carry,
+                          help=f"expected {exp_carry}" + (" ✓" if pred_carry == exp_carry else " ✗"))
 
-            st.code(
-                f"result   {' '.join(map(str, result_bits))}  ({result_int})\n"
-                f"expected {' '.join(map(str, int_to_bits(exp_result, 8)))}  ({exp_result})"
+                st.code(
+                    f"result   {' '.join(map(str, result_bits))}  ({result_int})\n"
+                    f"expected {' '.join(map(str, int_to_bits(exp_result, 8)))}  ({exp_result})"
+                )
+
+                out_screen = dataset._make_screen(
+                    result=int_to_bits(exp_result, 8), carry_out=[exp_carry]
+                )
+                show_results(rollout, out_screen, dataset)
+            else:
+                st.caption("← set inputs and click Calculate")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Adder UI
+    # ═══════════════════════════════════════════════════════════════════════════
+    else:
+        _sin, _sout  = dataset.sampler()
+        bits_per_num = len(_sin) // 2
+        n_out_bits   = len(_sout)
+        max_val      = 2 ** bits_per_num - 1
+
+        with left:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                a = st.number_input("A", min_value=0, max_value=max_val, value=min(7, max_val), step=1)
+            with col_b:
+                b = st.number_input("B", min_value=0, max_value=max_val, value=min(5, max_val), step=1)
+
+            c            = int(a) + int(b)
+            expected_bits = int_to_bits(c, n_out_bits)
+            inp_screen = make_io_screen(
+                W=dataset.W, H=dataset.H, r=dataset.r, spacing=dataset.spacing,
+                left_input=int_to_bits(int(a), bits_per_num) + int_to_bits(int(b), bits_per_num),
+                right_input=[],
             )
-
-            out_screen = dataset._make_screen(
-                result=int_to_bits(exp_result, 8), flags=exp_flags
+            out_screen = make_io_screen(
+                W=dataset.W, H=dataset.H, r=dataset.r, spacing=dataset.spacing,
+                left_input=[], right_input=expected_bits,
             )
-            show_results(rollout, out_screen, dataset)
-        else:
-            st.caption("← set inputs and click Calculate")
+            img_col, out_col = st.columns(2)
+            with img_col:
+                st.markdown(f"**A** `{int(a):0{bits_per_num}b}` &nbsp; **B** `{int(b):0{bits_per_num}b}`",
+                            unsafe_allow_html=True)
+                st_image_pixelated(zoom_nearest(media.to_rgb(inp_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
+            with out_col:
+                st.markdown(f"**C** `{c}` &nbsp; `{c:0{n_out_bits}b}`", unsafe_allow_html=True)
+                st_image_pixelated(zoom_nearest(media.to_rgb(out_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Adder UI
-# ═══════════════════════════════════════════════════════════════════════════════
-else:
-    _sin, _sout  = dataset.sampler()
-    bits_per_num = len(_sin) // 2
-    n_out_bits   = len(_sout)
-    max_val      = 2 ** bits_per_num - 1
+            calculate = st.button("Calculate", type="primary", use_container_width=True)
 
-    with left:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            a = st.number_input("A", min_value=0, max_value=max_val, value=min(7, max_val), step=1)
-        with col_b:
-            b = st.number_input("B", min_value=0, max_value=max_val, value=min(5, max_val), step=1)
+        with right:
+            if calculate:
+                with st.spinner(f"Running NCA ({steps} steps)…"):
+                    rollout   = _run_nca(nca, dataset, inp_screen, steps)
+                    pred_bits = decode_bits(rollout, dataset)
 
-        c            = int(a) + int(b)
-        expected_bits = int_to_bits(c, n_out_bits)
-        inp_screen = make_io_screen(
-            W=dataset.W, H=dataset.H, r=dataset.r, spacing=dataset.spacing,
-            left_input=int_to_bits(int(a), bits_per_num) + int_to_bits(int(b), bits_per_num),
-            right_input=[],
-        )
-        out_screen = make_io_screen(
-            W=dataset.W, H=dataset.H, r=dataset.r, spacing=dataset.spacing,
-            left_input=[], right_input=expected_bits,
-        )
-        img_col, out_col = st.columns(2)
-        with img_col:
-            st.markdown(f"**A** `{int(a):0{bits_per_num}b}` &nbsp; **B** `{int(b):0{bits_per_num}b}`",
-                        unsafe_allow_html=True)
-            st.image(zoom_nearest(media.to_rgb(inp_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
-        with out_col:
-            st.markdown(f"**C** `{c}` &nbsp; `{c:0{n_out_bits}b}`", unsafe_allow_html=True)
-            st.image(zoom_nearest(media.to_rgb(out_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
+                pred_int = int("".join(map(str, pred_bits)), 2)
+                valid    = sum(p == e for p, e in zip(pred_bits, expected_bits))
 
-        calculate = st.button("Calculate", type="primary", use_container_width=True)
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Predicted", pred_int)
+                r2.metric("Expected",  c)
+                r3.metric("Valid bits", f"{valid} / {n_out_bits}")
 
-    with right:
-        if calculate:
-            with st.spinner(f"Running NCA ({steps} steps)…"):
-                rollout   = _run_nca(nca, dataset, inp_screen, steps)
-                pred_bits = decode_bits(rollout, dataset)
-
-            pred_int = int("".join(map(str, pred_bits)), 2)
-            valid    = sum(p == e for p, e in zip(pred_bits, expected_bits))
-
-            r1, r2, r3 = st.columns(3)
-            r1.metric("Predicted", pred_int)
-            r2.metric("Expected",  c)
-            r3.metric("Valid bits", f"{valid} / {n_out_bits}")
-
-            st.code(
-                f"output   {' '.join(map(str, pred_bits))}\n"
-                f"expected {' '.join(map(str, expected_bits))}"
-            )
-            show_results(rollout, out_screen, dataset)
-        else:
-            st.caption("← set inputs and click Calculate")
+                st.code(
+                    f"output   {' '.join(map(str, pred_bits))}\n"
+                    f"expected {' '.join(map(str, expected_bits))}"
+                )
+                show_results(rollout, out_screen, dataset)
+            else:
+                st.caption("← set inputs and click Calculate")
