@@ -25,7 +25,7 @@ torch.set_default_device('cuda')
 
 LEARNING_RATE = 0.001
 BATCH_SIZE = 8
-STEPS = 50_000
+STEPS = 20_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 16
 N_OUTPUT_BITS = 1
@@ -58,6 +58,7 @@ def run_experiment(gaussian_noise, fire_rate):
         read_only_dims=[-4, -3, -2, -1],
         gaussian_noise=gaussian_noise,
         gaussian_noise_fire_rate=fire_rate,
+        padding_type = "constant",
     )
 
     trainer = NCPUTrainer(
@@ -146,16 +147,29 @@ def run_experiment(gaussian_noise, fire_rate):
                 r = rollout[:gif_b, ::2, :gif_c]
                 T_sub = r.shape[1]
                 target = out[:gif_b].detach().cpu()
-                target_row = torch.cat([target[b] for b in range(gif_b)], dim=-1)
+
+                _, _, _, cH, cW = r.shape
+                grid_H = (1 + gif_c) * cH + (gif_c) * 1
+                grid_W = gif_b * cW + (gif_b - 1) * 1
+
                 frame_list = []
                 for t in range(T_sub):
-                    rows = [target_row]
-                    for c in range(gif_c):
-                        row = torch.cat([r[b, t, c] for b in range(gif_b)], dim=-1)
-                        rows.append(row)
-                    frame_list.append(torch.cat(rows, dim=-2))
+                    frame = torch.zeros(grid_H, grid_W)
+
+                    for b in range(gif_b):
+                        col_start = b * (cW + 1)
+                        frame[0:cH, col_start:col_start + cW] = target[b]
+
+                    for ci in range(gif_c):
+                        row_start = (ci + 1) * cH + ci * 1
+                        for b in range(gif_b):
+                            col_start = b * (cW + 1)
+                            frame[row_start:row_start + cH, col_start:col_start + cW] = r[b, t, ci].detach().cpu()
+
+                    frame_list.append(frame)
+
                 frames = torch.stack(frame_list)
-                frames_np = frames.detach().cpu().numpy()
+                frames_np = frames.cpu().numpy()
                 frames_rgb = media.to_rgb(frames_np, vmin=-1, vmax=1, cmap="viridis")
                 frames_rgb = freeze_frame(torch.from_numpy(frames_rgb), timesteps=[0, -1], repeat=8)
                 gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
@@ -166,12 +180,6 @@ def run_experiment(gaussian_noise, fire_rate):
 
     trainer.save_checkpoint()
 
-
-for fr in FIRE_RATES:
-    run_experiment(GAUSSIAN_NOISE, fr)            print(f"  -> saved: loss_curve.png, snapshot_{step:07d}.png" +
-                (", rollout GIF" if rollout is not None else ""))
-
-    trainer.save_checkpoint()
 
 for fr in FIRE_RATES:
     run_experiment(GAUSSIAN_NOISE, fr)

@@ -26,7 +26,7 @@ torch.set_default_device('cuda')
 LEARNING_RATE = 0.001
 BATCH_SIZE = 8
 GAUSSIAN_NOISE = 0.2
-STEPS = 50_000
+STEPS = 20_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 8
 

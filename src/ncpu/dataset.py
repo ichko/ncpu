@@ -231,9 +231,9 @@ class MultiGateDataset(IterableDataset):
         """
         mid = self.W // 2
         # Zero out all code channels
-        inp[-4:] = 0.0
+        inp[-4:] = 256 // 2 
         # Set the left half of the active gate's channel to 1
-        inp[-(4 - gate_idx), :, :mid] = inp.max()
+        inp[-(4 - gate_idx), :, :mid] = 256
         return inp
 
     def get_output_bit_masks(self):

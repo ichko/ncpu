@@ -39,7 +39,7 @@ print(f"{'─'*60}\n")
 LEARNING_RATE = 0.001
 BATCH_SIZE = 8
 GAUSSIAN_NOISE = 0.0
-STEPS = 50_000
+STEPS = 20_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 16
 
@@ -52,7 +52,8 @@ nca = NeuralCA(
     alive_threshold = 0.1,
     zero_initialization = False,
     kernel_size = 5,
-    read_only_dims = [-4,-3,-2,-1]
+    read_only_dims = [-4,-3,-2,-1],
+    padding_type = "constant",
 )
 
 trainer = NCPUTrainer(
@@ -60,7 +61,7 @@ trainer = NCPUTrainer(
     dataset.get_dataloader(batch_size = BATCH_SIZE),
     lr = LEARNING_RATE,
     gaussian_noise = GAUSSIAN_NOISE,
-    loss_fn = output_masked_rollout_loss,
+    loss_fn = combined_loss,
     input_implant_type="disabled",
 )
 trainer.sanity_check()
@@ -153,30 +154,34 @@ for step in pbar:
         if rollout is not None:
             gif_b = BATCH_SIZE
             gif_c = min(C, NCA_CHANNELS)
-            # rollout: (B, T, C, H, W) — subsample time
-            r = rollout[:gif_b, ::2, :gif_c]            # (gif_b, T', gif_c, H, W)
+            r = rollout[:gif_b, ::2, :gif_c]
             T_sub = r.shape[1]
+            target = out[:gif_b].detach().cpu()
 
-            # Target output row: (gif_b, H, W) → repeat across time
-            target = out[:gif_b].detach().cpu()          # (gif_b, H, W)
-            target_row = torch.cat([target[b] for b in range(gif_b)], dim=-1)  # (H, gif_b*W)
+            _, _, _, cH, cW = r.shape
+            grid_H = (1 + gif_c) * cH + (gif_c) * 1
+            grid_W = gif_b * cW + (gif_b - 1) * 1
 
-            # Build grid: row 0 = target, rows 1..gif_c = NCA channels
-            # For each timestep, create ((1 + gif_c) * H, gif_b * W)
             frame_list = []
             for t in range(T_sub):
-                rows = [target_row]  # first row is always the target
-                for c in range(gif_c):
-                    row = torch.cat([r[b, t, c] for b in range(gif_b)], dim=-1)  # (H, gif_b*W)
-                    rows.append(row)
-                frame = torch.cat(rows, dim=-2)  # ((1+gif_c)*H, gif_b*W)
+                frame = torch.zeros(grid_H, grid_W)
+
+                for b in range(gif_b):
+                    col_start = b * (cW + 1)
+                    frame[0:cH, col_start:col_start + cW] = target[b]
+
+                for ci in range(gif_c):
+                    row_start = (ci + 1) * cH + ci * 1
+                    for b in range(gif_b):
+                        col_start = b * (cW + 1)
+                        frame[row_start:row_start + cH, col_start:col_start + cW] = r[b, t, ci].detach().cpu()
+
                 frame_list.append(frame)
 
-            frames = torch.stack(frame_list)  # (T', (1+gif_c)*H, gif_b*W)
-            frames_np = frames.detach().cpu().numpy()
+            frames = torch.stack(frame_list)
+            frames_np = frames.cpu().numpy()
             frames_rgb = media.to_rgb(frames_np, vmin=-1, vmax=1, cmap="viridis")
             frames_rgb = freeze_frame(torch.from_numpy(frames_rgb), timesteps=[0, -1], repeat=8)
-
             gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
             media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
             shutil.copy(gif_path, run_dir / "rollout_latest.gif")
