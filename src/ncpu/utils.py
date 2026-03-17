@@ -409,8 +409,8 @@ def conv_stack(layer_sizes, activation, **kwargs):
 
 
 def meshgrid_xy(H: int, W: int, device=None, dtype=torch.float32):
-    x = torch.linspace(-1, 1, W, device=device, dtype=dtype)
-    y = torch.linspace(-1, 1, H, device=device, dtype=dtype)
+    x = torch.linspace(1, -1, W, device=device, dtype=dtype)
+    y = torch.linspace(1, -1, H, device=device, dtype=dtype)
     yy, xx = torch.meshgrid(y, x, indexing="ij")  # (H, W)
     return xx, yy
 
