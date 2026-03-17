@@ -10,7 +10,7 @@ from pathlib import Path
 from matplotlib import pyplot as plt
 from tqdm.auto import tqdm
 
-from ncpu.loss import output_masked_rollout_loss
+from ncpu.loss import output_masked_rollout_loss, combined_loss
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
@@ -65,7 +65,7 @@ def run_experiment(gaussian_noise, fire_rate):
         dataset.get_dataloader(batch_size=BATCH_SIZE),
         lr=LEARNING_RATE,
         gaussian_noise=gaussian_noise,
-        loss_fn=output_masked_rollout_loss,
+        loss_fn=combined_loss,
         input_implant_type="disabled",
     )
     trainer.sanity_check()

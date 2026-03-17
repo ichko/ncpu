@@ -52,9 +52,7 @@ nca = NeuralCA(
     alive_threshold = 0.1,
     zero_initialization = False,
     kernel_size = 5,
-    read_only_dims = [-4,-3,-2,-1],
-    gaussian_noise = GAUSSIAN_NOISE,
-    gaussian_noise_fire_rate = GAUSSIAN_NOISE_FIRE_RATE,
+    read_only_dims = [-4,-3,-2,-1]
 )
 
 trainer = NCPUTrainer(
