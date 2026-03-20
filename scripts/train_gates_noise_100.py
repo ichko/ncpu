@@ -36,7 +36,7 @@ FIRE_RATES = [0.2, 0.4, 0.6, 0.8, 1.0]
 
 def run_experiment(gaussian_noise, fire_rate):
     run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = Path("runs") / f"coded_gates_noise{int(gaussian_noise*100)}_fr{int(fire_rate*100)}_{run_name}"
+    run_dir = Path("runs") / f"{run_name}_coded_gates_noise{int(gaussian_noise*100)}_fr{int(fire_rate*100)}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "rollouts").mkdir()
     (run_dir / "snapshots").mkdir()
@@ -68,6 +68,7 @@ def run_experiment(gaussian_noise, fire_rate):
         gaussian_noise=gaussian_noise,
         loss_fn=combined_loss,
         input_implant_type="disabled",
+        checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
     )
     trainer.sanity_check()
 
