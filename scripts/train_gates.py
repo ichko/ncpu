@@ -15,7 +15,7 @@ from ncpu.loss import loss_mse_whole_seq, loss_white_black, fullscreen_rollout_l
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, save_rollout_pdf
 
 model_path = None
 
@@ -51,7 +51,7 @@ nca = NeuralCA(
     fire_rate = 0.99,
     alive_threshold = 0.1,
     zero_initialization = False,
-    kernel_size = 5,
+    kernel_size=7,
     read_only_dims = [-4,-3,-2,-1],
     padding_type = "constant",
 )
@@ -67,6 +67,7 @@ trainer = NCPUTrainer(
 trainer.sanity_check()
 
 N_OUTPUT_BITS = 1  # single-bit gate output
+best_loss = float("inf")
 
 pbar = tqdm(range(STEPS))
 for step in pbar:
@@ -186,8 +187,32 @@ for step in pbar:
             media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
             shutil.copy(gif_path, run_dir / "rollout_latest.gif")
 
+            # ── Rollout PDF snapshot ──────────────────────────────────────────
+            if rollout is not None:
+                pdf_path = run_dir / "rollouts" / f"rollout_{step:07d}.pdf"
+                save_rollout_pdf(
+                    pdf_path, rollout,
+                    target=out.squeeze(1) if out.dim() == 4 else out,
+                    n_snapshots=6,
+                    batch_indices=list(range(min(B, 4))),
+                    max_channels=NCA_CHANNELS,
+                )
+                shutil.copy(pdf_path, run_dir / "rollout_latest.pdf")
+
+        # ── Save best rollout ─────────────────────────────────────────────
+        if rollout is not None and loss < best_loss:
+            best_loss = loss
+            torch.save({
+                "step": step,
+                "loss": loss,
+                "rollout": rollout.cpu(),
+                "inp": inp.cpu(),
+                "out": out.cpu(),
+                "nca_out": nca_out.detach().cpu(),
+            }, run_dir / "best_rollout.pt")
+
         print(f"  -> saved: loss_curve.png, snapshot_{step:07d}.png" +
-              (", rollout GIF" if rollout is not None else ""))
+              (", rollout GIF, rollout PDF" if rollout is not None else ""))
 
 
 trainer.save_checkpoint()

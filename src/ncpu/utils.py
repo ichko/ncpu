@@ -549,3 +549,69 @@ def save_grid_image(path, rows, nrow=8, padding=2, vmin=-1, vmax=1, cmap="viridi
         dim=0,
     )
     media.write_image(str(path), full.numpy())
+
+def save_rollout_pdf(path, rollout, target, n_snapshots=6, batch_indices=None, max_channels=None, vmin=-1, vmax=1, cmap="viridis"):
+    """Save a rollout as a vector PDF with a matplotlib grid.
+
+    Parameters
+    ----------
+    path : str or Path
+        Output file path (should end in .pdf).
+    rollout : Tensor (B, T, C, H, W)
+        Full rollout tensor.
+    target : Tensor (B, H, W)
+        Target output for the first row.
+    n_snapshots : int
+        Number of timesteps to sample (evenly spaced).
+    batch_indices : list[int] or None
+        Which batch samples to show. Default: first 4.
+    max_channels : int or None
+        Max NCA channels to display. Default: all.
+    """
+    from matplotlib import pyplot as plt
+    import numpy as np
+
+    B_total, T, C, H, W = rollout.shape
+    if batch_indices is None:
+        batch_indices = list(range(min(B_total, 4)))
+    if max_channels is not None:
+        C = min(C, max_channels)
+
+    # pick evenly-spaced timestep indices
+    ts = np.linspace(0, T - 1, n_snapshots, dtype=int)
+
+    n_b = len(batch_indices)
+    # rows: for each batch sample → (1 target row + C channel rows)
+    # columns: n_snapshots timesteps
+    n_rows = n_b * (1 + C)
+    n_cols = len(ts)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(n_cols * 1.2, n_rows * 1.2),
+        squeeze=False,
+    )
+
+    for bi, b in enumerate(batch_indices):
+        row_offset = bi * (1 + C)
+        for col, t in enumerate(ts):
+            # target row (same across timesteps)
+            ax = axes[row_offset, col]
+            ax.imshow(target[b].detach().cpu().numpy(), vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal")
+            ax.set_xticks([]); ax.set_yticks([])
+            if col == 0:
+                ax.set_ylabel(f"b{b} tgt", fontsize=6)
+            if bi == 0:
+                ax.set_title(f"t={t}", fontsize=7)
+
+            # channel rows
+            for ci in range(C):
+                ax = axes[row_offset + 1 + ci, col]
+                ax.imshow(rollout[b, t, ci].detach().cpu().numpy(), vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal")
+                ax.set_xticks([]); ax.set_yticks([])
+                if col == 0:
+                    ax.set_ylabel(f"ch{ci}", fontsize=6)
+
+    fig.tight_layout(pad=0.3)
+    fig.savefig(str(path), format="pdf", bbox_inches="tight")
+    plt.close(fig)

@@ -14,7 +14,7 @@ from ncpu.loss import output_masked_rollout_loss, combined_loss
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, save_grid_image
+from ncpu.utils import freeze_frame, save_grid_image, save_rollout_pdf
 
 print(torch.__version__)
 print(torch.version.cuda)
@@ -54,7 +54,7 @@ def run_experiment(gaussian_noise, fire_rate):
         fire_rate=0.99,
         alive_threshold=0.1,
         zero_initialization=False,
-        kernel_size=5,
+        kernel_size=7,
         read_only_dims=[-4, -3, -2, -1],
         gaussian_noise=gaussian_noise,
         gaussian_noise_fire_rate=fire_rate,
@@ -70,6 +70,8 @@ def run_experiment(gaussian_noise, fire_rate):
         input_implant_type="disabled",
     )
     trainer.sanity_check()
+
+    best_loss = float("inf")
 
     pbar = tqdm(range(STEPS), desc=f"noise={gaussian_noise} fr={fire_rate}")
     for step in pbar:
@@ -175,6 +177,30 @@ def run_experiment(gaussian_noise, fire_rate):
                 gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
                 media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
                 shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+
+            # ── Rollout PDF snapshot ──────────────────────────────────────────
+            if rollout is not None:
+                pdf_path = run_dir / "rollouts" / f"rollout_{step:07d}.pdf"
+                save_rollout_pdf(
+                    pdf_path, rollout,
+                    target=out.squeeze(1) if out.dim() == 4 else out,
+                    n_snapshots=6,
+                    batch_indices=list(range(min(B, 4))),
+                    max_channels=NCA_CHANNELS,
+                )
+                shutil.copy(pdf_path, run_dir / "rollout_latest.pdf")
+
+            # ── Save best rollout ─────────────────────────────────────────
+            if rollout is not None and loss < best_loss:
+                best_loss = loss
+                torch.save({
+                    "step": step,
+                    "loss": loss,
+                    "rollout": rollout.cpu(),
+                    "inp": inp.cpu(),
+                    "out": out.cpu(),
+                    "nca_out": nca_out.detach().cpu(),
+                }, run_dir / "best_rollout.pt")
 
             print(f"  -> saved artifacts for step {step}")
 
