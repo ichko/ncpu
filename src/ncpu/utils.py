@@ -550,13 +550,13 @@ def save_grid_image(path, rows, nrow=8, padding=2, vmin=-1, vmax=1, cmap="viridi
     )
     media.write_image(str(path), full.numpy())
 
-def save_rollout_pdf(path, rollout, target, n_snapshots=6, batch_indices=None, max_channels=None, vmin=-1, vmax=1, cmap="viridis"):
-    """Save a rollout as a vector PDF with a matplotlib grid.
+def save_rollout_svg(path, rollout, target, n_snapshots=6, batch_indices=None, max_channels=None, vmin=-1, vmax=1, cmap="viridis", display_size=32):
+    """Save a rollout as a vector SVG with a matplotlib grid.
 
     Parameters
     ----------
     path : str or Path
-        Output file path (should end in .pdf).
+        Output file path (should end in .svg).
     rollout : Tensor (B, T, C, H, W)
         Full rollout tensor.
     target : Tensor (B, H, W)
@@ -567,9 +567,12 @@ def save_rollout_pdf(path, rollout, target, n_snapshots=6, batch_indices=None, m
         Which batch samples to show. Default: first 4.
     max_channels : int or None
         Max NCA channels to display. Default: all.
+    display_size : int
+        Downsample spatial dims to this size before plotting.
     """
     from matplotlib import pyplot as plt
     import numpy as np
+    import torch.nn.functional as F
 
     B_total, T, C, H, W = rollout.shape
     if batch_indices is None:
@@ -577,12 +580,25 @@ def save_rollout_pdf(path, rollout, target, n_snapshots=6, batch_indices=None, m
     if max_channels is not None:
         C = min(C, max_channels)
 
-    # pick evenly-spaced timestep indices
-    ts = np.linspace(0, T - 1, n_snapshots, dtype=int)
+    # Downsample rollout: (B, T, C, H, W) → (B, T, C, ds, ds)
+    ds = display_size
+    if H != ds or W != ds:
+        r_flat = rollout[:, :, :C].reshape(-1, 1, H, W).float()
+        r_flat = F.interpolate(r_flat, size=(ds, ds), mode='nearest')
+        rollout_ds = r_flat.reshape(B_total, T, C, ds, ds)
+    else:
+        rollout_ds = rollout[:, :, :C]
+
+    # Downsample target: (B, H, W) → (B, ds, ds)
+    if target.shape[-2] != ds or target.shape[-1] != ds:
+        target_ds = F.interpolate(target.unsqueeze(1).float(), size=(ds, ds), mode='nearest').squeeze(1)
+    else:
+        target_ds = target
+
+    # pick evenly-spaced timestep indices, always including first and last
+    ts = list(dict.fromkeys([0] + list(np.linspace(0, T - 1, n_snapshots, dtype=int)) + [T - 1]))
 
     n_b = len(batch_indices)
-    # rows: for each batch sample → (1 target row + C channel rows)
-    # columns: n_snapshots timesteps
     n_rows = n_b * (1 + C)
     n_cols = len(ts)
 
@@ -595,9 +611,11 @@ def save_rollout_pdf(path, rollout, target, n_snapshots=6, batch_indices=None, m
     for bi, b in enumerate(batch_indices):
         row_offset = bi * (1 + C)
         for col, t in enumerate(ts):
-            # target row (same across timesteps)
+            # target row
             ax = axes[row_offset, col]
-            ax.imshow(target[b].detach().cpu().numpy(), vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal")
+            data = target_ds[b].detach().cpu().numpy()
+            ax.pcolormesh(np.flipud(data), vmin=vmin, vmax=vmax, cmap=cmap, rasterized=False)
+            ax.set_aspect("equal")
             ax.set_xticks([]); ax.set_yticks([])
             if col == 0:
                 ax.set_ylabel(f"b{b} tgt", fontsize=6)
@@ -607,11 +625,69 @@ def save_rollout_pdf(path, rollout, target, n_snapshots=6, batch_indices=None, m
             # channel rows
             for ci in range(C):
                 ax = axes[row_offset + 1 + ci, col]
-                ax.imshow(rollout[b, t, ci].detach().cpu().numpy(), vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal")
+                data = rollout_ds[b, t, ci].detach().cpu().numpy()
+                ax.pcolormesh(np.flipud(data), vmin=vmin, vmax=vmax, cmap=cmap, rasterized=False)
+                ax.set_aspect("equal")
                 ax.set_xticks([]); ax.set_yticks([])
                 if col == 0:
                     ax.set_ylabel(f"ch{ci}", fontsize=6)
 
     fig.tight_layout(pad=0.3)
-    fig.savefig(str(path), format="pdf", bbox_inches="tight")
+    fig.savefig(str(path), format="svg", bbox_inches="tight")
+    plt.close(fig)
+
+def save_rollout_png(
+    path,
+    rollout,          # (T, C, H, W)
+    n_snapshots=6,
+    max_channels=None,
+    vmin=-1,
+    vmax=1,
+    cmap="viridis",
+    dpi=150,
+):
+    """Save a labelled rollout grid as PNG via matplotlib.
+
+    Rows  = channels (+ one 'target' row at the top if *target* is given).
+    Cols  = evenly-spaced timestep snapshots from the rollout.
+    One figure per batch element in *batch_indices*.
+    """
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+    import torch, numpy as np
+
+    path = Path(path)
+    T, C, H, W = rollout.shape
+    if max_channels is not None:
+        C = min(C, max_channels)
+
+    ts = torch.linspace(0, T - 1, n_snapshots).long()
+
+    n_rows = C + 1
+    n_cols = len(ts)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(n_cols * 1.4 + 0.8, n_rows * 1.4 + 0.6),
+        squeeze=False,
+    )
+
+    for col_idx, t_idx in enumerate(ts):
+        # Target row
+        row_offset = 0
+        
+        # Channel rows
+        for ci in range(n_rows):
+            ax = axes[ci + row_offset, col_idx]
+            tile = rollout[t_idx, ci]
+            ax.imshow(tile, vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal", interpolation="nearest")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if col_idx == 0:
+                ax.set_ylabel(f"ch {ci}", fontsize=7)
+            if ci == 0:
+                ax.set_title(f"t={t_idx.item()}", fontsize=7)
+
+    fig.tight_layout(pad=0.3)
+    fig.savefig(str(path), dpi=dpi, bbox_inches="tight")
     plt.close(fig)

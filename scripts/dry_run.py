@@ -14,7 +14,7 @@ from ncpu.loss import output_masked_rollout_loss, combined_loss
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, save_grid_image, save_rollout_pdf
+from ncpu.utils import freeze_frame, save_grid_image, save_rollout_svg, save_rollout_png
 
 print(torch.__version__)
 print(torch.version.cuda)
@@ -52,8 +52,8 @@ nca = NeuralCA(
     fire_rate=0.99,
     alive_threshold=0.1,
     zero_initialization=False,
-    kernel_size=7,
-    read_only_dims=[-1],
+    kernel_size=KERNEL_SIZE,
+    read_only_dims=[-4,-3,-2,-1],
     gaussian_noise=GAUSSIAN_NOISE,
     gaussian_noise_fire_rate=FIRE_RATE,
     padding_type="constant",
@@ -177,17 +177,21 @@ for step in pbar:
             media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
             shutil.copy(gif_path, run_dir / "rollout_latest.gif")
 
-        # ── Rollout PDF snapshot ──────────────────────────────────────────
+        # ── Rollout PNG snapshot ──────────────────────────────────────────
         if rollout is not None:
-            pdf_path = run_dir / "rollouts" / f"rollout_{step:07d}.pdf"
-            save_rollout_pdf(
-                pdf_path, rollout,
-                target=out.squeeze(1) if out.dim() == 4 else out,
-                n_snapshots=6,
-                batch_indices=list(range(min(B, 4))),
-                max_channels=NCA_CHANNELS,
-            )
-            shutil.copy(pdf_path, run_dir / "rollout_latest.pdf")
+            png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
+            expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
+            print("PNG: ", rollout.shape, expanded_target.shape)
+            to_save = torch.cat([expanded_target, rollout], dim=2) 
+            # to_save = rollout 
+            print("to_save: ", to_save.shape)
+            for gate in range(4):
+                save_rollout_png(
+                    png_path, to_save[gate,:,:,:,:],
+                    n_snapshots=6,
+                    max_channels=NCA_CHANNELS,
+                )
+                shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
 
         # ── Save best rollout ─────────────────────────────────────────
         if rollout is not None and loss < best_loss:

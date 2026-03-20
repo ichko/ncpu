@@ -14,7 +14,7 @@ from ncpu.loss import output_masked_rollout_loss, combined_loss
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, save_grid_image, save_rollout_pdf
+from ncpu.utils import freeze_frame, save_grid_image, save_rollout_png
 
 print(torch.__version__)
 print(torch.version.cuda)
@@ -29,10 +29,10 @@ STEPS = 20_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 16
 N_OUTPUT_BITS = 1
+KERNEL_SIZE=7
 
 GAUSSIAN_NOISE = 0.4
 FIRE_RATES = [0.2, 0.4, 0.6, 0.8, 1.0]
-
 
 def run_experiment(gaussian_noise, fire_rate):
     run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -46,6 +46,22 @@ def run_experiment(gaussian_noise, fire_rate):
     print(f"  Logging to: {log_path}")
     print(f"{'='*60}\n")
 
+    # Save config
+    config = {
+        "LEARNING_RATE": LEARNING_RATE,
+        "BATCH_SIZE": BATCH_SIZE,
+        "STEPS": STEPS,
+        "PLOT_EVERY": PLOT_EVERY,
+        "NCA_CHANNELS": NCA_CHANNELS,
+        "N_OUTPUT_BITS": N_OUTPUT_BITS,
+        "KERNEL_SIZE": KERNEL_SIZE,
+        "GAUSSIAN_NOISE": gaussian_noise,  # use actual value, not global
+        "FIRE_RATES": FIRE_RATES,
+        "fire_rate": fire_rate,            # use actual value, not global
+    }
+    with open(run_dir / "config.json", "w") as f:
+        json.dump(config, f, indent=2)
+
     dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=NCA_CHANNELS)
 
     nca = NeuralCA(
@@ -54,7 +70,7 @@ def run_experiment(gaussian_noise, fire_rate):
         fire_rate=0.99,
         alive_threshold=0.1,
         zero_initialization=False,
-        kernel_size=7,
+        kernel_size=KERNEL_SIZE,
         read_only_dims=[-4, -3, -2, -1],
         gaussian_noise=gaussian_noise,
         gaussian_noise_fire_rate=fire_rate,
@@ -179,17 +195,21 @@ def run_experiment(gaussian_noise, fire_rate):
                 media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
                 shutil.copy(gif_path, run_dir / "rollout_latest.gif")
 
-            # ── Rollout PDF snapshot ──────────────────────────────────────────
-            if rollout is not None:
-                pdf_path = run_dir / "rollouts" / f"rollout_{step:07d}.pdf"
-                save_rollout_pdf(
-                    pdf_path, rollout,
-                    target=out.squeeze(1) if out.dim() == 4 else out,
+        # ── Rollout PNG snapshot ──────────────────────────────────────────
+        if rollout is not None:
+            png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
+            expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
+            print("PNG: ", rollout.shape, expanded_target.shape)
+            to_save = torch.cat([expanded_target, rollout], dim=2) 
+            # to_save = rollout 
+            print("to_save: ", to_save.shape)
+            for gate in range(4):
+                save_rollout_png(
+                    png_path, to_save[gate,:,:,:,:],
                     n_snapshots=6,
-                    batch_indices=list(range(min(B, 4))),
                     max_channels=NCA_CHANNELS,
                 )
-                shutil.copy(pdf_path, run_dir / "rollout_latest.pdf")
+                shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
 
             # ── Save best rollout ─────────────────────────────────────────
             if rollout is not None and loss < best_loss:
