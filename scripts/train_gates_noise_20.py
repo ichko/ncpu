@@ -200,35 +200,31 @@ def run_experiment(gaussian_noise, fire_rate):
                 media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
                 shutil.copy(gif_path, run_dir / "rollout_latest.gif")
 
-        # ── Rollout PNG snapshot ──────────────────────────────────────────
-        if rollout is not None:
-            png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
-            expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
-            print("PNG: ", rollout.shape, expanded_target.shape)
-            to_save = torch.cat([expanded_target, rollout], dim=2) 
-            # to_save = rollout 
-            print("to_save: ", to_save.shape)
-            for gate in range(4):
-                save_rollout_png(
-                    png_path, to_save[gate,:,:,:,:],
-                    n_snapshots=6,
-                    max_channels=NCA_CHANNELS,
-                )
-                shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
+                # ── Rollout PNG snapshot ──────────────────────────────────────────
+                png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
+                expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
+                to_save = torch.cat([expanded_target, rollout], dim=2) 
+                for gate in range(4):
+                    save_rollout_png(
+                        png_path, to_save[gate,:,:,:,:],
+                        n_snapshots=6,
+                        max_channels=NCA_CHANNELS,
+                    )
+                    shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
 
-            # ── Save best rollout ─────────────────────────────────────────
-            if rollout is not None and loss < best_loss:
-                best_loss = loss
-                torch.save({
-                    "step": step,
-                    "loss": loss,
-                    "rollout": rollout.cpu(),
-                    "inp": inp.cpu(),
-                    "out": out.cpu(),
-                    "nca_out": nca_out.detach().cpu(),
-                }, run_dir / "best_rollout.pt")
+                # ── Save best rollout ─────────────────────────────────────────
+                if loss < best_loss:
+                    best_loss = loss
+                    torch.save({
+                        "step": step,
+                        "loss": loss,
+                        "rollout": rollout.cpu(),
+                        "inp": inp.cpu(),
+                        "out": out.cpu(),
+                        "nca_out": nca_out.detach().cpu(),
+                    }, run_dir / "best_rollout.pt")
 
-            print(f"  -> saved artifacts for step {step}")
+                print(f"  -> saved artifacts for step {step}")
 
     trainer.save_checkpoint()
 
