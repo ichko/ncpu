@@ -11,16 +11,17 @@ from torch.utils.data import DataLoader
 
 from ncpu.base_trainer import BaseTrainer
 from ncpu.loss import output_masked_rollout_loss
-from ncpu.nca import NeuralCAv2
+from ncpu.nca import NeuralCA
 from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.utils import (
     add_gaussian_noise,
     print_tensor,
+    meshgrid_xy,
     sequence_batch_to_html_gifs,
     tensor_to_video_pane,
 )
 
-from typing import Optional, Callable, Sequence, Union
+from typing import Optional, Callable, Sequence, Union, List
 
 
 class NCPUTrainer(BaseTrainer):
@@ -28,16 +29,16 @@ class NCPUTrainer(BaseTrainer):
 
     def __init__(
         self,
-        nca: NeuralCAv2,
+        nca: NeuralCA,
         dataloader: DataLoader,
         lr: float,
         gaussian_noise: float,
         grad_clip: Optional[float] = 1.0,
         stop_loss: Optional[float] = None,
         checkpoint_pattern: Optional[str] = None,
-        loss_fn=output_masked_rollout_loss,
-        input_implant_type="first",
-        normalize_fn=normalize_neg1_to_1,
+        loss_fn : Optional[Callable] =output_masked_rollout_loss,
+        input_implant_type : str ="first",
+        normalize_fn :  Optional[Callable] =normalize_neg1_to_1,
     ):
         super().__init__(
             **(
@@ -46,6 +47,7 @@ class NCPUTrainer(BaseTrainer):
                 else {"checkpoint_pattern": checkpoint_pattern}
             )
         )
+        print(f"nca.device: {nca.device}")
         self.nca = nca
         self.to(nca.device)
         self.dataloader = dataloader
@@ -57,7 +59,6 @@ class NCPUTrainer(BaseTrainer):
         self.grad_clip = grad_clip
         self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
 
-        self.optim = torch.optim.Adam(self.nca.parameters(), lr=self.lr)
         left_mask, right_mask = self.ds.get_io_mask()
         self.inp_mask = torch.tensor(left_mask).to(self.nca.device)
         self.out_mask = torch.tensor(right_mask).to(self.nca.device)
@@ -102,15 +103,18 @@ class NCPUTrainer(BaseTrainer):
                 .expand(bs, self.nca.channels, self.ds.H, self.ds.W)
                 .clone()
             )
+            first_state = first_state.to(self.nca.device)
+        elif self.input_implant_type == "disabled":
+            return inp.to(self.nca.device)
         else:
             first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
             first_state[:, 0] = inp
-        first_state = first_state.to(self.nca.device)
         return first_state
 
     def optim_step(self, steps, return_rollout=False):
         batch = next(self.dataset_iter)
         inp, out = batch
+        print(f"optim_step: inp {inp.shape}  out {out.shape}")
 
         inp = self.normalize_fn(inp)
         out = self.normalize_fn(out)
@@ -208,9 +212,14 @@ class NCPUTrainer(BaseTrainer):
         )
 
         rollout = info["rollout"]
-        if rollout:
-            rollout = rollout[:to_show]
-            vid = tensor_to_video_pane(
-                rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
+        if rollout is not None:
+            sequence_batch_to_html_gifs(
+                rollout, columns=to_show, width=64, height=64, fps=10, channels=[n for n in range(to_show)]
             )
-            return pn.Column(vid)
+
+        #     print("hello")
+        #     rollout = rollout[:to_show]
+        #     vid = tensor_to_video_pane(
+        #         rollout, nrow=to_show, zoom=2, padding=1, fps=10, format="gif"
+        #     )
+        #     return pn.Column(vid)

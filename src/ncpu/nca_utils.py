@@ -163,3 +163,32 @@ class ReadOnlyChannels(nn.Module):
     def forward(self, x):
         x = x * self.read_only_mask
         return x
+
+
+class GaussianNoise(nn.Module):
+    """Adds Gaussian noise to all channels except read-only dims during training."""
+
+    def __init__(self, channels: int, std: float = 0.1, fire_rate: float = 1.0, read_only_dims: list = []):
+        super().__init__()
+        self.std = std
+        self.fire_rate = fire_rate
+        # Build a mask: 1 for writable channels, 0 for read-only
+        mask = torch.ones(channels)
+        for d in read_only_dims:
+            mask[d] = 0.0
+        # shape (C,) → broadcastable to (B, C, H, W)
+        self.register_buffer("mask", mask.view(1, -1, 1, 1))
+
+    def forward(self, x):
+        if self.training and self.std > 0:
+            noise = torch.randn_like(x) * self.std
+            noise = noise * self.mask
+            if self.fire_rate < 1.0:
+                # Stochastic spatial mask: (B, 1, H, W)
+                fire_mask = (
+                    torch.rand(x.shape[0], 1, x.shape[2], x.shape[3], device=x.device)
+                    < self.fire_rate
+                ).to(x.dtype)
+                noise = noise * fire_mask
+            x = x + noise
+        return x

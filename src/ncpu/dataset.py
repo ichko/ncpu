@@ -4,6 +4,7 @@ import sys
 
 import sys
 import torch
+from argparse import Namespace
 from torch.utils.data import DataLoader, IterableDataset
 
 from ncpu.utils import make_alu_screen, make_io_screen
@@ -160,98 +161,105 @@ class NCPUDataset(IterableDataset):
             shuffle=False,  # can't shuffle IterableDataset
         )
 
-class DynamicDataset(IterableDataset):
-    def __init__(
-        self,
-        config,
-        update_y : int,
-        update_x : int,
-        steps: int,
-        stages : int = sys.maxsize
-    ):
-        self.steps = steps
-        self.counter = 0
-        self.dataset = NCPUDataset(config)
-        self.spacing = self.dataset.spacing
-        self.W = self.dataset.W
-        self.H = self.dataset.H
-        self.r = self.dataset.r
-        self.update_y = update_y
-        self.update_x = update_x
 
-        self.stage = 0
-        self.stages = stages
+class MultiGateDataset(IterableDataset):
 
-    def get_io_mask(self):
-        return self.dataset.get_io_mask()
+    GATE_NAMES = ["AND", "OR", "XOR", "NAND"]
 
-    def get_sample(self):
-        if self.counter >= self.steps and self.stage < self.stages:
-            self.counter = 0
-            spacing = self.spacing
-            spacing_x = max(spacing[0] - self.update_x, self.r) # stop points from moving outside the board
-            spacing_y = max(spacing[1] - self.update_y, self.r + 2) # stop points from moving outside the board
-            self.spacing = (spacing_x, spacing_y)
-            self.stage += 1
+    def __init__(self, config, nca_channels):
 
-        self.dataset.W = self.W
-        self.dataset.H = self.H
-        self.dataset.r = self.r
-        self.dataset.spacing = self.spacing
-        ret = self.dataset.get_sample()
-        self.counter += 1
-        return ret
+        self.W = config.W
+        self.H = config.H
+        self.r = config.r
+        self.spacing = config.spacing
+        self.nca_channels = nca_channels
 
-    def __iter__(self):
-        while True:
-            yield self.get_sample()
-
-    def get_dataloader(self, batch_size):
-        return DataLoader(
-            self,
-            batch_size=batch_size,
-            shuffle=False,  # can't shuffle IterableDataset
+        self.AND_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_AND_gate,
+            )
+        )
+        self.OR_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_OR_gate,
+            )
+        )
+        self.XOR_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_XOR_gate,
+            )
+        )
+        self.NAND_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_NAND_gate,
+            )
         )
 
-class ScheduledDataset(IterableDataset):
-    def __init__(
-        self,
-        datasets: List[NCPUDataset],
-        steps: int,
-    ):
-        self.steps = steps
+        self.datasets = [self.AND_Dataset, self.OR_Dataset, self.XOR_Dataset, self.NAND_Dataset]
         self.counter = 0
-        self.ds_index = 0
-        self.datasets = datasets
-        self.W = datasets[self.ds_index].W
-        self.H = datasets[self.ds_index].H
-        self.r = datasets[self.ds_index].r
+
+    def _return_dataset(self):
+        return self.datasets[self.counter % 4]
+
+    def _code_dataset(self, inp, gate_idx):
+        """Write a one-hot gate code into the last 4 channels of inp.
+
+        inp shape: (nca_channels, H, W)
+        Channels [-4], [-3], [-2], [-1] encode AND, OR, XOR, NAND respectively.
+        Only the left half (columns 0..W//2) is set to 1 for the active gate;
+        the right half and all inactive gate channels remain 0.
+        """
+        mid = self.W // 2
+        # Zero out all code channels
+        inp[-4:] = 256 // 2 
+        # Set the left half of the active gate's channel to 1
+        inp[-(4 - gate_idx), :, :mid] = 256
+        return inp
+
+    def get_output_bit_masks(self):
+        """Returns (n_bits, H, W) float tensor — one binary mask per output circle."""
+        return self._return_dataset().get_output_bit_masks()
 
     def get_io_mask(self):
-        return self.datasets[self.ds_index].get_io_mask()
+        return self._return_dataset().get_io_mask()
 
     def get_sample(self):
-        if self.counter >= self.steps:
-            self.counter = 0
-            self.ds_index = (
-                self.ds_index + 1
-                if self.ds_index < (len(self.datasets) - 1)
-                else self.ds_index
-            )
+        gate_idx = self.counter % 4
+        dataset = self.datasets[gate_idx]
+        left, right = dataset.get_sample()
 
-        self.W = self.datasets[self.ds_index].W
-        self.H = self.datasets[self.ds_index].H
-        self.r = self.datasets[self.ds_index].r
-        ret = self.datasets[self.ds_index].get_sample()
-        self.counter += 1
-        return ret
+        # Expand single-channel (H, W) input to (nca_channels, H, W)
+        inp = left.unsqueeze(0).expand(self.nca_channels, self.H, self.W).clone()
 
-    def get_io_mask(self):
-        return self.datasets[self.ds_index].get_io_mask()
+        # Encode which gate is active into the last 4 channels
+        inp = self._code_dataset(inp, gate_idx)
+
+        return inp, right
 
     def __iter__(self):
         while True:
             yield self.get_sample()
+            self.counter += 1
 
     def get_dataloader(self, batch_size):
         return DataLoader(

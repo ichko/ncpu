@@ -2,6 +2,13 @@ import torch
 from torch.nn import functional as F
 
 
+def loss_mse_whole_seq(rollout, out, **kwargs):
+    N = rollout.shape[1]
+    nca_outs = rollout[:, -N:, 0]
+    out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
+    loss = F.mse_loss(nca_outs, out_rep)
+    return loss
+
 def loss_mse_rollout(rollout, out, **kwargs):
     N = min(5, rollout.shape[1])
     nca_outs = rollout[:, -N:, 0]
@@ -11,13 +18,15 @@ def loss_mse_rollout(rollout, out, **kwargs):
 
 
 def loss_white_black(rollout, out, **kwargs):
-    nca_out = rollout[:, -1, 0]
+    N = rollout.shape[1]
+    nca_outs = rollout[:, -N:, 0]
 
     # print(out.shape, out.dtype, out.min(), out.max())
-    white_mask = (out > 0.0).float()
-    black_mask = (out <= 0.0).float()
+    out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
+    white_mask = (out_rep > 0.0).float()
+    black_mask = (out_rep <= 0.0).float()
 
-    batch_loss = F.mse_loss(nca_out, out, reduction="none")
+    batch_loss = F.mse_loss(nca_outs, out_rep, reduction="none")
     white_loss = batch_loss * white_mask
     black_loss = batch_loss * black_mask
 
@@ -43,5 +52,8 @@ def fullscreen_rollout_loss(rollout, out, inp, **kwargs):
     B = rollout.shape[0]
     T = rollout.shape[1] - 1
     nca_outs = rollout[:, 1:, 0]
-    out_rep = (out + inp).unsqueeze(1).expand(B, T, *out.shape[1:])
+    out_rep = (out).unsqueeze(1).expand(B, T, *out.shape[1:])
     return F.mse_loss(nca_outs, out_rep)
+
+def combined_loss(rollout, out, inp, mask, **kwargs):
+    return 0.8 * output_masked_rollout_loss(rollout, out, mask =  mask) + 0.2 * fullscreen_rollout_loss(rollout, out, inp=inp)
