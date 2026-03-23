@@ -135,7 +135,7 @@ def main():
     else:
         nca.load_state_dict(state)
 
-    nca.eval()
+    # nca.eval()
 
     dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=nca.channels)
     dl = dataset.get_dataloader(batch_size=args.batch)
