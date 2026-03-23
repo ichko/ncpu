@@ -95,7 +95,7 @@ def output_rollout_input_last_loss(rollout, out, mask, inp_mask, inp, **kwargs):
     B = rollout.shape[0]
     T = rollout.shape[1] - 1
     nca_outs = rollout[:, 1:, 0]  # (B, T, H, W)
-    last = rollout[:, -1, 0]      # (B, H, W)
+    last = rollout[:, -1, 0]  # (B, H, W)
 
     out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
     out_loss = ((nca_outs - out_rep) ** 2 * mask).sum() / (mask.sum() * B * T)

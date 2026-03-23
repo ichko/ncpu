@@ -6,7 +6,7 @@ import sys
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
-from ncpu.utils import make_alu_screen, make_io_screen, make_io_screen_cols1
+from ncpu.utils import make_alu_screen, make_io_screen, make_io_screen_bottom_aligned, make_io_screen_cols1
 
 
 def sample_8bit_adder(*args):
@@ -16,6 +16,16 @@ def sample_8bit_adder(*args):
     b_int = int("".join(map(str, b.tolist())), 2)
     s_int = a_int + b_int
     out = torch.tensor(list(map(int, f"{s_int:09b}")))
+    return torch.cat([a, b]), out
+
+
+def sample_4bit_multiplier(*args):
+    a = torch.randint(0, 2, size=(4,))
+    b = torch.randint(0, 2, size=(4,))
+    a_int = int("".join(map(str, a.tolist())), 2)
+    b_int = int("".join(map(str, b.tolist())), 2)
+    p_int = a_int * b_int  # 0..225, fits in 8 bits
+    out = torch.tensor(list(map(int, f"{p_int:08b}")))
     return torch.cat([a, b]), out
 
 
@@ -81,6 +91,78 @@ def sample_majority3(*args):
 
 # def sample_8bit_adder(*args):
 #     return two_arg_sampler(lambda a, b: a != b)
+
+
+class ExtrapolationDataset(IterableDataset):
+    """Adder dataset with variable bit width for length-generalisation experiments.
+
+    Each batch_size consecutive samples share the same bit width k, sampled
+    uniformly from [min_bits, max_bits].  The grid is fixed to accommodate
+    max_bits inputs and max_bits+1 outputs, with bottom alignment so LSB is
+    always at the same absolute y position.
+    """
+
+    def __init__(self, W, H, r, spacing, min_bits, max_bits, batch_size):
+        self.W = W
+        self.H = H
+        self.r = r
+        self.spacing = spacing
+        self.min_bits = min_bits
+        self.max_bits = max_bits
+        self.batch_size = batch_size
+        self.current_k = torch.randint(min_bits, max_bits + 1, ()).item()
+        self.samples_at_k = 0
+
+    def _resample_k(self):
+        self.current_k = torch.randint(self.min_bits, self.max_bits + 1, ()).item()
+        self.samples_at_k = 0
+
+    def _make_screen(self, a_bits, b_bits, output_bits):
+        return make_io_screen_bottom_aligned(
+            self.H, self.W, self.r, self.spacing, a_bits, b_bits, output_bits
+        )
+
+    def get_io_mask(self):
+        inp = self._make_screen([1] * self.max_bits, [1] * self.max_bits, [])
+        out = self._make_screen([], [], [1] * (self.max_bits + 1))
+        return inp, out
+
+    def get_output_bit_masks(self):
+        n_out = self.max_bits + 1
+        masks = []
+        for i in range(n_out):
+            one_hot = [1 if j == i else 0 for j in range(n_out)]
+            s = self._make_screen([], [], one_hot)
+            masks.append(torch.from_numpy(s > 200).float())
+        return torch.stack(masks)  # (n_out, H, W)
+
+    def get_sample(self):
+        if self.samples_at_k >= self.batch_size:
+            self._resample_k()
+
+        k = self.current_k
+        a = torch.randint(0, 2, (k,))
+        b = torch.randint(0, 2, (k,))
+        a_int = int("".join(map(str, a.tolist())), 2)
+        b_int = int("".join(map(str, b.tolist())), 2)
+        s_int = a_int + b_int
+        out_bits = list(map(int, f"{s_int:0{k + 1}b}"))
+
+        inp = self._make_screen(a.tolist(), b.tolist(), [])
+        out = self._make_screen([], [], out_bits)
+
+        self.samples_at_k += 1
+        return (
+            torch.from_numpy(inp).float(),
+            torch.from_numpy(out).float(),
+        )
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
+
+    def get_dataloader(self, batch_size):
+        return DataLoader(self, batch_size=batch_size, shuffle=False)
 
 
 class NCPUDataset(IterableDataset):
@@ -326,98 +408,72 @@ def _int_to_bits(n, width):
     return [int(b) for b in f"{n:0{width}b}"]
 
 
-def _compute_alu(a_int, b_int, cin, op):
-    """Compute 8-bit ALU result and carry_out.
+def _compute_alu(a_int, b_int, op):
+    """Compute 8-bit ALU result (truncated to 8 bits).
 
     Opcodes:
-        0: ADD   A + B + cin
-        1: SUB   A - B - cin  (carry = NOT borrow)
+        0: ADD   (A + B) & 0xFF
+        1: SUB   (A - B) & 0xFF
         2: AND   A & B
         3: OR    A | B
         4: XOR   A ^ B
-        5: NOT   ~A
-        6: SHL   A << 1, cin → LSB
-        7: SHR   A >> 1, cin → MSB
-
-    Returns (result_int, carry_out)
+        5: NOT   ~A & 0xFF
+        6: SHL   (A << 1) & 0xFF
+        7: SHR   A >> 1
     """
-    carry_out = 0
-
-    if op == 0:  # ADD
-        full = a_int + b_int + cin
-        result = full & 0xFF
-        carry_out = int(full > 0xFF)
-    elif op == 1:  # SUB
-        full = a_int - b_int - cin
-        result = full & 0xFF
-        carry_out = int(full >= 0)  # carry = NOT borrow
-    elif op == 2:  # AND
-        result = a_int & b_int
-    elif op == 3:  # OR
-        result = a_int | b_int
-    elif op == 4:  # XOR
-        result = a_int ^ b_int
-    elif op == 5:  # NOT A
-        result = (~a_int) & 0xFF
-    elif op == 6:  # SHL
-        carry_out = (a_int >> 7) & 1
-        result = ((a_int << 1) | cin) & 0xFF
-    else:  # SHR
-        carry_out = a_int & 1
-        result = ((cin << 7) | (a_int >> 1)) & 0xFF
-
-    return result, carry_out
+    if   op == 0: return (a_int + b_int) & 0xFF
+    elif op == 1: return (a_int - b_int) & 0xFF
+    elif op == 2: return a_int & b_int
+    elif op == 3: return a_int | b_int
+    elif op == 4: return a_int ^ b_int
+    elif op == 5: return (~a_int) & 0xFF
+    elif op == 6: return (a_int << 1) & 0xFF
+    else:         return a_int >> 1
 
 
 class ALUDataset(IterableDataset):
-    """8-bit ALU dataset using the make_alu_screen layout."""
+    """8-bit ALU dataset — column layout (A/B left, opcode middle, result right)."""
 
     def __init__(self, config):
-        self.W = config.W
-        self.H = config.H
-        self.r = config.r
+        self.W       = config.W
+        self.H       = config.H
+        self.r       = config.r
+        self.spacing = config.spacing
 
-    def _make_screen(
-        self, a=None, b=None, carry_in=None, opcode=None, result=None, carry_out=None
-    ):
+    def _make_screen(self, a_bits=None, b_bits=None, opcode_bits=None, result_bits=None):
         return make_alu_screen(
-            self.H, self.W, self.r,
-            a=a, b=b, carry_in=carry_in, opcode=opcode, result=result, carry_out=carry_out,
+            self.H, self.W, self.r, self.spacing,
+            a_bits=a_bits, b_bits=b_bits,
+            opcode_bits=opcode_bits, result_bits=result_bits,
         )
 
     def get_io_mask(self):
-        inp = self._make_screen(a=[1] * 8, b=[1] * 8, carry_in=[1], opcode=[1] * 3)
-        out = self._make_screen(result=[1] * 8, carry_out=[1])
+        inp = self._make_screen(a_bits=[1]*8, b_bits=[1]*8, opcode_bits=[1]*3)
+        out = self._make_screen(result_bits=[1]*8)
         return inp, out
 
     def get_output_bit_masks(self):
-        """Returns (9, H, W) tensor — one mask per output bit (8 result + carry_out)."""
+        """Returns (8, H, W) tensor — one mask per output bit."""
         masks = []
         for i in range(8):
-            s = self._make_screen(result=[1 if j == i else 0 for j in range(8)])
+            s = self._make_screen(result_bits=[1 if j == i else 0 for j in range(8)])
             masks.append(torch.from_numpy(s > 200).float())
-        s = self._make_screen(carry_out=[1])
-        masks.append(torch.from_numpy(s > 200).float())
-        return torch.stack(masks)  # (9, H, W)
+        return torch.stack(masks)  # (8, H, W)
 
     def get_sample(self):
         a_int = torch.randint(0, 256, ()).item()
         b_int = torch.randint(0, 256, ()).item()
-        cin = torch.randint(0, 2, ()).item()
-        op = torch.randint(0, 8, ()).item()
+        op    = torch.randint(0, 8, ()).item()
 
-        result_int, carry_out = _compute_alu(a_int, b_int, cin, op)
+        result_int = _compute_alu(a_int, b_int, op)
 
+        uses_b = op < 5  # ADD, SUB, AND, OR, XOR use B; NOT/SHL/SHR do not
         inp = self._make_screen(
-            a=_int_to_bits(a_int, 8),
-            b=_int_to_bits(b_int, 8),
-            carry_in=[cin],
-            opcode=_int_to_bits(op, 3),
+            a_bits=_int_to_bits(a_int, 8),
+            b_bits=_int_to_bits(b_int, 8) if uses_b else None,
+            opcode_bits=_int_to_bits(op, 3),
         )
-        out = self._make_screen(
-            result=_int_to_bits(result_int, 8),
-            carry_out=[carry_out],
-        )
+        out = self._make_screen(result_bits=_int_to_bits(result_int, 8))
         return (torch.from_numpy(inp).float(), torch.from_numpy(out).float())
 
     def __iter__(self):

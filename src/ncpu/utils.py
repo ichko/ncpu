@@ -304,6 +304,40 @@ def make_io_screen(H, W, r, spacing, left_input, right_input):
     return screen
 
 
+def make_io_screen_bottom_aligned(H, W, r, spacing, a_bits, b_bits, output_bits):
+    """Fixed-size grid with bottom-aligned circles for variable-width adder inputs.
+
+    LSB (last element, MSB-first convention) is anchored to a fixed y position
+    regardless of how many bits are provided — so the NCA sees spatially consistent
+    encodings across different bit widths.
+
+    Layout:
+        Col 0 (x = side_sp):        A operand
+        Col 1 (x = side_sp + step): B operand
+        Right (x = W - side_sp):    output/result
+    """
+    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
+    among_sp, side_sp = int(spacing[0]), int(spacing[1])
+    r = int(r)
+    step = 2 * r + among_sp
+    bottom_y = H - side_sp  # fixed LSB anchor regardless of bit count
+
+    def draw_col(bits, cx):
+        for i, bit in enumerate(reversed(bits)):  # i=0 → LSB at bottom
+            y = bottom_y - i * step
+            if r <= y < H - r:
+                cv2.circle(screen, (cx, y), r, 255 if bit else 0, -1)
+
+    if a_bits:
+        draw_col(a_bits, side_sp)
+    if b_bits:
+        draw_col(b_bits, side_sp + step)
+    if output_bits:
+        draw_col(output_bits, W - side_sp)
+
+    return screen
+
+
 def make_io_screen_cols1(H, W, r, spacing, left_input, right_input):
     """Like make_io_screen but inputs and outputs are each a single column."""
     screen = np.full((H, W), fill_value=128, dtype=np.uint8)
@@ -330,61 +364,58 @@ def make_alu_screen(
     H,
     W,
     r,
-    a=None,
-    b=None,
-    carry_in=None,
-    opcode=None,
-    result=None,
-    carry_out=None,
+    spacing,
+    a_bits=None,
+    b_bits=None,
+    opcode_bits=None,
+    result_bits=None,
 ):
-    """Draw an ALU input/output screen with concentric circular layout.
+    """Draw an ALU input/output screen with three-column layout.
 
-    Layout:
-        Outer ring (20): A[0-7], B[0-7], carry_in, opcode[0-2]
-        Middle ring (8): result bits
-        Center      (1): carry_out
+    Layout (left → middle → right):
+      Left   : A (sub-col 0) + B (sub-col 1), 8 rows × 2 columns
+      Middle : opcode[0..2], single column at W//2
+      Right  : result[0..7], single column at W − side_sp
 
     Args:
-        H, W      : grid size
-        r         : circle radius
-        a, b      : list of 8 ints (bits), or None
-        carry_in  : list of 1 int, or None
-        opcode    : list of 3 ints, or None
-        result    : list of 8 ints, or None
-        carry_out : list of 1 int, or None
+        H, W         : grid size
+        r            : circle radius
+        spacing      : (among_sp, side_sp)
+        a_bits/b_bits: list of 8 ints (MSB-first), or None
+        opcode_bits  : list of 3 ints, or None
+        result_bits  : list of 8 ints, or None
     """
-    screen = np.full((H, W), 128, dtype=np.uint8)
-    cy0, cx0 = H // 2, W // 2
-    outer_r  = min(H, W) // 2 - r - 6
-    result_r = min(H, W) // 4 - 2
+    among_sp = int(spacing[0])
+    side_sp  = int(spacing[1])
+    r        = int(r)
+    screen   = np.full((H, W), fill_value=128, dtype=np.uint8)
 
-    def ring_centers(n, ring_radius):
-        return [
-            (
-                int(round(cy0 + ring_radius * np.sin(2 * np.pi * i / n - np.pi / 2))),
-                int(round(cx0 + ring_radius * np.cos(2 * np.pi * i / n - np.pi / 2))),
-            )
-            for i in range(n)
-        ]
-
-    def draw_group(bits, centers):
-        for bit, (cy, cx) in zip(bits, centers):
+    def _draw_col(bits, cx):
+        n  = len(bits)
+        v  = n * 2*r + among_sp * (n - 1)
+        tm = (H - v) // 2
+        for i, bit in enumerate(bits):
+            cy = tm + r + i * (2*r + among_sp)
             cv2.circle(screen, (cx, cy), r, 255 if bit else 0, -1)
 
-    # outer ring: A[0-7]=0-7, B[0-7]=8-15, cin=16, opcode[0-2]=17-19
-    outer = ring_centers(20, outer_r)
-    if a        is not None: draw_group(a,        outer[0:8])
-    if b        is not None: draw_group(b,        outer[8:16])
-    if carry_in is not None: draw_group(carry_in, outer[16:17])
-    if opcode   is not None: draw_group(opcode,   outer[17:20])
+    # Left: A sub-col 0, B sub-col 1 — both span 8 rows with shared vertical origin
+    if a_bits is not None or b_bits is not None:
+        n  = 8
+        v  = n * 2*r + among_sp * (n - 1)
+        tm = (H - v) // 2
+        for col_i, bits in enumerate([a_bits or [0]*8, b_bits or [0]*8]):
+            cx = side_sp + col_i * (2*r + among_sp)
+            for i, bit in enumerate(bits):
+                cy = tm + r + i * (2*r + among_sp)
+                cv2.circle(screen, (cx, cy), r, 255 if bit else 0, -1)
 
-    # middle ring: result bits
-    if result is not None:
-        draw_group(result, ring_centers(8, result_r))
+    # Middle: opcode bits, centered at W//2
+    if opcode_bits:
+        _draw_col(opcode_bits, W // 2)
 
-    # center: carry_out
-    if carry_out is not None:
-        cv2.circle(screen, (cx0, cy0), r, 255 if carry_out[0] else 0, -1)
+    # Right: result bits
+    if result_bits:
+        _draw_col(result_bits, W - side_sp)
 
     return screen
 

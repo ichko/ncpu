@@ -23,22 +23,28 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from ncpu.dataset import (
-    ALUDataset, NCPUDataset,
-    sample_4bit_adder, sample_8bit_adder,
+    ALUDataset, ExtrapolationDataset, NCPUDataset,
+    sample_4bit_adder, sample_4bit_multiplier, sample_8bit_adder,
     sample_AND_gate, sample_OR_gate, sample_NOR_gate, sample_NAND_gate, sample_XOR_gate,
 )
 from ncpu.nca import NeuralCA
-from ncpu.utils import freeze_frame, make_alu_screen, make_grid, make_io_screen
+from ncpu.utils import freeze_frame, make_alu_screen, make_grid, make_io_screen, make_io_screen_bottom_aligned, make_io_screen_cols1
 
 RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 SAMPLER_MAP = {
-    "sample_4bit_adder": sample_4bit_adder,
-    "sample_8bit_adder": sample_8bit_adder,
-    "sample_AND_gate": sample_AND_gate,
-    "sample_OR_gate": sample_OR_gate,
-    "sample_NOR_gate": sample_NOR_gate,
-    "sample_NAND_gate": sample_NAND_gate,
-    "sample_XOR_gate": sample_XOR_gate,
+    "sample_4bit_adder":      sample_4bit_adder,
+    "sample_8bit_adder":      sample_8bit_adder,
+    "sample_4bit_multiplier": sample_4bit_multiplier,
+    "sample_AND_gate":        sample_AND_gate,
+    "sample_OR_gate":         sample_OR_gate,
+    "sample_NOR_gate":        sample_NOR_gate,
+    "sample_NAND_gate":       sample_NAND_gate,
+    "sample_XOR_gate":        sample_XOR_gate,
+}
+SCREEN_FN_MAP = {
+    "make_io_screen":               make_io_screen,
+    "make_io_screen_cols1":         make_io_screen_cols1,
+    "make_io_screen_bottom_aligned": make_io_screen_bottom_aligned,
 }
 ALU_OPCODES = ["ADD", "SUB", "AND", "OR", "XOR", "NOT", "SHL", "SHR"]
 
@@ -79,12 +85,33 @@ def load_adder_run(run_name: str, checkpoint_name: str):
     config  = json.loads((run_dir / "config.json").read_text())
     ds_cfg, nca_cfg = config["ds"], config["nca"]
 
+    screen_fn = SCREEN_FN_MAP.get(ds_cfg.get("screen_fn", "make_io_screen"), make_io_screen)
     dataset = NCPUDataset(Namespace(
         W=ds_cfg["W"], H=ds_cfg["H"], r=ds_cfg["r"],
         spacing=tuple(ds_cfg["spacing"]),
         sampler=SAMPLER_MAP[ds_cfg["sampler"]],
         balanced=False,
+        screen_fn=screen_fn,
     ))
+    nca = _build_nca(nca_cfg)
+    nca.load_state_dict(torch.load(run_dir / "checkpoints" / checkpoint_name, map_location="cpu"))
+    nca.eval()
+    return nca, dataset, config
+
+
+@st.cache_resource
+def load_extrapolation_run(run_name: str, checkpoint_name: str):
+    run_dir = RUNS_DIR / run_name
+    config  = json.loads((run_dir / "config.json").read_text())
+    ds_cfg, nca_cfg = config["ds"], config["nca"]
+
+    dataset = ExtrapolationDataset(
+        W=ds_cfg["W"], H=ds_cfg["H"], r=ds_cfg["r"],
+        spacing=tuple(ds_cfg["spacing"]),
+        min_bits=ds_cfg["min_bits"],
+        max_bits=8,  # always load with full 8-bit capacity for inference
+        batch_size=ds_cfg["batch_size"],
+    )
     nca = _build_nca(nca_cfg)
     nca.load_state_dict(torch.load(run_dir / "checkpoints" / checkpoint_name, map_location="cpu"))
     nca.eval()
@@ -108,6 +135,9 @@ def load_alu_run(run_name: str, checkpoint_name: str):
 
 def is_alu_run(config):
     return config.get("run", {}).get("task") == "alu_8bit"
+
+def is_extrapolation_run(config):
+    return "min_bits" in config.get("ds", {})
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -230,21 +260,33 @@ def load_log(run_dir: Path):
     sampled = lines[::step]
     if lines and lines[-1] not in sampled:
         sampled.append(lines[-1])
-    steps, losses, bits = [], [], []
+    steps, losses, bits, k_vals = [], [], [], []
+    val_records = []  # list of {"step", "k", "val_loss", "val_bits"}
     for line in sampled:
         try:
             d = json.loads(line)
-            steps.append(d["step"])
-            losses.append(d["loss"])
-            bits.append(d.get("num_valid_bits"))
+            if d.get("phase") == "val":
+                val_records.append({"step": d["step"], "k": d["k"],
+                                     "val_loss": d["val_loss"], "val_bits": d["val_bits"]})
+            else:
+                steps.append(d["step"])
+                losses.append(d["loss"])
+                bits.append(d.get("num_valid_bits"))
+                k_vals.append(d.get("current_k"))
         except Exception:
             pass
-    return steps, losses, bits
+    return steps, losses, bits, k_vals, val_records
 
 
-def _loss_curve_fig(steps, losses):
+def _loss_curve_fig(steps, losses, val_by_k=None):
     fig, ax = plt.subplots(figsize=(6, 3))
-    ax.scatter(steps, losses, s=0.5, alpha=0.4, color="steelblue")
+    ax.scatter(steps, losses, s=0.5, alpha=0.3, color="steelblue", label="train")
+    if val_by_k:
+        colors = plt.cm.autumn([i / max(len(val_by_k), 1) for i in range(len(val_by_k))])
+        for (k, vd), col in zip(sorted(val_by_k.items()), colors):
+            if vd["steps"]:
+                ax.plot(vd["steps"], vd["losses"], color=col, linewidth=1.2, label=f"val k={k}")
+        ax.legend(fontsize=7, markerscale=4)
     ax.set_yscale("log")
     ax.set_xlabel("step")
     ax.set_ylabel("loss")
@@ -253,13 +295,39 @@ def _loss_curve_fig(steps, losses):
     return fig
 
 
-def _bits_curve_fig(steps, bits, n_bits):
+def _bits_curve_fig(steps, bits, n_bits, k_vals=None, normalize=False, val_by_k=None):
+    has_k = k_vals and any(k is not None for k in k_vals)
+
+    if normalize:
+        denoms = [k + 1 if k is not None else n_bits for k in (k_vals or [None] * len(bits))]
+        y = [b / d * 100 if d else 0 for b, d in zip(bits, denoms)]
+        ylabel, ylim, title_suffix = "valid bits (%)", (0, 105), " (normalised)"
+    else:
+        y = bits
+        ylabel, ylim, title_suffix = "valid bits", (0, n_bits), ""
+
     fig, ax = plt.subplots(figsize=(6, 3))
-    ax.scatter(steps, bits, s=0.5, alpha=0.4, color="darkorange")
-    ax.set_ylim(0, n_bits)
+    if has_k:
+        k_clean = [k if k is not None else 1 for k in k_vals]
+        sc = ax.scatter(steps, y, c=k_clean, s=0.5, cmap="plasma", vmin=1, vmax=8, alpha=0.4)
+        fig.colorbar(sc, ax=ax, label="train k")
+    else:
+        ax.scatter(steps, y, s=0.5, alpha=0.4, color="darkorange")
+
+    if val_by_k:
+        colors = plt.cm.autumn([i / max(len(val_by_k), 1) for i in range(len(val_by_k))])
+        for (k, vd), col in zip(sorted(val_by_k.items()), colors):
+            if vd["steps"]:
+                vb = vd["bits"]
+                if normalize:
+                    vb = [b / (k + 1) * 100 for b in vb]
+                ax.plot(vd["steps"], vb, color=col, linewidth=1.2, label=f"val k={k}")
+        ax.legend(fontsize=7, markerscale=4)
+
+    ax.set_ylim(*ylim)
     ax.set_xlabel("step")
-    ax.set_ylabel("valid bits")
-    ax.set_title(f"Valid bits  (step {steps[-1]})")
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"Valid bits{title_suffix}  (step {steps[-1]})")
     fig.tight_layout()
     return fig
 
@@ -302,7 +370,7 @@ tab_mon, tab_inf = st.tabs(["📊 Training Monitor", "🔬 Inference"])
 
 @st.fragment(run_every="15s")
 def _monitor_fragment(run_dir, run_name):
-    steps, losses, bits = load_log(run_dir)
+    steps, losses, bits, k_vals, val_records = load_log(run_dir)
 
     if not losses:
         st.info("No log.jsonl found yet — training may not have started.")
@@ -314,18 +382,28 @@ def _monitor_fragment(run_dir, run_name):
         _ds_cfg = _cfg["ds"]
         if is_alu_run(_cfg):
             _ds_tmp = ALUDataset(Namespace(W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"]))
+        elif is_extrapolation_run(_cfg):
+            _ds_tmp = ExtrapolationDataset(
+                W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"],
+                spacing=tuple(_ds_cfg["spacing"]),
+                min_bits=_ds_cfg["min_bits"], max_bits=8,
+                batch_size=_ds_cfg["batch_size"],
+            )
         else:
+            screen_fn = SCREEN_FN_MAP.get(_ds_cfg.get("screen_fn", "make_io_screen"), make_io_screen)
             _ds_tmp = NCPUDataset(Namespace(
                 W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"],
                 spacing=tuple(_ds_cfg["spacing"]),
                 sampler=SAMPLER_MAP[_ds_cfg["sampler"]],
                 balanced=False,
+                screen_fn=screen_fn,
             ))
         n_bits = len(_ds_tmp.get_output_bit_masks())
     except Exception:
         n_bits = max(b for b in bits if b is not None) if bits else 1
 
     bits_clean = [b for b in bits if b is not None]
+    k_clean    = [k for k, b in zip(k_vals, bits) if b is not None]
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Steps logged", steps[-1] if steps else 0)
@@ -334,14 +412,25 @@ def _monitor_fragment(run_dir, run_name):
         m3.metric("Last valid bits", f"{bits_clean[-1]:.2f} / {n_bits}")
 
     bits_steps = [s for s, b in zip(steps, bits) if b is not None]
+    normalize  = st.checkbox("Normalise bits curve (%)", value=False)
+
+    # group val records by k
+    val_by_k = {}
+    for r in val_records:
+        val_by_k.setdefault(r["k"], {"steps": [], "losses": [], "bits": []})
+        val_by_k[r["k"]]["steps"].append(r["step"])
+        val_by_k[r["k"]]["losses"].append(r["val_loss"])
+        val_by_k[r["k"]]["bits"].append(r["val_bits"])
+
     curve_col, bits_col = st.columns(2)
     with curve_col:
-        fig = _loss_curve_fig(steps, losses)
+        fig = _loss_curve_fig(steps, losses, val_by_k=val_by_k)
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
     with bits_col:
         if bits_clean:
-            fig = _bits_curve_fig(bits_steps, bits_clean, n_bits)
+            fig = _bits_curve_fig(bits_steps, bits_clean, n_bits, k_vals=k_clean,
+                                   normalize=normalize, val_by_k=val_by_k)
             st.pyplot(fig, use_container_width=True)
             plt.close(fig)
         else:
@@ -390,11 +479,14 @@ with tab_inf:
         checkpoint = st.selectbox("Checkpoint", checkpoints, label_visibility="collapsed")
 
     # detect task type before loading
-    _peek = json.loads((run_dir / "config.json").read_text())
-    _alu  = is_alu_run(_peek)
+    _peek  = json.loads((run_dir / "config.json").read_text())
+    _alu   = is_alu_run(_peek)
+    _extrap = is_extrapolation_run(_peek)
 
     if _alu:
         nca, dataset, config = load_alu_run(run_name, checkpoint)
+    elif _extrap:
+        nca, dataset, config = load_extrapolation_run(run_name, checkpoint)
     else:
         nca, dataset, config = load_adder_run(run_name, checkpoint)
 
@@ -474,6 +566,73 @@ with tab_inf:
 
                 out_screen = dataset._make_screen(
                     result=int_to_bits(exp_result, 8), carry_out=[exp_carry]
+                )
+                show_results(rollout, out_screen, dataset)
+            else:
+                st.caption("← set inputs and click Calculate")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Extrapolation UI
+    # ═══════════════════════════════════════════════════════════════════════════
+    elif _extrap:
+        train_max = config["run"].get("max_train_bits", 5)
+        with left:
+            k = st.slider("Bit width", min_value=1, max_value=8, value=train_max + 1,
+                          help=f"Trained on 1–{train_max} bits. Values above {train_max} are extrapolation.")
+            if k > train_max:
+                st.warning(f"⚠ Extrapolation: trained up to {train_max} bits")
+
+            max_val = 2 ** k - 1
+            col_a, col_b = st.columns(2)
+            with col_a:
+                a = st.number_input("A", min_value=0, max_value=max_val, value=min(7, max_val), step=1)
+            with col_b:
+                b = st.number_input("B", min_value=0, max_value=max_val, value=min(5, max_val), step=1)
+
+            c             = int(a) + int(b)
+            n_out_bits    = k + 1
+            expected_bits = int_to_bits(c, n_out_bits)
+            ds_cfg        = config["ds"]
+
+            inp_screen = make_io_screen_bottom_aligned(
+                H=ds_cfg["H"], W=ds_cfg["W"], r=ds_cfg["r"],
+                spacing=tuple(ds_cfg["spacing"]),
+                a_bits=int_to_bits(int(a), k), b_bits=int_to_bits(int(b), k), output_bits=[],
+            )
+            out_screen = make_io_screen_bottom_aligned(
+                H=ds_cfg["H"], W=ds_cfg["W"], r=ds_cfg["r"],
+                spacing=tuple(ds_cfg["spacing"]),
+                a_bits=[], b_bits=[], output_bits=expected_bits,
+            )
+
+            img_col, out_col = st.columns(2)
+            with img_col:
+                st.markdown(f"**A** `{int(a):0{k}b}` &nbsp; **B** `{int(b):0{k}b}`", unsafe_allow_html=True)
+                st_image_pixelated(zoom_nearest(media.to_rgb(inp_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
+            with out_col:
+                st.markdown(f"**C** `{c}` &nbsp; `{c:0{n_out_bits}b}`", unsafe_allow_html=True)
+                st_image_pixelated(zoom_nearest(media.to_rgb(out_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
+
+            calculate = st.button("Calculate", type="primary", use_container_width=True)
+
+        with right:
+            if calculate:
+                with st.spinner(f"Running NCA ({steps} steps)…"):
+                    rollout   = _run_nca(nca, dataset, inp_screen, steps)
+                    pred_bits = decode_bits(rollout, dataset)
+
+                pred_bits_k = pred_bits[-(n_out_bits):]  # bottom-aligned: last n_out_bits
+                pred_int    = int("".join(map(str, pred_bits_k)), 2)
+                valid       = sum(p == e for p, e in zip(pred_bits_k, expected_bits))
+
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Predicted", pred_int)
+                r2.metric("Expected",  c)
+                r3.metric("Valid bits", f"{valid} / {n_out_bits}")
+
+                st.code(
+                    f"output   {' '.join(map(str, pred_bits_k))}\n"
+                    f"expected {' '.join(map(str, expected_bits))}"
                 )
                 show_results(rollout, out_screen, dataset)
             else:

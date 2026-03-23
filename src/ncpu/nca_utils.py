@@ -194,6 +194,33 @@ class CompassChannels(nn.Module):
         return state
 
 
+class GaussianNoise(nn.Module):
+    """Per-step additive Gaussian noise injected during the NCA rollout.
+
+    At each forward call, noise is applied with probability `prob`.
+    Read-only channels are excluded via a fixed mask.
+    Both `std` and `prob` are plain attributes — update them from the
+    training script to implement a noise schedule.
+    """
+
+    def __init__(self, num_channels, read_only_dims=None):
+        super().__init__()
+        self.std = 0.0
+        self.prob = 0.0
+        mask = torch.ones(1, num_channels, 1, 1)
+        for c in (read_only_dims or []):
+            mask[:, c] = 0.0
+        self.register_buffer("mask", mask)
+
+    def forward(self, x):
+        if self.prob <= 0.0 or self.std <= 0.0:
+            return x
+        if torch.rand(1).item() > self.prob:
+            return x
+        noise = torch.randn_like(x) * self.std * self.mask
+        return torch.clamp(x + noise, -10.0, 10.0)
+
+
 class ReadOnlyChannels(nn.Module):
     def __init__(
         self, num_channels, read_only_dims
