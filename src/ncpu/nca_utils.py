@@ -180,7 +180,7 @@ class GaussianNoise(nn.Module):
         self.register_buffer("mask", mask.view(1, -1, 1, 1))
 
     def forward(self, x):
-        if self.training and self.std > 0:
+        if self.std > 0:
             noise = torch.randn_like(x) * self.std
             noise = noise * self.mask
             if self.fire_rate < 1.0:

@@ -645,6 +645,7 @@ def save_rollout_png(
     vmax=1,
     cmap="viridis",
     dpi=150,
+    channels = [], # if non-empty, only plot these channels (0-indexed); otherwise plot all up to max_channels 
 ):
     """Save a labelled rollout grid as PNG via matplotlib.
 
@@ -663,7 +664,10 @@ def save_rollout_png(
 
     ts = torch.linspace(0, T - 1, n_snapshots).long()
 
-    n_rows = C + 1
+    if channels:
+        n_rows = len(channels)
+    else:
+        n_rows = C + 1
     n_cols = len(ts)
 
     fig, axes = plt.subplots(
@@ -679,7 +683,10 @@ def save_rollout_png(
         # Channel rows
         for ci in range(n_rows):
             ax = axes[ci + row_offset, col_idx]
-            tile = rollout[t_idx, ci]
+            if channels:
+                tile = rollout[t_idx, channels[ci]]
+            else:
+                tile = rollout[t_idx, ci]
             ax.imshow(tile, vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal", interpolation="nearest")
             ax.set_xticks([])
             ax.set_yticks([])
@@ -691,3 +698,43 @@ def save_rollout_png(
     fig.tight_layout(pad=0.3)
     fig.savefig(str(path), dpi=dpi, bbox_inches="tight")
     plt.close(fig)
+
+def save_rollout_gif(rollout, out, batch_size, nca_channels, gif_path):
+    gif_b = batch_size
+    gif_c = min(C, nca_channels)
+    r = rollout[:gif_b, ::2, :gif_c]
+    T_sub = r.shape[1]
+    target = out[:gif_b].detach().cpu()
+
+    # Build grid with 1px black borders between cells
+    # Row: target + gif_c channel rows = (1 + gif_c) rows
+    # Col: gif_b batch samples
+    _, _, _, cH, cW = r.shape  # cell height/width
+    grid_H = (1 + gif_c) * cH + (gif_c) * 1      # rows + separators between them
+    grid_W = gif_b * cW + (gif_b - 1) * 1         # cols + separators between them
+
+    frame_list = []
+    for t in range(T_sub):
+        frame = torch.zeros(grid_H, grid_W)
+
+        # Row 0: target
+        for b in range(gif_b):
+            col_start = b * (cW + 1)
+            frame[0:cH, col_start:col_start + cW] = target[b]
+
+        # Rows 1..gif_c: NCA channels
+        for ci in range(gif_c):
+            row_start = (ci + 1) * cH + ci * 1  # skip target row + separators
+            for b in range(gif_b):
+                col_start = b * (cW + 1)
+                frame[row_start:row_start + cH, col_start:col_start + cW] = r[b, t, ci].detach().cpu()
+
+        frame_list.append(frame)
+
+    frames = torch.stack(frame_list)
+    frames_np = frames.cpu().numpy()
+    frames_rgb = media.to_rgb(frames_np, vmin=-1, vmax=1, cmap="viridis")
+    frames_rgb = freeze_frame(torch.from_numpy(frames_rgb), timesteps=[0, -1], repeat=8)
+    # gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
+    media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
+    # shutil.copy(gif_path, run_dir / "rollout_latest.gif")

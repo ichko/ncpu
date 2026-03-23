@@ -91,7 +91,7 @@ def run_experiment(gaussian_noise, fire_rate):
         lr=LEARNING_RATE,
         gaussian_noise=gaussian_noise,
         loss_fn=combined_loss,
-        input_implant_type="first",
+        input_implant_type="all",
         checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
     )
     trainer.sanity_check()

@@ -91,7 +91,7 @@ def run_experiment(gaussian_noise, fire_rate):
         lr=LEARNING_RATE,
         gaussian_noise=gaussian_noise,
         loss_fn=combined_loss,
-        input_implant_type="first",
+        input_implant_type="all",
         checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
     )
     trainer.sanity_check()
@@ -206,7 +206,6 @@ def run_experiment(gaussian_noise, fire_rate):
 
                 png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
                 expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
-                print("PNG: ", rollout.shape, expanded_target.shape)
                 to_save = torch.cat([expanded_target, rollout], dim=2) 
                 # to_save = rollout 
                 print("to_save: ", to_save.shape)
