@@ -24,6 +24,7 @@ Outputs under results/E_ablations/:
     ks_rollout_{gate}.svg   — channel 0 over time, rows=kernel sizes
     am_rollout_{gate}.svg   — channel 0 over time, rows=am values
     zi_rollout_{gate}.svg   — channel 0 over time, rows=zi values
+    ablations_combined.svg  — paper figure: all three convergence bars in one row
 """
 
 import json
@@ -549,5 +550,55 @@ snapshot_grid(am_runs, AM_VALUES, {0.0: "am=0.0 (off)", 0.1: "am=0.1"},
 rollout_figures(zi_runs, ZI_VALUES, ZI_LABELS, "zi")
 snapshot_grid(zi_runs, ZI_VALUES, ZI_LABELS,
               "ZI ablation — final snapshots", "zi_snapshots.svg")
+
+# ── Paper figure: combined convergence bars (all three ablations, one row) ──────
+
+PANEL_SPECS = [
+    ("Kernel size  (k)", ks_runs, KS_VALUES, KS_COLORS,
+     {k: f"k={k}" for k in KS_VALUES}, 0),
+    ("Alive masking  (am)", am_runs, AM_VALUES, AM_COLORS,
+     {0.0: "am=0 (off)", 0.1: "am=0.1"}, 10),
+    ("Zero init  (zi)", zi_runs, ZI_VALUES, ZI_COLORS,
+     ZI_LABELS, 0),
+]
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), sharey=True)
+
+for col, (ablation_label, runs_dict, values, colors, labels, rot) in enumerate(PANEL_SPECS):
+    ax = axes[col]
+    x_pos = np.arange(len(values))
+    # one group per gate, each gate is a cluster of bars
+    bar_w = 0.22
+    offsets = np.linspace(-(len(GATES)-1)/2, (len(GATES)-1)/2, len(GATES)) * bar_w
+    gate_colors = ["#4E79A7", "#59A14F", "#B07AA1"]   # AND, XOR, half-adder
+
+    for gi, gate in enumerate(GATES):
+        n_bits = N_BITS.get(gate, 1)
+        means, stds = [], []
+        for val in values:
+            dirs = runs_dict.get(gate, {}).get(val, [])
+            convs = [steps_to_full_bits(load_log(d), n_bits) or max_steps for d in dirs]
+            means.append(np.mean(convs) if convs else max_steps)
+            stds.append(np.std(convs)   if convs else 0)
+        ax.bar(x_pos + offsets[gi], means, width=bar_w, yerr=stds, capsize=3,
+               color=gate_colors[gi], alpha=0.85,
+               label=gate if col == 0 else None)
+
+    ax.axhline(max_steps, color="#cccccc", linestyle="--", linewidth=0.8)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels([labels[v] for v in values], rotation=rot,
+                       ha="right" if rot else "center", fontsize=9)
+    ax.set_title(ablation_label, fontsize=10)
+    if col == 0:
+        ax.set_ylabel("Steps to full convergence")
+        ax.legend(fontsize=8, loc="upper left")
+    ax.text(x_pos[-1], max_steps * 1.01, "did not\nconverge", ha="center",
+            va="bottom", fontsize=6.5, color="#888888")
+
+fig.suptitle("Ablation study — steps to convergence (15 000 cap = did not converge)",
+             fontsize=10)
+fig.tight_layout()
+save(fig, "ablations_combined.svg")
+print("Saved: ablations_combined.svg")
 
 print(f"\nAll outputs in {OUT_DIR}/")

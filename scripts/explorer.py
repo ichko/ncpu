@@ -23,12 +23,13 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from ncpu.dataset import (
+    ALU2Dataset, ALU2_COND_NAMES, ALU2_OP_NAMES, _compute_alu2, _int_to_bits_msb,
     ALUDataset, ExtrapolationDataset, NCPUDataset,
     sample_4bit_adder, sample_4bit_multiplier, sample_8bit_adder,
     sample_AND_gate, sample_OR_gate, sample_NOR_gate, sample_NAND_gate, sample_XOR_gate,
 )
 from ncpu.nca import NeuralCA
-from ncpu.utils import freeze_frame, make_alu_screen, make_grid, make_io_screen, make_io_screen_bottom_aligned, make_io_screen_cols1
+from ncpu.utils import freeze_frame, make_alu2_screen, make_alu_screen, make_grid, make_io_screen, make_io_screen_bottom_aligned, make_io_screen_cols1
 
 RUNS_DIR = Path(__file__).resolve().parent.parent / "runs"
 SAMPLER_MAP = {
@@ -136,6 +137,24 @@ def load_alu_run(run_name: str, checkpoint_name: str):
 def is_alu_run(config):
     return config.get("run", {}).get("task") == "alu_8bit"
 
+def is_alu2_run(config):
+    return config.get("run", {}).get("experiment") == "E_alu2"
+
+@st.cache_resource
+def load_alu2_run(run_name: str, checkpoint_name: str):
+    run_dir = RUNS_DIR / run_name
+    config  = json.loads((run_dir / "config.json").read_text())
+    ds_cfg, nca_cfg = config["ds"], config["nca"]
+    dataset = ALU2Dataset(Namespace(
+        W=ds_cfg["W"], H=ds_cfg["H"], r=ds_cfg["r"], among_sp=ds_cfg["among_sp"],
+        x_a=ds_cfg["x_a"], x_b=ds_cfg["x_b"], x_ctrl=ds_cfg["x_ctrl"], x_out=ds_cfg["x_out"],
+    ))
+    nca = _build_nca(nca_cfg)
+    ckpt_path = run_dir / "checkpoints" / checkpoint_name
+    nca.load_state_dict(torch.load(ckpt_path, map_location="cpu", weights_only=True), strict=False)
+    nca.eval()
+    return nca, dataset, config
+
 def is_extrapolation_run(config):
     return "min_bits" in config.get("ds", {})
 
@@ -164,7 +183,8 @@ def st_image_pixelated(img, **kwargs):
 def _run_nca(nca, dataset, screen: np.ndarray, steps: int):
     inp = torch.from_numpy(screen).float() / 128.0 - 1.0
     state = torch.zeros(1, nca.channels, dataset.H, dataset.W)
-    state[0, 1] = inp  # channel 1 = read-only input
+    state[0, 0] = inp  # channel 0: mutable, starts with input
+    state[0, 1] = inp  # channel 1: read-only anchor
     with torch.no_grad():
         return nca(state, steps=steps)
 
@@ -380,7 +400,12 @@ def _monitor_fragment(run_dir, run_name):
     try:
         _cfg = json.loads((run_dir / "config.json").read_text())
         _ds_cfg = _cfg["ds"]
-        if is_alu_run(_cfg):
+        if is_alu2_run(_cfg):
+            _ds_tmp = ALU2Dataset(Namespace(
+                W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"], among_sp=_ds_cfg["among_sp"],
+                x_a=_ds_cfg["x_a"], x_b=_ds_cfg["x_b"], x_ctrl=_ds_cfg["x_ctrl"], x_out=_ds_cfg["x_out"],
+            ))
+        elif is_alu_run(_cfg):
             _ds_tmp = ALUDataset(Namespace(W=_ds_cfg["W"], H=_ds_cfg["H"], r=_ds_cfg["r"]))
         elif is_extrapolation_run(_cfg):
             _ds_tmp = ExtrapolationDataset(
@@ -481,9 +506,12 @@ with tab_inf:
     # detect task type before loading
     _peek  = json.loads((run_dir / "config.json").read_text())
     _alu   = is_alu_run(_peek)
+    _alu2  = is_alu2_run(_peek)
     _extrap = is_extrapolation_run(_peek)
 
-    if _alu:
+    if _alu2:
+        nca, dataset, config = load_alu2_run(run_name, checkpoint)
+    elif _alu:
         nca, dataset, config = load_alu_run(run_name, checkpoint)
     elif _extrap:
         nca, dataset, config = load_extrapolation_run(run_name, checkpoint)
@@ -496,9 +524,91 @@ with tab_inf:
     left, right = st.columns([1, 2])
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # ALU v2 UI
+    # ═══════════════════════════════════════════════════════════════════════════
+    if _alu2:
+        ds_cfg = config["ds"]
+        with left:
+            op_col, cin_col = st.columns([3, 1])
+            with op_col:
+                opcode_name = st.selectbox("Opcode", ALU2_OP_NAMES)
+            with cin_col:
+                carry_in = st.number_input("Cin", min_value=0, max_value=1, value=0, step=1)
+
+            cond_name = st.selectbox("Condition", ALU2_COND_NAMES)
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                a = st.number_input("A", min_value=0, max_value=255, value=42, step=1)
+                st.code(f"{int(a):08b}")
+            with col_b:
+                b = st.number_input("B", min_value=0, max_value=255, value=27, step=1)
+                st.code(f"{int(b):08b}")
+
+            op_idx   = ALU2_OP_NAMES.index(opcode_name)
+            cond_idx = ALU2_COND_NAMES.index(cond_name)
+            uses_b   = op_idx not in (5, 6, 7)
+
+            ctrl_bits = _int_to_bits_msb(op_idx, 3) + [int(carry_in)] + _int_to_bits_msb(cond_idx, 3)
+            exp_result, exp_cout, exp_branch = _compute_alu2(int(a), int(b), int(carry_in), op_idx, cond_idx)
+            out_bits = _int_to_bits_msb(exp_result, 8) + [exp_cout, exp_branch]
+
+            inp_screen = make_alu2_screen(
+                ds_cfg["H"], ds_cfg["W"], ds_cfg["r"], ds_cfg["among_sp"],
+                ds_cfg["x_a"], ds_cfg["x_b"], ds_cfg["x_ctrl"], ds_cfg["x_out"],
+                a_bits=_int_to_bits_msb(int(a), 8),
+                b_bits=_int_to_bits_msb(int(b), 8) if uses_b else None,
+                ctrl_bits=ctrl_bits,
+            )
+            exp_out_screen = make_alu2_screen(
+                ds_cfg["H"], ds_cfg["W"], ds_cfg["r"], ds_cfg["among_sp"],
+                ds_cfg["x_a"], ds_cfg["x_b"], ds_cfg["x_ctrl"], ds_cfg["x_out"],
+                out_bits=out_bits,
+            )
+
+            img_col, out_col = st.columns(2)
+            with img_col:
+                st.markdown(f"`{int(a):08b}` **{opcode_name}** `{int(b):08b}`")
+                st_image_pixelated(zoom_nearest(media.to_rgb(inp_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
+            with out_col:
+                st.markdown(f"= `{exp_result:08b}` ({exp_result})")
+                st_image_pixelated(zoom_nearest(media.to_rgb(exp_out_screen[np.newaxis], vmin=0, vmax=255, cmap="viridis")[0]))
+                st.caption(f"cout={exp_cout}  branch={exp_branch} ({cond_name})")
+
+            calculate = st.button("Calculate", type="primary", use_container_width=True)
+
+        with right:
+            if calculate:
+                with st.spinner(f"Running NCA ({steps} steps)…"):
+                    rollout   = _run_nca(nca, dataset, inp_screen, steps)
+                    pred_bits = decode_bits(rollout, dataset)
+
+                pred_result = int("".join(map(str, pred_bits[:8])), 2)
+                pred_cout   = pred_bits[8]
+                pred_branch = pred_bits[9]
+                valid = sum(p == e for p, e in zip(pred_bits, out_bits))
+
+                r1, r2, r3, r4, r5 = st.columns(5)
+                r1.metric("Result",   pred_result)
+                r2.metric("Expected", exp_result)
+                r3.metric("Valid bits", f"{valid} / 10")
+                r4.metric("cout", pred_cout,
+                          help=f"expected {exp_cout}" + (" ✓" if pred_cout == exp_cout else " ✗"))
+                r5.metric("branch", pred_branch,
+                          help=f"expected {exp_branch}" + (" ✓" if pred_branch == exp_branch else " ✗"))
+
+                st.code(
+                    f"result   {' '.join(map(str, pred_bits[:8]))}  ({pred_result})\n"
+                    f"expected {' '.join(map(str, _int_to_bits_msb(exp_result, 8)))}  ({exp_result})"
+                )
+                show_results(rollout, exp_out_screen, dataset)
+            else:
+                st.caption("← set inputs and click Calculate")
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # ALU UI
     # ═══════════════════════════════════════════════════════════════════════════
-    if _alu:
+    elif _alu:
         with left:
             op_col, cin_col = st.columns([3, 1])
             with op_col:

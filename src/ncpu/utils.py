@@ -420,6 +420,41 @@ def make_alu_screen(
     return screen
 
 
+def make_alu2_screen(H, W, r, among_sp, x_a, x_b, x_ctrl, x_out,
+                     a_bits=None, b_bits=None, ctrl_bits=None, out_bits=None):
+    """ALU v2 screen layout with four explicit columns.
+
+    Columns
+    -------
+    A     : 8 bits (MSB-top, vertically centred)   at x_a
+    B     : 8 bits (MSB-top, vertically centred)   at x_b
+    CTRL  : 7 bits (MSB-top, vertically centred)   at x_ctrl
+            layout: [op2, op1, op0, carry_in, cond2, cond1, cond0]
+    OUT   : 13 bits (MSB-top, vertically centred)  at x_out
+            layout: [res7..res0, carry_out, zero, neg, overflow, branch_taken]
+
+    Pass None to leave a column blank (circles drawn as mid-grey, i.e. value=128).
+    """
+    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
+    step = 2 * r + among_sp
+
+    def _col(bits, cx):
+        if bits is None:
+            return
+        n = len(bits)
+        v = n * 2 * r + among_sp * (n - 1)
+        tm = (H - v) // 2
+        for i, bit in enumerate(bits):
+            cy = tm + r + i * step
+            cv2.circle(screen, (cx, cy), r, 255 if bit else 0, -1)
+
+    _col(a_bits,    x_a)
+    _col(b_bits,    x_b)
+    _col(ctrl_bits, x_ctrl)
+    _col(out_bits,  x_out)
+    return screen
+
+
 def conv_stack(layer_sizes, activation, **kwargs):
     layers = []
 

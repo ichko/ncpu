@@ -6,11 +6,14 @@ Usage:
     uv run python scripts/analyze_e1.py
 
 Outputs under results/E1/:
-    summary.csv              — per-run metrics
-    loss_curves.png          — all gates, mean ± std shading
-    bits_curves.png          — valid bits, mean ± std shading
-    convergence_bar.png      — bar chart: steps to full convergence (mean ± std)
-    snapshots_grid.png       — best snapshot per gate
+    summary.csv                   — per-run metrics
+    loss_curves.svg               — all gates, mean ± std shading
+    bits_curves.svg               — valid bits, mean ± std shading
+    convergence_bar.svg           — steps to full convergence (mean ± std)
+    snapshots_grid.svg            — best snapshot per gate
+    layout_diagram.svg            — schematic of grid layout
+    rollout_{gate}_ch0.svg        — channel 0 over time, all input combos
+    rollout_{gate}_allch.svg      — all channels for highlight combo
 """
 
 import json
@@ -166,9 +169,9 @@ ax.set_ylabel("Loss (masked MSE)")
 ax.set_title("E1 — Gate benchmark: training loss (mean ± std)")
 ax.legend(loc="upper right", ncol=2)
 fig.tight_layout()
-fig.savefig(OUT_DIR / "loss_curves.pdf")
+fig.savefig(OUT_DIR / "loss_curves.svg")
 plt.close(fig)
-print(f"\nSaved: loss_curves.pdf")
+print(f"\nSaved: loss_curves.svg")
 
 # ── Valid bits curves ─────────────────────────────────────────────────────────
 
@@ -184,9 +187,9 @@ ax.set_ylabel("Valid bits (mean)")
 ax.set_title("E1 — Gate benchmark: valid bits (mean ± std)")
 ax.legend(loc="lower right", ncol=2)
 fig.tight_layout()
-fig.savefig(OUT_DIR / "bits_curves.pdf")
+fig.savefig(OUT_DIR / "bits_curves.svg")
 plt.close(fig)
-print(f"Saved: bits_curves.pdf")
+print(f"Saved: bits_curves.svg")
 
 # ── Convergence bar chart ─────────────────────────────────────────────────────
 
@@ -209,9 +212,9 @@ ax.set_ylabel("Steps to full convergence")
 ax.set_title("E1 — Steps to reach max valid bits (mean ± std)")
 ax.tick_params(axis="x", rotation=30)
 fig.tight_layout()
-fig.savefig(OUT_DIR / "convergence_bar.pdf")
+fig.savefig(OUT_DIR / "convergence_bar.svg")
 plt.close(fig)
-print(f"Saved: convergence_bar.pdf")
+print(f"Saved: convergence_bar.svg")
 
 # ── Snapshot grid (best seed = lowest final loss) ─────────────────────────────
 
@@ -241,9 +244,9 @@ if n > 0:
         ax.axis("off")
     fig.suptitle("E1 — Final snapshots (best seed per gate)", fontsize=10)
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "snapshots_grid.pdf", dpi=150)
+    fig.savefig(OUT_DIR / "snapshots_grid.svg", dpi=150)
     plt.close(fig)
-    print(f"Saved: snapshots_grid.pdf")
+    print(f"Saved: snapshots_grid.svg")
 
 # ── Print summary table ───────────────────────────────────────────────────────
 
@@ -336,9 +339,9 @@ fig.legend(handles=handles, loc="lower center", fontsize=7, ncol=2,
            framealpha=0.9, edgecolor="#cccccc", bbox_to_anchor=(0.5, 0.02))
 
 fig.suptitle("E1 — Gate layout (cols1, 48×48 grid)", fontsize=9, y=0.99)
-fig.savefig(OUT_DIR / "layout_diagram.pdf", bbox_inches="tight", pad_inches=0.02)
+fig.savefig(OUT_DIR / "layout_diagram.svg", bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
-print(f"\nSaved: layout_diagram.pdf")
+print(f"\nSaved: layout_diagram.svg")
 
 # ── Rollout visualisations ────────────────────────────────────────────────────
 # For each notable gate: rows = input combos, cols = timesteps (channel 0)
@@ -393,7 +396,7 @@ def load_nca(run_dir):
         padding_type=nc.get("padding_type", "zeros"),
     )
     last_ckpt = sorted((run_dir / "checkpoints").glob("nca_*.pt"))[-1]
-    nca.load_state_dict(torch.load(last_ckpt, map_location="cpu", weights_only=True))
+    nca.load_state_dict(torch.load(last_ckpt, map_location="cpu", weights_only=True), strict=False)
     nca.eval()
     return nca
 
@@ -485,10 +488,10 @@ for gate, sc in SHOWCASE.items():
             ax.set_title("target", fontsize=8, pad=2)
 
     fig.suptitle(f"{gate}  —  channel 0 over time", fontsize=10)
-    out = OUT_DIR / f"rollout_{gate}_ch0.pdf"
+    out = OUT_DIR / f"rollout_{gate}_ch0.svg"
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
-    print(f"    Saved: rollout_{gate}_ch0.pdf")
+    print(f"    Saved: rollout_{gate}_ch0.svg")
 
     # ── Figure 2: all channels for the highlight combo ────────────────────────
     hi_bits   = combos[sc["highlight"]]
@@ -516,9 +519,208 @@ for gate, sc in SHOWCASE.items():
                 ax.set_ylabel(tag, fontsize=6)
 
     fig.suptitle(f"{gate}  —  all channels  —  {hi_label}", fontsize=9)
-    out = OUT_DIR / f"rollout_{gate}_allch.pdf"
+    out = OUT_DIR / f"rollout_{gate}_allch.svg"
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
-    print(f"    Saved: rollout_{gate}_allch.pdf")
+    print(f"    Saved: rollout_{gate}_allch.svg")
+
+# ── Paper figure: unified spatial encoding overview ────────────────────────────
+# Shows the encoding concept across three task complexities:
+#   Panel A — 2-input gate (XOR): 2 in, 1 out
+#   Panel B — 4-bit adder (cols2): A col + B col, 5 out
+#   Panel C — 8-bit ALU: A col + B col + opcode col, 8 out
+
+PAPER_OUT = Path("results")
+PAPER_OUT.mkdir(exist_ok=True)
+
+# ── shared drawing helpers ─────────────────────────────────────────────────────
+
+def _circ(ax, cx, cy, r, bit, zorder=3):
+    color = "#ffffff" if bit else "#111111"
+    ec    = "#555555"
+    ax.add_patch(mpatches.Circle((cx, cy), r,
+                                  facecolor=color, edgecolor=ec,
+                                  linewidth=0.6, zorder=zorder))
+
+def _col(ax, bits, cx, H, r, sp):
+    n  = len(bits)
+    v  = n * 2*r + sp * (n-1)
+    tm = (H - v) // 2
+    for i, b in enumerate(bits):
+        _circ(ax, cx, tm + r + i*(2*r+sp), r, b)
+
+def _label(ax, cx, cy, txt, color, fs=6):
+    ax.text(cx, cy, txt, ha="center", va="center",
+            fontsize=fs, color=color, fontweight="bold", zorder=4)
+
+def _bracket(ax, cx, top_y, bot_y, lbl, color, side="right"):
+    off = 7
+    sx  = cx + off if side == "right" else cx - off
+    ax.plot([sx, sx], [top_y, bot_y], color=color, lw=1.2)
+    ax.plot([sx, sx + (3 if side=="right" else -3)], [top_y, top_y], color=color, lw=1.2)
+    ax.plot([sx, sx + (3 if side=="right" else -3)], [bot_y, bot_y], color=color, lw=1.2)
+    ax.text(sx + (6 if side=="right" else -6), (top_y+bot_y)/2,
+            lbl, ha="left" if side=="right" else "right",
+            va="center", fontsize=5.5, color=color)
+
+BG   = "#e8e8e8"
+CINP = "#2c7bb6"
+COUT = "#d7191c"
+COP  = "#1a9641"
+
+# ── Panel A: XOR gate (2-in, 1-out, 48×48) ────────────────────────────────────
+PA_H, PA_W, PA_r, PA_sp, PA_side = 48, 48, 4, 2, 10
+A_bits_xor  = [0, 1]
+B_bit_xor   = [1]
+
+# ── Panel B: 4-bit adder cols2 (80×112 scaled down) ──────────────────────────
+PB_H, PB_W, PB_r, PB_sp, PB_side = 80, 60, 3, 2, 10
+A_bits_add  = [1, 0, 1, 1]   # 11
+B_bits_add  = [0, 1, 1, 0]   #  6  → sum = 17 = 0b10001
+sum_bits    = [1, 0, 0, 0, 1]
+
+# ── Panel C: 8-bit ALU (128×112 scaled down) ──────────────────────────────────
+PC_H, PC_W, PC_r, PC_sp, PC_side = 80, 80, 3, 1, 8
+A_bits_alu  = [1,0,1,1,0,1,0,1]   # 0xB5
+B_bits_alu  = [0,1,1,0,1,1,1,0]   # 0x6E
+op_bits     = [0,0,0]              # ADD
+res_bits    = [0,0,1,0,0,0,1,1]   # (0xB5+0x6E)&0xFF = 0x23
+
+scale = 0.055
+lm, rm = 0.08, 0.08
+tm_m, bm_m = 0.38, 0.28
+gap = 0.18
+
+pw_a = PA_W * scale
+pw_b = PB_W * scale
+pw_c = PC_W * scale
+ph   = max(PA_H, PB_H, PC_H) * scale
+fig_w = pw_a + pw_b + pw_c + 2*gap + lm + rm
+fig_h = ph + tm_m + bm_m
+
+fig, axes = plt.subplots(1, 3, figsize=(fig_w, fig_h))
+fig.subplots_adjust(
+    left   = lm / fig_w,
+    right  = 1 - rm / fig_w,
+    bottom = bm_m / fig_h,
+    top    = 1 - tm_m / fig_h,
+    wspace = gap / ((pw_a + pw_b + pw_c) / 3),
+)
+
+# ── Panel A ───────────────────────────────────────────────────────────────────
+ax = axes[0]
+ax.set_xlim(0, PA_W); ax.set_ylim(PA_H, 0); ax.set_aspect("equal")
+ax.set_facecolor(BG)
+ax.add_patch(mpatches.FancyBboxPatch((0,0), PA_W, PA_H,
+    boxstyle="square,pad=0", lw=1, edgecolor="#aaaaaa", facecolor=BG))
+ax.set_xticks([]); ax.set_yticks([])
+ax.set_title("(a) Logic gate\n(XOR: 2 in, 1 out)", fontsize=7.5, pad=4)
+
+# inputs
+_col(ax, A_bits_xor, PA_side, PA_H, PA_r, PA_sp)
+# labels on circles
+n = 2; v = n*2*PA_r+PA_sp*(n-1); tm = (PA_H-v)//2
+for i, (b, lbl) in enumerate(zip(A_bits_xor, ["a","b"])):
+    cy = tm + PA_r + i*(2*PA_r+PA_sp)
+    _label(ax, PA_side, cy, f"{'1' if b else '0'}", "#ffffff" if b else "#dddddd", fs=5)
+    ax.text(PA_side - PA_r - 3, cy, lbl, ha="right", va="center", fontsize=6, color=CINP)
+
+# output
+_col(ax, B_bit_xor, PA_W-PA_side, PA_H, PA_r, PA_sp)
+cy_out = PA_H//2
+_label(ax, PA_W-PA_side, cy_out, "1", "#ffffff", fs=5)
+ax.text(PA_W-PA_side + PA_r + 3, cy_out, "out", ha="left", va="center",
+        fontsize=6, color=COUT)
+
+# arrow
+ax.annotate("", xy=(PA_W-PA_side-PA_r-1, cy_out),
+            xytext=(PA_side+PA_r+1, cy_out),
+            arrowprops=dict(arrowstyle="->", color="#777777", lw=0.8))
+
+# legend patches inside panel
+ax.add_patch(mpatches.Circle((5, PA_H-5), 2.5, facecolor="#ffffff",
+             edgecolor="#555555", lw=0.6))
+ax.text(9, PA_H-5, "= 1", va="center", fontsize=5, color="#333333")
+ax.add_patch(mpatches.Circle((5, PA_H-11), 2.5, facecolor="#111111",
+             edgecolor="#555555", lw=0.6))
+ax.text(9, PA_H-11, "= 0", va="center", fontsize=5, color="#333333")
+
+# ── Panel B ───────────────────────────────────────────────────────────────────
+ax = axes[1]
+ax.set_xlim(0, PB_W); ax.set_ylim(PB_H, 0); ax.set_aspect("equal")
+ax.set_facecolor(BG)
+ax.add_patch(mpatches.FancyBboxPatch((0,0), PB_W, PB_H,
+    boxstyle="square,pad=0", lw=1, edgecolor="#aaaaaa", facecolor=BG))
+ax.set_xticks([]); ax.set_yticks([])
+ax.set_title("(b) 4-bit adder\n(A col + B col → 5-bit sum)", fontsize=7.5, pad=4)
+
+step_b = 2*PB_r+PB_sp
+_col(ax, A_bits_add, PB_side,          PB_H, PB_r, PB_sp)
+_col(ax, B_bits_add, PB_side+step_b,   PB_H, PB_r, PB_sp)
+_col(ax, sum_bits,   PB_W-PB_side,     PB_H, PB_r, PB_sp)
+
+n=4; v=n*2*PB_r+PB_sp*(n-1); tm=(PB_H-v)//2
+ax.text(PB_side, tm-4, "A", ha="center", va="bottom", fontsize=6, color=CINP, fontweight="bold")
+ax.text(PB_side+step_b, tm-4, "B", ha="center", va="bottom", fontsize=6, color=CINP, fontweight="bold")
+
+n2=5; v2=n2*2*PB_r+PB_sp*(n2-1); tm2=(PB_H-v2)//2
+ax.text(PB_W-PB_side, tm2-4, "S", ha="center", va="bottom", fontsize=6, color=COUT, fontweight="bold")
+
+# arrow
+mid_x = (PB_side + step_b + PB_r + PB_W - PB_side - PB_r) / 2
+ax.annotate("", xy=(PB_W-PB_side-PB_r-1, PB_H//2),
+            xytext=(PB_side+step_b+PB_r+1, PB_H//2),
+            arrowprops=dict(arrowstyle="->", color="#777777", lw=0.8))
+
+# ── Panel C ───────────────────────────────────────────────────────────────────
+ax = axes[2]
+ax.set_xlim(0, PC_W); ax.set_ylim(PC_H, 0); ax.set_aspect("equal")
+ax.set_facecolor(BG)
+ax.add_patch(mpatches.FancyBboxPatch((0,0), PC_W, PC_H,
+    boxstyle="square,pad=0", lw=1, edgecolor="#aaaaaa", facecolor=BG))
+ax.set_xticks([]); ax.set_yticks([])
+ax.set_title("(c) 8-bit ALU\n(A + B + opcode → result)", fontsize=7.5, pad=4)
+
+step_c = 2*PC_r+PC_sp
+_col(ax, A_bits_alu, PC_side,          PC_H, PC_r, PC_sp)
+_col(ax, B_bits_alu, PC_side+step_c,   PC_H, PC_r, PC_sp)
+
+# opcode col (middle, green)
+n_op=3; v_op=n_op*2*PC_r+PC_sp*(n_op-1); tm_op=(PC_H-v_op)//2
+for i, b in enumerate(op_bits):
+    cy = tm_op + PC_r + i*(2*PC_r+PC_sp)
+    ax.add_patch(mpatches.Circle((PC_W//2, cy), PC_r,
+                                  facecolor="#ffffff" if b else "#111111",
+                                  edgecolor=COP, linewidth=1.0, zorder=3))
+
+_col(ax, res_bits, PC_W-PC_side, PC_H, PC_r, PC_sp)
+
+n=8; v=n*2*PC_r+PC_sp*(n-1); tm=(PC_H-v)//2
+ax.text(PC_side,        tm-4, "A",  ha="center", va="bottom", fontsize=6, color=CINP, fontweight="bold")
+ax.text(PC_side+step_c, tm-4, "B",  ha="center", va="bottom", fontsize=6, color=CINP, fontweight="bold")
+ax.text(PC_W//2,    tm_op-4,  "op", ha="center", va="bottom", fontsize=6, color=COP,  fontweight="bold")
+n2=8; v2=n2*2*PC_r+PC_sp*(n2-1); tm2=(PC_H-v2)//2
+ax.text(PC_W-PC_side, tm2-4, "R", ha="center", va="bottom", fontsize=6, color=COUT, fontweight="bold")
+
+ax.annotate("", xy=(PC_W-PC_side-PC_r-1, PC_H//2),
+            xytext=(PC_W//2+PC_r+1, PC_H//2),
+            arrowprops=dict(arrowstyle="->", color="#777777", lw=0.8))
+
+# ── shared legend below all panels ────────────────────────────────────────────
+handles = [
+    mpatches.Patch(color=CINP, label="Input operand"),
+    mpatches.Patch(color=COP,  label="Opcode"),
+    mpatches.Patch(color=COUT, label="Output"),
+    mpatches.Circle((0,0), 1, facecolor="#ffffff", edgecolor="#555555", lw=0.8, label="bit = 1"),
+    mpatches.Circle((0,0), 1, facecolor="#111111", edgecolor="#555555", lw=0.8, label="bit = 0"),
+]
+fig.legend(handles=handles, loc="lower center", ncol=5, fontsize=7,
+           framealpha=0.9, edgecolor="#cccccc", bbox_to_anchor=(0.5, 0.01))
+
+fig.suptitle("Spatial encoding: inputs and outputs as pixel circles on a 2-D grid",
+             fontsize=9, y=0.98)
+fig.savefig(PAPER_OUT / "fig_encoding_overview.svg", bbox_inches="tight", pad_inches=0.04)
+plt.close(fig)
+print(f"\nSaved: results/fig_encoding_overview.svg")
 
 print(f"\nAll outputs in {OUT_DIR}/")

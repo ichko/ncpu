@@ -6,7 +6,9 @@ import sys
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
-from ncpu.utils import make_alu_screen, make_io_screen, make_io_screen_bottom_aligned, make_io_screen_cols1
+import random
+
+from ncpu.utils import make_alu2_screen, make_alu_screen, make_io_screen, make_io_screen_bottom_aligned, make_io_screen_cols1
 
 
 def sample_8bit_adder(*args):
@@ -475,6 +477,176 @@ class ALUDataset(IterableDataset):
         )
         out = self._make_screen(result_bits=_int_to_bits(result_int, 8))
         return (torch.from_numpy(inp).float(), torch.from_numpy(out).float())
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
+
+    def get_dataloader(self, batch_size):
+        return DataLoader(self, batch_size=batch_size, shuffle=False)
+
+
+# ── ALU v2 ────────────────────────────────────────────────────────────────────
+
+#  Operations (3-bit opcode)
+#   0: ADD   A + B + carry_in  → result, carry_out, Z, N, V
+#   1: SUB   A - B - carry_in  → result, carry_out (=~borrow), Z, N, V
+#   2: AND   A & B
+#   3: OR    A | B
+#   4: XOR   A ^ B
+#   5: NOT   ~A
+#   6: RCL   rotate-left  A through carry
+#   7: RCR   rotate-right A through carry
+#
+#  CTRL column (7 bits, MSB-top): [op2, op1, op0, carry_in, cond2, cond1, cond0]
+#  OUT  column (13 bits, MSB-top): [res7..res0, carry_out, zero, neg, overflow, branch_taken]
+#
+#  Condition codes (3-bit cond):
+#   0=EQ(Z=1)  1=NE(Z=0)  2=CS(C=1)  3=CC(C=0)
+#   4=MI(N=1)  5=PL(N=0)  6=AL(always)  7=NV(never)
+
+ALU2_OP_NAMES = ["ADD", "SUB", "AND", "OR", "XOR", "NOT", "RCL", "RCR"]
+ALU2_COND_NAMES = ["EQ", "NE", "CS", "CC", "MI", "PL", "AL", "NV"]
+
+# Curriculum stages — each tuple is the set of op indices active in that stage
+ALU2_CURRICULUM = [
+    [2, 3, 4, 5],        # stage 0: bitwise only (AND/OR/XOR/NOT)
+    [0, 1, 2, 3, 4, 5],  # stage 1: + arithmetic (ADD/SUB)
+    list(range(8)),       # stage 2: + shifts/rotates (RCL/RCR) — full set
+]
+
+
+def _compute_alu2(a_int, b_int, carry_in, op, cond):
+    """Full ALU v2: returns (result, carry_out, branch_taken).
+
+    Flags (zero, neg) are computed internally only to resolve branch_taken;
+    they are NOT separate outputs — the NCA must internalise them.
+
+    Condition codes:
+        0=EQ(Z)  1=NE(!Z)  2=CS(C)  3=CC(!C)
+        4=MI(N)  5=PL(!N)  6=AL     7=NV
+    """
+    ci = int(carry_in) & 1
+
+    if op == 0:   # ADD with carry
+        full      = a_int + b_int + ci
+        result    = full & 0xFF
+        carry_out = (full >> 8) & 1
+    elif op == 1: # SUB with borrow: A - B - carry_in
+        full      = a_int - b_int - ci
+        result    = full & 0xFF
+        carry_out = 0 if full < 0 else 1   # NOT borrow
+    elif op == 2: result = a_int & b_int; carry_out = 0   # AND
+    elif op == 3: result = a_int | b_int; carry_out = 0   # OR
+    elif op == 4: result = a_int ^ b_int; carry_out = 0   # XOR
+    elif op == 5: result = (~a_int) & 0xFF; carry_out = 0 # NOT
+    elif op == 6: # RCL — rotate left through carry
+        carry_out = (a_int >> 7) & 1
+        result    = ((a_int << 1) | ci) & 0xFF
+    else:         # RCR — rotate right through carry
+        carry_out = a_int & 1
+        result    = ((a_int >> 1) | (ci << 7)) & 0xFF
+
+    zero  = int(result == 0)
+    neg   = (result >> 7) & 1
+    cond_map     = [zero, 1-zero, carry_out, 1-carry_out, neg, 1-neg, 1, 0]
+    branch_taken = cond_map[cond & 7]
+
+    return result, carry_out, branch_taken
+
+
+def _int_to_bits_msb(n, width):
+    return [(n >> (width - 1 - i)) & 1 for i in range(width)]
+
+
+class ALU2Dataset(IterableDataset):
+    """Full 8-bit ALU with carry and branch output on a 160×112 grid.
+
+    Layout (160×112, r=4, step=10px)
+    ---------------------------------
+    x_A    = 16  : operand A (8 bits, MSB-top)
+    x_B    = 32  : operand B (8 bits, blank for NOT/RCL/RCR)
+    x_CTRL = 60  : op[2:0] + carry_in + cond[2:0]  — 7 bits
+    x_OUT  = 144 : result[7:0] + carry_out + branch_taken  — 10 bits
+
+    The NCA must internalise zero and negative flags as intermediate state
+    to correctly compute branch_taken — no external logic is used.
+    """
+
+    # Default geometry — mirrors the constants in train_alu2.py
+    W        = 96
+    H        = 112
+    R        = 4
+    AMONG_SP = 2
+    X_A      = 12
+    X_B      = 24
+    X_CTRL   = 48
+    X_OUT    = 82
+
+    def __init__(self, config=None, curriculum_stage=None):
+        if config is not None:
+            self.W        = int(config.W)
+            self.H        = int(config.H)
+            self.R        = int(config.r)
+            self.AMONG_SP = int(config.among_sp)
+            self.X_A      = int(config.x_a)
+            self.X_B      = int(config.x_b)
+            self.X_CTRL   = int(config.x_ctrl)
+            self.X_OUT    = int(config.x_out)
+        self.curriculum_stage = curriculum_stage   # None → full set
+
+    def _screen(self, a_bits=None, b_bits=None, ctrl_bits=None, out_bits=None):
+        return make_alu2_screen(
+            self.H, self.W, self.R, self.AMONG_SP,
+            self.X_A, self.X_B, self.X_CTRL, self.X_OUT,
+            a_bits=a_bits, b_bits=b_bits,
+            ctrl_bits=ctrl_bits, out_bits=out_bits,
+        )
+
+    def _active_ops(self):
+        s = self.curriculum_stage
+        if s is None or s >= len(ALU2_CURRICULUM):
+            return list(range(8))
+        return ALU2_CURRICULUM[s]
+
+    def get_io_mask(self):
+        inp = self._screen(a_bits=[1]*8, b_bits=[1]*8, ctrl_bits=[1]*7)
+        out = self._screen(out_bits=[1]*10)
+        return inp, out
+
+    def get_output_bit_masks(self):
+        """Returns (10, H, W) tensor — one binary mask per output bit."""
+        masks = []
+        for i in range(10):
+            bits = [1 if j == i else 0 for j in range(10)]
+            s = self._screen(out_bits=bits)
+            masks.append(torch.from_numpy(s > 200).float())
+        return torch.stack(masks)   # (10, H, W)
+
+    def get_sample(self):
+        a_int    = random.randint(0, 255)
+        b_int    = random.randint(0, 255)
+        carry_in = random.randint(0, 1)
+        op       = random.choice(self._active_ops())
+        cond     = random.randint(0, 7)
+
+        result, cout, branch = _compute_alu2(a_int, b_int, carry_in, op, cond)
+
+        ctrl_bits = (_int_to_bits_msb(op, 3)
+                     + [carry_in]
+                     + _int_to_bits_msb(cond, 3))        # 7 bits
+        out_bits  = (_int_to_bits_msb(result, 8)
+                     + [cout, branch])                   # 10 bits
+
+        uses_b = op not in (5, 6, 7)   # NOT/RCL/RCR don't use B
+
+        inp = self._screen(
+            a_bits    = _int_to_bits_msb(a_int, 8),
+            b_bits    = _int_to_bits_msb(b_int, 8) if uses_b else None,
+            ctrl_bits = ctrl_bits,
+        )
+        out = self._screen(out_bits=out_bits)
+        return torch.from_numpy(inp).float(), torch.from_numpy(out).float()
 
     def __iter__(self):
         while True:
