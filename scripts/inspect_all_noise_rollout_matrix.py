@@ -28,34 +28,6 @@ def find_checkpoint(run_dir):
     return pts[-1] if pts else None
 
 
-def build_nca(cfg):
-    print(
-        "channels: " , cfg.get("NCA_CHANNELS", 16),
-        "hidden_channels: " , cfg.get("HIDDEN_CHANNELS", [128]),
-        "fire_rate: " , cfg.get("fire_rate", 0.99),
-        "alive_threshold: " , cfg.get("alive_threshold", 0.1),
-        "zero_initialization: " , cfg.get("zero_initialization", False),
-        "kernel_size: " , cfg.get("KERNEL_SIZE", 7),
-        "padding_type: " , cfg.get("padding_type", "constant"),
-        "read_only_dims: " , cfg.get("read_only_dims", [-4, -3, -2, -1]),
-        "gaussian_noise: " , cfg.get("GAUSSIAN_NOISE", 0.2),
-        "gaussian_noise_fire_rate: " , cfg.get("gaussian_noise_fire_rate", cfg.get("fire_rate", 0.2)),
-
-    )
-
-    return NeuralCA(
-        channels=cfg.get("NCA_CHANNELS", 16),
-        hidden_channels=cfg.get("HIDDEN_CHANNELS", [128]),
-        fire_rate=cfg.get("fire_rate", 0.99),
-        alive_threshold=cfg.get("alive_threshold", 0.1),
-        zero_initialization=cfg.get("zero_initialization", False),
-        kernel_size=cfg.get("KERNEL_SIZE", 7),
-        padding_type=cfg.get("padding_type", "constant"),
-        read_only_dims=cfg.get("read_only_dims", [-4, -3, -2, -1]),
-        gaussian_noise=cfg.get("GAUSSIAN_NOISE", 0.2),
-        gaussian_noise_fire_rate=cfg.get("gaussian_noise_fire_rate", cfg.get("fire_rate", 0.2)),
-    )
-
 def implant_input(inp, input_implant_type : str, nca_channels: int, H : int , W : int):
     bs = inp.shape[0]
     if input_implant_type == "all":
@@ -108,41 +80,30 @@ def plot_log(run_dir, out_dir):
         fig.savefig(out_dir / "log_bits.png", dpi=120)
         plt.close(fig)
 
+def get_rollout(run_dir,steps):
+    ckpt = find_checkpoint(run_dir)
+    cfg = load_config(run_dir)
+    noise=cfg.get("GAUSSIAN_NOISE", 0.2)
+    noise_fr=cfg.get("fire_rate", 0.2)
+
+    if ckpt is None:
+        return None
+    checkpoint = torch.load(run_dir / "best_rollout.pt")
+    rollout = checkpoint["rollout"][:,:steps,...] # (B, T, C, H, W)
+    target = checkpoint["out"]
+    return rollout, target, noise_fr, noise
 
 def analyze(run_dir, batch_size=8, steps=64):
     assert run_dir.exists(), f"{run_dir} not found"
 
-    out_dir = run_dir / "analysis"
+    out_dir = run_dir / "best_rollout_analysis_single"
     out_dir.mkdir(exist_ok=True)
 
-    device = "cuda"
-    cfg = load_config(run_dir)
-    nca = build_nca(cfg).to(device)
     ckpt = find_checkpoint(run_dir)
-    if ckpt is None:
-        raise RuntimeError(f"No checkpoint in {run_dir}/checkpoints")
-    state = torch.load(ckpt, map_location=device, weights_only=False)
-    if "model_state_dict" in state:
-        nca.load_state_dict(state["model_state_dict"])
-    else:
-        nca.load_state_dict(state)
 
-    # nca.eval()
-
-    dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=nca.channels)
-    dl = dataset.get_dataloader(batch_size=batch_size)
-    inp, target = next(iter(dl))
-    inp = inp.to(device)
-
-    first_state = normalize_neg1_to_1(inp)
-    target = normalize_neg1_to_1(target)
-    first_state = add_gaussian_noise(first_state, 0, 0.2)
-
-    print(inp.shape)
-
-    # first_state = implant_input(inp, input_implant_type="first", nca_channels=nca.channels, H=inp.shape[-2], W=inp.shape[-1])
-    with torch.no_grad():
-        rollout = nca.forward(first_state, steps=steps)
+    checkpoint = torch.load(run_dir / "best_rollout.pt")
+    rollout = checkpoint["rollout"][:,:steps,...] # (B, T, C, H, W)
+    target = checkpoint["out"]
 
     # Save rollback plot
     target = target.to(rollout.device)
@@ -153,16 +114,16 @@ def analyze(run_dir, batch_size=8, steps=64):
         save_rollout_png(
             out_dir / f"rollout_{ckpt.stem}_gate_{g}.png",
             to_save[g].cpu(),  # first sample: (T, C, H, W)
-            n_snapshots=4,
-            max_channels=min(nca.channels, 16),
-            channels=[0,1,3,5]
+            n_snapshots=2,
+            max_channels=16,
+            channels=[0,1]
         )
 
     save_rollout_gif(
         rollout,
         target,
         batch_size,
-        min(nca.channels, 16),
+        16,
         out_dir / f"rollout_{ckpt.stem}.gif",
     )
 
@@ -181,11 +142,47 @@ def analyze_multiple(base_dir=Path.home() / "ncpu" / "runs", batch_size=8, steps
     if not run_dirs:
         raise FileNotFoundError(f"No runs found for pattern {pattern} in {base_dir}")
 
-    for run_dir in run_dirs:
-        if not run_dir.is_dir():
-            continue
-        print(f"analyzing {run_dir}")
-        analyze(run_dir, batch_size=batch_size, steps=steps)
+    labels_y = ["fr=0.2", "fr=0.4", "fr=0.6", "fr=0.8", "fr=1.0"]
+    labels_x = ["std=0.2", "std=0.4", "std=0.6", "std=0.8", "std=1.0"]
+
+    target_frames = torch.empty((5, 5, 64, 64))
+    for gate in [0,1,2,3]:
+        for step in [0, 12, 24, 31]:
+            final_frames = torch.empty((5, 5, 64, 64))
+            for n,run_dir in enumerate(run_dirs):
+                if not run_dir.is_dir():
+                    continue
+                print(f"analyzing {run_dir}")
+                rollout, target, noise_fr, noise = get_rollout(run_dir, steps=steps)
+                x = int(noise_fr*10/2 - 1) 
+                y = int(noise*10/2 - 1) 
+                print(rollout.shape, x,y)
+                final_frame = rollout[gate,step,0,:,:]
+                final_frames[x,y] = final_frame
+                target_frames[x,y] = target[gate]
+            
+            assert run_dir.exists(), f"{run_dir} not found"
+            out_dir = run_dir / "all_gate_noises_combined"
+            out_dir.mkdir(exist_ok=True)
+
+            print(final_frames.shape)
+            save_rollout_png(
+                out_dir / f"frame_matrix_noise_fr_step_{step}_gate_{gate}.png",
+                final_frames.cpu(),  # first sample: (T, C, H, W)
+                n_snapshots=4,
+                max_channels=4,
+                labels_x = labels_x,
+                labels_y = labels_y,
+            )
+
+        save_rollout_png(
+            out_dir / f"frame_matrix_noise_fr_target_gate_{gate}.png",
+            target_frames.cpu(),  # first sample: (T, C, H, W)
+            n_snapshots=4,
+            max_channels=4,
+            labels_x = labels_x,
+            labels_y = labels_y,
+        )
 
     # analyze(run_dir, batch_size=batch_size, steps=steps)
 

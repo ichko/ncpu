@@ -49,7 +49,7 @@ dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=NCA_CH
 nca = NeuralCA(
     channels=NCA_CHANNELS,
     hidden_channels=[128],
-    fire_rate=0.99,
+    fire_rate=0.5,
     alive_threshold=0.1,
     zero_initialization=False,
     kernel_size=KERNEL_SIZE,

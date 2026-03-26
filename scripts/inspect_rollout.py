@@ -9,7 +9,7 @@ from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.dataset import MultiGateDataset
 from ncpu.nca import NeuralCA
-from ncpu.utils import save_rollout_png, save_grid_image, add_gaussian_noise, save_rollout_gif
+from ncpu.utils import save_rollout_png, save_grid_image, add_gaussian_noise, save_rollout_gif, save_cross_section_y, save_cross_section_x
 
 
 def load_config(run_dir):
@@ -27,34 +27,6 @@ def find_checkpoint(run_dir):
     pts = sorted(ckpt_dir.glob("nca_*.pt"))
     return pts[-1] if pts else None
 
-
-def build_nca(cfg):
-    print(
-        "channels: " , cfg.get("NCA_CHANNELS", 16),
-        "hidden_channels: " , cfg.get("HIDDEN_CHANNELS", [128]),
-        "fire_rate: " , cfg.get("fire_rate", 0.99),
-        "alive_threshold: " , cfg.get("alive_threshold", 0.1),
-        "zero_initialization: " , cfg.get("zero_initialization", False),
-        "kernel_size: " , cfg.get("KERNEL_SIZE", 7),
-        "padding_type: " , cfg.get("padding_type", "constant"),
-        "read_only_dims: " , cfg.get("read_only_dims", [-4, -3, -2, -1]),
-        "gaussian_noise: " , cfg.get("GAUSSIAN_NOISE", 0.2),
-        "gaussian_noise_fire_rate: " , cfg.get("gaussian_noise_fire_rate", cfg.get("fire_rate", 0.2)),
-
-    )
-
-    return NeuralCA(
-        channels=cfg.get("NCA_CHANNELS", 16),
-        hidden_channels=cfg.get("HIDDEN_CHANNELS", [128]),
-        fire_rate=cfg.get("fire_rate", 0.99),
-        alive_threshold=cfg.get("alive_threshold", 0.1),
-        zero_initialization=cfg.get("zero_initialization", False),
-        kernel_size=cfg.get("KERNEL_SIZE", 7),
-        padding_type=cfg.get("padding_type", "constant"),
-        read_only_dims=cfg.get("read_only_dims", [-4, -3, -2, -1]),
-        gaussian_noise=cfg.get("GAUSSIAN_NOISE", 0.2),
-        gaussian_noise_fire_rate=cfg.get("gaussian_noise_fire_rate", cfg.get("fire_rate", 0.2)),
-    )
 
 def implant_input(inp, input_implant_type : str, nca_channels: int, H : int , W : int):
     bs = inp.shape[0]
@@ -112,59 +84,43 @@ def plot_log(run_dir, out_dir):
 def analyze(run_dir, batch_size=8, steps=64):
     assert run_dir.exists(), f"{run_dir} not found"
 
-    out_dir = run_dir / "analysis"
+    out_dir = run_dir / "best_rollout_analysis_single"
     out_dir.mkdir(exist_ok=True)
 
-    device = "cuda"
-    cfg = load_config(run_dir)
-    nca = build_nca(cfg).to(device)
     ckpt = find_checkpoint(run_dir)
-    if ckpt is None:
-        raise RuntimeError(f"No checkpoint in {run_dir}/checkpoints")
-    state = torch.load(ckpt, map_location=device, weights_only=False)
-    if "model_state_dict" in state:
-        nca.load_state_dict(state["model_state_dict"])
-    else:
-        nca.load_state_dict(state)
 
-    # nca.eval()
-
-    dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=nca.channels)
-    dl = dataset.get_dataloader(batch_size=batch_size)
-    inp, target = next(iter(dl))
-    inp = inp.to(device)
-
-    first_state = normalize_neg1_to_1(inp)
-    target = normalize_neg1_to_1(target)
-    first_state = add_gaussian_noise(first_state, 0, 0.2)
-
-    print(inp.shape)
-
-    # first_state = implant_input(inp, input_implant_type="first", nca_channels=nca.channels, H=inp.shape[-2], W=inp.shape[-1])
-    with torch.no_grad():
-        rollout = nca.forward(first_state, steps=steps)
+    checkpoint = torch.load(run_dir / "best_rollout.pt")
+    rollout = checkpoint["rollout"][:,:steps,...] # (B, T, C, H, W)
+    target = checkpoint["out"]
 
     # Save rollback plot
     target = target.to(rollout.device)
     expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
     to_save = torch.cat([expanded_target, rollout], dim=2) 
 
-    for g in [0,1,2,3,4,5,6,7]:
-        save_rollout_png(
-            out_dir / f"rollout_{ckpt.stem}_gate_{g}.png",
-            to_save[g].cpu(),  # first sample: (T, C, H, W)
-            n_snapshots=4,
-            max_channels=min(nca.channels, 16),
-            channels=[0,1,3,5]
-        )
+    # for g in [0,1,2,3,4,5,6,7]:
+    #     save_rollout_png(
+    #         out_dir / f"rollout_{ckpt.stem}_gate_{g}.png",
+    #         to_save[g].cpu(),  # first sample: (T, C, H, W)
+    #         n_snapshots=2,
+    #         max_channels=16,
+    #         channels=[0,1]
+    #     )
 
-    save_rollout_gif(
-        rollout,
-        target,
-        batch_size,
-        min(nca.channels, 16),
-        out_dir / f"rollout_{ckpt.stem}.gif",
-    )
+    save_cross_section_y(rollout,
+        path= out_dir / f"y_section_{ckpt.stem}.png",
+        cross_section=-16)
+    save_cross_section_x(rollout,
+        path= out_dir / f"x_section_{ckpt.stem}.png",
+        cross_section=32)
+
+    # save_rollout_gif(
+    #     rollout,
+    #     target,
+    #     batch_size,
+    #     16,
+    #     out_dir / f"rollout_{ckpt.stem}.gif",
+    # )
 
     # copy latest for convenience
     (out_dir / "rollout_latest.png").write_bytes((out_dir / f"rollout_{ckpt.stem}_gate_{0}.png").read_bytes())

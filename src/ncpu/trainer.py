@@ -111,7 +111,7 @@ class NCPUTrainer(BaseTrainer):
             first_state[:, 0] = inp
         return first_state
 
-    def optim_step(self, steps, return_rollout=False):
+    def optim_step(self, steps, return_rollout : bool = False, init_noise : bool = False, noise_std : Optional[float] = None, noise_fire_rate : Optional[float] = None):
         batch = next(self.dataset_iter)
         inp, out = batch
         print(f"optim_step: inp {inp.shape}  out {out.shape}")
@@ -119,7 +119,7 @@ class NCPUTrainer(BaseTrainer):
         inp = self.normalize_fn(inp)
         out = self.normalize_fn(out)
 
-        if self.gaussian_noise > 0:
+        if self.gaussian_noise > 0 and init_noise:
             inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
 
         inp = inp.to(self.device)
@@ -130,7 +130,7 @@ class NCPUTrainer(BaseTrainer):
             forward_steps = np.random.randint(steps[0], steps[1])
 
         first_state = self._implant_input(inp)
-        rollout = self.nca.forward(first_state, steps=forward_steps)
+        rollout = self.nca.forward(first_state, steps=forward_steps, noise_std=noise_std, noise_fire_rate=noise_fire_rate)
 
         nca_out = rollout[:, -1, 0]
 

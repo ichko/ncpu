@@ -29,10 +29,10 @@ STEPS = 30_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 16
 N_OUTPUT_BITS = 1
-KERNEL_SIZE=5
+KERNEL_SIZE=7
 
-GAUSSIAN_NOISES = [0.2, 0.4, 0.6, 0.8, 1.0]
-FIRE_RATES = [0.2, 0.4, 0.6, 0.8, 1.0]
+GAUSSIAN_NOISES = [0.2, 0.6, 1.0]
+FIRE_RATES = [0.2, 0.6, 1.0]
 
 def run_experiment(gaussian_noise, fire_rate):
     run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -75,7 +75,7 @@ def run_experiment(gaussian_noise, fire_rate):
     nca = NeuralCA(
         channels=NCA_CHANNELS,
         hidden_channels=[128],
-        fire_rate=0.5,
+        fire_rate=0.99,
         alive_threshold=0.1,
         zero_initialization=False,
         kernel_size=KERNEL_SIZE,

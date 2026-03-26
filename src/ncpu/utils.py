@@ -20,6 +20,10 @@ import matplotlib.cm as cm
 import tempfile
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import numpy as np
+
 EPS = 1e-8
 
 
@@ -646,6 +650,8 @@ def save_rollout_png(
     cmap="viridis",
     dpi=150,
     channels = [], # if non-empty, only plot these channels (0-indexed); otherwise plot all up to max_channels 
+    labels_x = [],
+    labels_y = [],
 ):
     """Save a labelled rollout grid as PNG via matplotlib.
 
@@ -653,9 +659,6 @@ def save_rollout_png(
     Cols  = evenly-spaced timestep snapshots from the rollout.
     One figure per batch element in *batch_indices*.
     """
-    import matplotlib.pyplot as plt
-    from pathlib import Path
-    import torch, numpy as np
 
     path = Path(path)
     T, C, H, W = rollout.shape
@@ -691,9 +694,15 @@ def save_rollout_png(
             ax.set_xticks([])
             ax.set_yticks([])
             if col_idx == 0:
-                ax.set_ylabel(f"ch {ci}", fontsize=7)
+                if labels_x:
+                    ax.set_ylabel(labels_x[ci], fontsize=14)
+                else:
+                    ax.set_ylabel(f"ch {ci}", fontsize=14)
             if ci == 0:
-                ax.set_title(f"t={t_idx.item()}", fontsize=7)
+                if labels_y:
+                    ax.set_title(labels_y[col_idx], fontsize=14)
+                else:
+                    ax.set_title(f"t={t_idx.item()}", fontsize=14)
 
     fig.tight_layout(pad=0.3)
     fig.savefig(str(path), dpi=dpi, bbox_inches="tight")
@@ -701,7 +710,7 @@ def save_rollout_png(
 
 def save_rollout_gif(rollout, out, batch_size, nca_channels, gif_path):
     gif_b = batch_size
-    gif_c = min(C, nca_channels)
+    gif_c = nca_channels
     r = rollout[:gif_b, ::2, :gif_c]
     T_sub = r.shape[1]
     target = out[:gif_b].detach().cpu()
@@ -738,3 +747,81 @@ def save_rollout_gif(rollout, out, batch_size, nca_channels, gif_path):
     # gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
     media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
     # shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+
+def save_cross_section_y(rollout, path, cross_section=-4, channel=0):
+    path = Path(path)
+    B, T, C, H, W = rollout.shape
+
+    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+              "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+
+    for batch in range(B):
+        line = torch.abs(rollout[batch, -1, channel, :, cross_section]).numpy()
+        ax.plot(line, color="#1f77b4", linewidth=0.5, linestyle="--")
+
+
+    ax.set_xlabel("H index", fontsize=9)
+    ax.set_ylabel("Magnitude", fontsize=9)
+    ax.set_title(f"Cross-section  idx={cross_section}  C={channel}", fontsize=10)
+
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.grid(which="major", linewidth=0.5, linestyle="--", color="#cccccc")
+    ax.grid(which="minor", linewidth=0.25, linestyle=":", color="#dddddd")
+    ax.tick_params(axis="both", labelsize=8, direction="in",
+                   which="both", top=True, right=True)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    if B > 1:
+        ax.legend(fontsize=7, frameon=True, framealpha=0.9,
+                  edgecolor="#cccccc", loc="best")
+
+    fig.tight_layout(pad=0.5)
+    fig.savefig(str(path), dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
+def save_cross_section_x(rollout, path, cross_section=-4, channel=0):
+    path = Path(path)
+    B, T, C, H, W = rollout.shape
+
+    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+              "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+
+    for batch in range(B):
+        line = torch.abs(rollout[batch, -1, channel, cross_section, :]).numpy()
+        ax.plot(line, color="#1f77b4", linewidth=0.5, linestyle="--")
+
+
+    ax.set_xlabel("H index", fontsize=9)
+    ax.set_ylabel("Magnitude", fontsize=9)
+    ax.set_title(f"Cross-section  idx={cross_section}  C={channel}", fontsize=10)
+
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.grid(which="major", linewidth=0.5, linestyle="--", color="#cccccc")
+    ax.grid(which="minor", linewidth=0.25, linestyle=":", color="#dddddd")
+    ax.tick_params(axis="both", labelsize=8, direction="in",
+                   which="both", top=True, right=True)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    if B > 1:
+        ax.legend(fontsize=7, frameon=True, framealpha=0.9,
+                  edgecolor="#cccccc", loc="best")
+
+    fig.tight_layout(pad=0.5)
+    fig.savefig(str(path), dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
+def bit_accuracy(frame, target):
+    mask = torch.abs(target) > 0.5
+    diff = (frame - target)[mask]
+    score = diff.mean()
+    return score

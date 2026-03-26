@@ -1,5 +1,6 @@
 __pycache__
 .gif
+.gz
 checkpoints/
 .ipynb_checkpoints/
 training_history/
