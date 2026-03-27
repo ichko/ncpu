@@ -11,8 +11,8 @@ from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.dataset import MultiGateDataset
 from ncpu.nca import NeuralCA
 from pathlib import Path
+import matplotlib.cm as cm
 
-from pandas.plotting import parallel_coordinates
 
 def load_log(run_dir):
     print(run_dir)
@@ -71,21 +71,43 @@ def analyze_single(run_dir, out_dir):
 
     data = convergence_grid.T.numpy()  # shape (n_rows, 5)
     print(data.shape)
-    fig, ax = plt.subplots(figsize=(8, len(data) * 0.4))
-    im = ax.imshow(data, cmap="RdYlGn", aspect="auto")
 
-    for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
-            ax.text(j, i, f"{data[i,j]:.2f}", ha="center", va="center", fontsize=7)
+    # ── radar chart ──────────────────────────────────────────────
+    axes_labels = ["fr", "am", "zi", "ks", "convergence"]
+    N = len(axes_labels)
+    angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+    angles += angles[:1]
 
-    ax.set_xticks(range(5))
-    ax.set_xticklabels(["fr", "am", "zi", "ks", "convergence"])
-    ax.set_yticks(range(len(data)))
-    ax.set_yticklabels([f"{i}" for i in range(len(data))], fontsize=7)
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+    cmap = cm.get_cmap("RdYlGn")
 
-    plt.colorbar(im, ax=ax)
+    for i in np.argsort(data[:, 4])[::-1]:   # low-conv rows drawn last (on top)
+        row  = data[i]
+        conv = row[4]
+        radii = row.copy()
+        radii[4] = 1 - conv
+        radii[:4] *= (1 - conv * 0.5)
+        values = radii.tolist() + radii[:1].tolist()
+        ax.plot(angles, values, color=cmap(conv), linewidth=1.2, alpha=conv)
+        ax.fill(angles, values, color=cmap(conv), alpha=conv)
+
+    ax.set_thetagrids(np.degrees(angles[:-1]), labels=axes_labels, fontsize=11)
+    ax.set_ylim(0, 1)
+    ax.set_yticks(np.linspace(0, 1, 5))
+    ax.set_yticklabels([f"{v:.1f}" for v in np.linspace(0, 1, 5)], fontsize=8, color="gray")
+    ax.tick_params(pad=8)
+    ax.grid(color="gray", alpha=0.2, linewidth=0.5)
+    ax.spines["polar"].set_visible(False)
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, shrink=0.6, pad=0.1)
+    cbar.ax.set_ylabel("convergence  (lower = bigger shape)", fontsize=9)
+    cbar.ax.invert_yaxis()
+
+    plt.title("Convergence radar", pad=20, fontsize=13)
     plt.tight_layout()
-    plt.savefig(out_dir / "convergence_grid.png", dpi=150, bbox_inches="tight")
+    plt.savefig(out_dir / "convergence_radar.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 def main():
