@@ -694,13 +694,13 @@ def save_rollout_png(
             ax.set_xticks([])
             ax.set_yticks([])
             if col_idx == 0:
-                if labels_x:
-                    ax.set_ylabel(labels_x[ci], fontsize=14)
+                if labels_y:
+                    ax.set_ylabel(labels_y[ci], fontsize=14)
                 else:
                     ax.set_ylabel(f"ch {ci}", fontsize=14)
             if ci == 0:
-                if labels_y:
-                    ax.set_title(labels_y[col_idx], fontsize=14)
+                if labels_x:
+                    ax.set_title(labels_x[col_idx], fontsize=14)
                 else:
                     ax.set_title(f"t={t_idx.item()}", fontsize=14)
 
@@ -819,9 +819,39 @@ def save_cross_section_x(rollout, path, cross_section=-4, channel=0):
     fig.savefig(str(path), dpi=300, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
+def save_matrix(out_dir, matrix, labels_x, labels_y, title):
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(matrix.T.numpy(), cmap="coolwarm", vmin=0, vmax=1)
+
+    # Annotate each cell with the value
+    for i in range(matrix.T.shape[0]):
+        for j in range(matrix.T.shape[1]):
+            val = matrix.T[i, j].item()
+            text_color = "black" if 0.3 < val < 0.8 else "white"
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center",
+                    fontsize=9, color=text_color, fontweight="bold")
+
+    # Axis labels
+    ax.set_xticks(range(len(labels_x)))
+    ax.set_yticks(range(len(labels_y)))
+    ax.set_xticklabels(labels_x, rotation=45, ha="right")
+    ax.set_yticklabels(labels_y)
+
+    ax.set_xlabel("Noise Std", labelpad=10)
+    ax.set_ylabel("Frame Rate", labelpad=10)
+    ax.set_title(title, pad=12)
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Bit Accuracy", rotation=270, labelpad=15)
+
+    plt.tight_layout()
+    plt.savefig(out_dir, dpi=150, bbox_inches="tight")
+    plt.close()
 
 def bit_accuracy(frame, target):
     mask = torch.abs(target) > 0.5
-    diff = (frame - target)[mask]
-    score = diff.mean()
-    return score
+    bits_number = mask.sum().item()
+
+    frame_bit = (frame[mask].sum()).int()/bits_number
+    target_bit = (target[mask].sum()).int()/bits_number
+    return np.abs(1.0 - np.abs(frame_bit - target_bit))

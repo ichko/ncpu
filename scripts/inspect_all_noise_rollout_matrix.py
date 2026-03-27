@@ -1,15 +1,16 @@
-import argparse
+import re
 import json
-from pathlib import Path
-
-import matplotlib.pyplot as plt
 import torch
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
 
+from ncpu.utils import save_rollout_png, save_grid_image, add_gaussian_noise, save_rollout_gif, save_matrix, bit_accuracy
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.dataset import MultiGateDataset
 from ncpu.nca import NeuralCA
-from ncpu.utils import save_rollout_png, save_grid_image, add_gaussian_noise, save_rollout_gif
+from pathlib import Path
 
 
 def load_config(run_dir):
@@ -17,6 +18,13 @@ def load_config(run_dir):
     if cfg_path.exists():
         with open(cfg_path, "r") as f:
             return json.load(f)
+    return {}
+
+def load_log(run_dir):
+    cfg_path = run_dir / "log.jsonl"
+    if cfg_path.exists():
+        with open(cfg_path, "r") as f:
+            return [json.loads(line) for line in f]
     return {}
 
 
@@ -96,7 +104,7 @@ def get_rollout(run_dir,steps):
 def analyze(run_dir, batch_size=8, steps=64):
     assert run_dir.exists(), f"{run_dir} not found"
 
-    out_dir = run_dir / "best_rollout_analysis_single"
+    out_dir = run_dir / "all_noise_inspection"
     out_dir.mkdir(exist_ok=True)
 
     ckpt = find_checkpoint(run_dir)
@@ -138,7 +146,19 @@ def analyze(run_dir, batch_size=8, steps=64):
 
 def analyze_multiple(base_dir=Path.home() / "ncpu" / "runs", batch_size=8, steps=128):
     pattern = f"*_coded_gates_noise*"
-    run_dirs = sorted(Path(base_dir).glob(pattern))
+
+    out_dir = base_dir / "all_noise_insepction"
+    out_dir.mkdir(exist_ok=True)
+    assert out_dir.exists(), f"{out_dir} not found"
+    out_dir = out_dir / "all_gate_noises_combined"
+    out_dir.mkdir(exist_ok=True)
+
+    run_dirs_raw = sorted(Path(base_dir).glob(pattern))
+
+    # Keep only dirs matching: _coded_gates_noise{number}_fr{number}
+    noise_fr_re = re.compile(r"_coded_gates_noise(\d+)_fr(\d+)")
+    run_dirs = [p for p in run_dirs_raw if noise_fr_re.search(p.name)]
+
     if not run_dirs:
         raise FileNotFoundError(f"No runs found for pattern {pattern} in {base_dir}")
 
@@ -149,23 +169,57 @@ def analyze_multiple(base_dir=Path.home() / "ncpu" / "runs", batch_size=8, steps
     for gate in [0,1,2,3]:
         for step in [0, 12, 24, 31]:
             final_frames = torch.empty((5, 5, 64, 64))
+            convergence_grid = torch.empty((5, 5))
+            validity_grid = torch.empty((5, 5))
+            bit_accuracy_grid = torch.empty((5, 5))
             for n,run_dir in enumerate(run_dirs):
                 if not run_dir.is_dir():
                     continue
-                print(f"analyzing {run_dir}")
-                rollout, target, noise_fr, noise = get_rollout(run_dir, steps=steps)
+                log = load_log(run_dir)
+                rollout, target, noise_fr, noise = get_rollout(run_dir, steps)
                 x = int(noise_fr*10/2 - 1) 
                 y = int(noise*10/2 - 1) 
-                print(rollout.shape, x,y)
-                final_frame = rollout[gate,step,0,:,:]
-                final_frames[x,y] = final_frame
-                target_frames[x,y] = target[gate]
-            
-            assert run_dir.exists(), f"{run_dir} not found"
-            out_dir = run_dir / "all_gate_noises_combined"
-            out_dir.mkdir(exist_ok=True)
 
-            print(final_frames.shape)
+                convergence_step = 0.0
+                chunk_size = 2500
+                step_size = int(chunk_size/100)
+                for n in range(0, len(log), step_size):
+                    chunk = [l["num_valid_bits"] for l in log[n:n+chunk_size]] 
+                    print("Checking convergence for", run_dir.name, "mean valid bits:", np.mean(chunk))
+                    if np.mean(chunk) > 0.95:
+                        convergence_step = np.abs(1 - n/len(log))
+                        break
+    
+                final_frames[x,y] = rollout[gate,step,0,:,:]
+                validity_grid[x,y] = np.mean([l["num_valid_bits"] for l in log[-2500:]])
+                convergence_grid[x,y] = convergence_step
+                target_frames[x,y] = target[gate,:,:]
+                bit_accuracy_grid[x,y] = bit_accuracy(rollout[gate,step,0,:,:], target[gate,:,:])
+
+            save_matrix(
+                out_dir / f"total_bit_validity.png",
+                validity_grid,
+                labels_x = labels_x,
+                labels_y = labels_y,
+                title=f"Bit Validity Across 2000 rollouts"
+            )
+
+            save_matrix(
+                out_dir / f"convergence_grid.png",
+                convergence_grid,
+                labels_x = labels_x,
+                labels_y = labels_y,
+                title=f"Convergence step grid (> 0.95)"
+            )
+
+            save_matrix(
+                out_dir / f"bit_accuracy_step{step}_gate{gate}_.png",
+                bit_accuracy_grid,
+                labels_x = labels_x,
+                labels_y = labels_y,
+                title=f"Bit Accuracy — Step {step}, Gate {gate}"
+            )
+
             save_rollout_png(
                 out_dir / f"frame_matrix_noise_fr_step_{step}_gate_{gate}.png",
                 final_frames.cpu(),  # first sample: (T, C, H, W)
