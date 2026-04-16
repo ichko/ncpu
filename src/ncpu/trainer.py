@@ -114,7 +114,7 @@ class NCPUTrainer(BaseTrainer):
     def optim_step(self, steps, return_rollout : bool = False, init_noise : bool = False, noise_std : Optional[float] = None, noise_fire_rate : Optional[float] = None):
         batch = next(self.dataset_iter)
         inp, out = batch
-        print(f"optim_step: inp {inp.shape}  out {out.shape}")
+        # print(f"optim_step: inp {inp.shape}  out {out.shape}")
 
         inp = self.normalize_fn(inp)
         out = self.normalize_fn(out)

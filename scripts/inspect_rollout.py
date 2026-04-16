@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
@@ -81,6 +82,26 @@ def plot_log(run_dir, out_dir):
         plt.close(fig)
 
 
+def load_rollout_tensor(run_dir, steps):
+    best_rollout_path = run_dir / "best_rollout.pt"
+    payload = torch.load(best_rollout_path, map_location="cpu")
+
+    rollout = payload.get("rollout") if isinstance(payload, dict) else payload
+
+    if isinstance(rollout, np.ndarray):
+        rollout = torch.from_numpy(rollout)
+    elif not torch.is_tensor(rollout):
+        rollout = torch.as_tensor(rollout)
+
+    if rollout.ndim == 4:
+        # Support single-sample rollout stored as (T, C, H, W).
+        rollout = rollout.unsqueeze(0)
+    elif rollout.ndim != 5:
+        raise ValueError(f"Expected rollout with 4 or 5 dims, got shape={tuple(rollout.shape)}")
+
+    return rollout[:, :steps, ...].float(), best_rollout_path
+
+
 def analyze(run_dir, batch_size=8, steps=64):
     assert run_dir.exists(), f"{run_dir} not found"
 
@@ -88,30 +109,37 @@ def analyze(run_dir, batch_size=8, steps=64):
     out_dir.mkdir(exist_ok=True)
 
     ckpt = find_checkpoint(run_dir)
+    rollout, best_rollout_path = load_rollout_tensor(run_dir, steps)  # (B, T, C, H, W)
+    rollout_stem = ckpt.stem if ckpt is not None else best_rollout_path.stem
 
-    checkpoint = torch.load(run_dir / "best_rollout.pt")
-    rollout = checkpoint["rollout"][:,:steps,...] # (B, T, C, H, W)
-    target = checkpoint["out"]
-
-    # Save rollback plot
-    target = target.to(rollout.device)
-    expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
-    to_save = torch.cat([expanded_target, rollout], dim=2) 
-
-    # for g in [0,1,2,3,4,5,6,7]:
-    #     save_rollout_png(
-    #         out_dir / f"rollout_{ckpt.stem}_gate_{g}.png",
-    #         to_save[g].cpu(),  # first sample: (T, C, H, W)
-    #         n_snapshots=2,
-    #         max_channels=16,
-    #         channels=[0,1]
-    #     )
+    n_samples = min(int(rollout.shape[0]), batch_size)
+    n_channels_to_show = min(16, int(rollout.shape[2]))
+    channels_to_show = list(range(n_channels_to_show))
+    channel_labels = [f"ch {i}" for i in channels_to_show]
+    preferred_steps = [0, 12, 24, 32]
+    for sample_idx in range(n_samples):
+        selected_steps = [s for s in preferred_steps if s < rollout.shape[1]]
+        if not selected_steps:
+            selected_steps = [0, max(0, int(rollout.shape[1]) - 1)]
+        save_rollout_png(
+            out_dir / f"rollout_inspected_{rollout_stem}_sample_{sample_idx}.png",
+            rollout[sample_idx].cpu(),
+            n_snapshots=len(selected_steps),
+            snapshot_indices=selected_steps,
+            max_channels=n_channels_to_show,
+            channels=channels_to_show,
+            labels_x=[f"t={s}" for s in selected_steps],
+            labels_y=channel_labels,
+            mark_right_output_circle=True,
+            output_circle_radius_px=5,
+            output_circle_color="gray",
+        )
 
     save_cross_section_y(rollout,
-        path= out_dir / f"y_section_{ckpt.stem}.png",
+        path= out_dir / f"y_section_{rollout_stem}.png",
         cross_section=-16)
     save_cross_section_x(rollout,
-        path= out_dir / f"x_section_{ckpt.stem}.png",
+        path= out_dir / f"x_section_{rollout_stem}.png",
         cross_section=32)
 
     # save_rollout_gif(
@@ -123,7 +151,9 @@ def analyze(run_dir, batch_size=8, steps=64):
     # )
 
     # copy latest for convenience
-    (out_dir / "rollout_latest.png").write_bytes((out_dir / f"rollout_{ckpt.stem}_gate_{0}.png").read_bytes())
+    if n_samples > 0:
+        latest_source = out_dir / f"rollout_inspected_{rollout_stem}_sample_0.png"
+        (out_dir / "rollout_latest.png").write_bytes(latest_source.read_bytes())
 
     # log plots
     plot_log(run_dir, out_dir)
@@ -132,7 +162,7 @@ def analyze(run_dir, batch_size=8, steps=64):
 
 
 def analyze_multiple(base_dir=Path.home() / "ncpu" / "runs", batch_size=8, steps=128):
-    pattern = f"*_coded_gates_noise*"
+    pattern = f"*_gate_dynamic_*"
     run_dirs = sorted(Path(base_dir).glob(pattern))
     if not run_dirs:
         raise FileNotFoundError(f"No runs found for pattern {pattern} in {base_dir}")

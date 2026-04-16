@@ -644,6 +644,7 @@ def save_rollout_png(
     path,
     rollout,          # (T, C, H, W)
     n_snapshots=6,
+    snapshot_indices=None,
     max_channels=None,
     vmin=-1,
     vmax=1,
@@ -652,6 +653,9 @@ def save_rollout_png(
     channels = [], # if non-empty, only plot these channels (0-indexed); otherwise plot all up to max_channels 
     labels_x = [],
     labels_y = [],
+    mark_right_output_circle=False,
+    output_circle_radius_px=5,
+    output_circle_color="gray",
 ):
     """Save a labelled rollout grid as PNG via matplotlib.
 
@@ -665,7 +669,10 @@ def save_rollout_png(
     if max_channels is not None:
         C = min(C, max_channels)
 
-    ts = torch.linspace(0, T - 1, n_snapshots).long()
+    if snapshot_indices is not None and len(snapshot_indices) > 0:
+        ts = torch.as_tensor(snapshot_indices, dtype=torch.long)
+    else:
+        ts = torch.linspace(0, T - 1, n_snapshots).long()
 
     if channels:
         n_rows = len(channels)
@@ -691,18 +698,29 @@ def save_rollout_png(
             else:
                 tile = rollout[t_idx, ci]
             ax.imshow(tile, vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal", interpolation="nearest")
+            if mark_right_output_circle:
+                cx = W - output_circle_radius_px - 12
+                cy = H // 2
+                circ = plt.Circle(
+                    (cx, cy),
+                    radius=output_circle_radius_px,
+                    fill=False,
+                    edgecolor=output_circle_color,
+                    linewidth=4.0,
+                )
+                ax.add_patch(circ)
             ax.set_xticks([])
             ax.set_yticks([])
             if col_idx == 0:
                 if labels_y:
-                    ax.set_ylabel(labels_y[ci], fontsize=14)
+                    ax.set_ylabel(labels_y[ci], fontsize=20)
                 else:
-                    ax.set_ylabel(f"ch {ci}", fontsize=14)
+                    ax.set_ylabel(f"ch {ci}", fontsize=20)
             if ci == 0:
                 if labels_x:
-                    ax.set_title(labels_x[col_idx], fontsize=14)
+                    ax.set_title(labels_x[col_idx], fontsize=20)
                 else:
-                    ax.set_title(f"t={t_idx.item()}", fontsize=14)
+                    ax.set_title(f"t={t_idx.item()}", fontsize=20)
 
     fig.tight_layout(pad=0.3)
     fig.savefig(str(path), dpi=dpi, bbox_inches="tight")

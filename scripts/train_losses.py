@@ -73,7 +73,7 @@ def run_experiment(loss_name : str, loss_fn : Callable):
         channels=NCA_CHANNELS,
         hidden_channels=[128],
         fire_rate=0.99,
-        alive_threshold=0.1,
+        alive_threshold=0.0,
         zero_initialization=False,
         kernel_size=KERNEL_SIZE,
         read_only_dims=[-4, -3, -2, -1],
