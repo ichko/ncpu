@@ -409,48 +409,36 @@ for op in range(8):
     print(f"  {ALU2_OP_NAMES[op]:4s}  result={acc[:8].mean()*100:.1f}%  "
           f"carry={acc[8]*100:.1f}%  branch={acc[9]*100:.1f}%")
 
-# Plot per-op accuracy
-fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), sharey=True)
+# Plot per-op accuracy — grouped bar chart
+fig, ax = plt.subplots(figsize=(4.5, 3.8))
 
 x       = np.arange(8)
+bw      = 0.24   # bar width
+off     = 0.26   # centre offset (gap between bars = off - bw = 0.02)
 op_lbls = ALU2_OP_NAMES
 
-# Panel 1: result byte accuracy
-vals = [op_acc[op]["result"] * 100 for op in range(8)]
-axes[0].bar(x, vals, color=COL_A, alpha=0.85)
-axes[0].set_title("Result byte accuracy\n(mean of 8 bits)")
-axes[0].set_xticks(x); axes[0].set_xticklabels(op_lbls, fontsize=8)
-axes[0].set_ylabel("Accuracy (%)")
-axes[0].set_ylim(0, 105)
-axes[0].axhline(100, color="#aaaaaa", linewidth=0.8, linestyle="--")
+r_vals = [op_acc[op]["result"]       * 100 for op in range(8)]
+c_vals = [op_acc[op]["carry_out"]    * 100 for op in range(8)]
+b_vals = [op_acc[op]["branch_taken"] * 100 for op in range(8)]
 
-# Panel 2: carry_out accuracy
-vals = [op_acc[op]["carry_out"] * 100 for op in range(8)]
-bars = axes[1].bar(x, vals, color=COL_B, alpha=0.85)
-# carry_out is always 0 for AND/OR/XOR/NOT → trivially correct if NCA outputs negative
-for i, op in enumerate(range(8)):
-    if op in (2, 3, 4, 5):   # AND/OR/XOR/NOT: carry always 0
-        bars[i].set_hatch("//")
-        bars[i].set_edgecolor("#888888")
-axes[1].set_title("carry_out accuracy\n(// = always-zero op)")
-axes[1].set_xticks(x); axes[1].set_xticklabels(op_lbls, fontsize=8)
-axes[1].set_ylim(0, 105)
-axes[1].axhline(100, color="#aaaaaa", linewidth=0.8, linestyle="--")
+ax.bar(x - off, r_vals, bw, color=COL_A,   alpha=0.85, label="result byte")
+ax.bar(x,       c_vals, bw, color=COL_B,   alpha=0.85, label="carry out")
+ax.bar(x + off, b_vals, bw, color=COL_OUT, alpha=0.85, label="branch taken")
 
-# Panel 3: branch_taken accuracy
-vals = [op_acc[op]["branch_taken"] * 100 for op in range(8)]
-axes[2].bar(x, vals, color=COL_OUT, alpha=0.85)
-axes[2].axhline(50, color="#aaaaaa", linewidth=0.8, linestyle=":",
-                label="random baseline (50%)")
-axes[2].set_title("branch_taken accuracy\n(all 8 conditions sampled)")
-axes[2].set_xticks(x); axes[2].set_xticklabels(op_lbls, fontsize=8)
-axes[2].set_ylim(0, 105)
-axes[2].axhline(100, color="#aaaaaa", linewidth=0.8, linestyle="--")
-axes[2].legend(fontsize=7)
+ax.set_xlim(-0.5, 7.5)
+ax.set_ylim(0, 104)
+ax.set_xticks(x)
+ax.set_xticklabels(op_lbls, fontsize=9)
+ax.set_ylabel("Accuracy (%)", fontsize=9)
+ax.tick_params(axis="y", labelsize=8)
+ax.grid(False)
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.legend(fontsize=10, loc="upper center", bbox_to_anchor=(0.5, -0.12),
+          ncol=3, frameon=True, framealpha=0.9, edgecolor="#cccccc",
+          handlelength=1.2, handletextpad=0.4, columnspacing=1.0)
 
-fig.suptitle(f"E_alu2 — per-operation accuracy  ({N_ACC} samples/op, T={T_EVAL} steps)",
-             fontsize=10)
-fig.tight_layout()
+fig.tight_layout(rect=[0, 0.10, 1, 1])
 fig.savefig(OUT_DIR / "per_op_accuracy.svg")
 plt.close(fig)
 print("Saved: per_op_accuracy.svg")

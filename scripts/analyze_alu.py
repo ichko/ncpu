@@ -189,7 +189,7 @@ def load_nca(run_dir):
         padding_type=nc.get("padding_type", "zeros"),
     )
     ckpts = sorted((run_dir / "checkpoints").glob("nca_*.pt"))
-    nca.load_state_dict(torch.load(ckpts[-1], map_location="cpu", weights_only=True))
+    nca.load_state_dict(torch.load(ckpts[-1], map_location="cpu", weights_only=True), strict=False)
     nca.eval()
     return nca
 
@@ -376,9 +376,9 @@ if snaps:
 # Schematic showing the three-column ALU grid layout at true pixel scale.
 
 H_D, W_D  = 112, 128
-r_d       = 4
+r_d       = 5
 among_sp  = 2
-side_sp   = 20
+side_sp   = 21
 
 COL_A   = "#4E79A7"   # blue   — A input
 COL_B   = "#76B7B2"   # teal   — B input
@@ -386,26 +386,27 @@ COL_OP  = "#F28E2B"   # orange — opcode
 COL_RES = "#59A14F"   # green  — result
 COL_BG  = "#f7f7f7"
 
-def _draw_col_diag(ax, n, cx, color, labels, fontsize=5):
+def _draw_col_diag(ax, n, cx, color, labels):
     v  = n * 2*r_d + among_sp * (n - 1)
     tm = (H_D - v) // 2
     for i, lbl in enumerate(labels):
         cy = tm + r_d + i * (2*r_d + among_sp)
         ax.add_patch(mpatches.Circle((cx, cy), r_d, color=color, zorder=3))
         ax.text(cx, cy, lbl, ha="center", va="center",
-                fontsize=fontsize, color="white", fontweight="bold", zorder=4)
+                fontsize=9, color="white", fontweight="bold", zorder=4)
 
-scale  = 0.028
-p_w    = W_D * scale    # 3.584"
-p_h    = H_D * scale    # 3.136"
-lm, rm = 0.15, 0.15
-tm, bm = 0.45, 0.45
+scale  = 0.030
+p_w    = W_D * scale
+p_h    = H_D * scale
+lm, rm = 0.10, 0.10
+tm_m   = 0.55
+bm_m   = 0.52
 fig_w  = p_w + lm + rm
-fig_h  = p_h + tm + bm
+fig_h  = p_h + tm_m + bm_m
 
 fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 fig.subplots_adjust(left=lm/fig_w, right=1-rm/fig_w,
-                    bottom=bm/fig_h, top=1-tm/fig_h)
+                    bottom=bm_m/fig_h, top=1-tm_m/fig_h)
 
 ax.set_xlim(0, W_D)
 ax.set_ylim(H_D, 0)
@@ -415,45 +416,45 @@ ax.add_patch(mpatches.FancyBboxPatch((0, 0), W_D, H_D, boxstyle="square,pad=0",
              linewidth=1, edgecolor="#aaaaaa", facecolor=COL_BG, zorder=0))
 ax.set_xticks([]); ax.set_yticks([])
 
-# A column (cx = side_sp)
+# A column
 cx_a = side_sp
 _draw_col_diag(ax, 8, cx_a, COL_A, [f"a{i}" for i in range(8)])
 
-# B column (cx = side_sp + 2r + among_sp)
+# B column
 cx_b = side_sp + 2*r_d + among_sp
 _draw_col_diag(ax, 8, cx_b, COL_B, [f"b{i}" for i in range(8)])
 
-# Opcode column (cx = W//2)
+# Opcode column
 cx_op = W_D // 2
 _draw_col_diag(ax, 3, cx_op, COL_OP, [f"op{i}" for i in range(3)])
 
-# Result column (cx = W - side_sp)
+# Result column
 cx_res = W_D - side_sp
 _draw_col_diag(ax, 8, cx_res, COL_RES, [f"r{i}" for i in range(8)])
 
-# Column labels
-label_y = H_D + 4
+# Column labels — above the figure (y-axis is inverted, so negative y is above)
+label_y = -4
 for cx, lbl, col in [
     (cx_a,  "A",      COL_A),
     (cx_b,  "B",      COL_B),
     (cx_op, "opcode", COL_OP),
     (cx_res,"result", COL_RES),
 ]:
-    ax.text(cx, label_y, lbl, ha="center", va="top",
-            fontsize=6, color=col, fontweight="bold")
+    ax.text(cx, label_y, lbl, ha="center", va="bottom",
+            fontsize=9, color=col, fontweight="bold")
 
 handles = [
-    mpatches.Patch(color=COL_A,   label="A bits (r/o ch1)"),
-    mpatches.Patch(color=COL_B,   label="B bits (r/o ch1)"),
-    mpatches.Patch(color=COL_OP,  label="Opcode"),
-    mpatches.Patch(color=COL_RES, label="Result"),
+    mpatches.Patch(color=COL_A,   label="input A"),
+    mpatches.Patch(color=COL_B,   label="input B"),
+    mpatches.Patch(color=COL_OP,  label="opcode"),
+    mpatches.Patch(color=COL_RES, label="result"),
 ]
-fig.legend(handles=handles, loc="lower center", fontsize=7, ncol=4,
+fig.legend(handles=handles, loc="lower center", fontsize=10, ncol=4,
            framealpha=0.9, edgecolor="#cccccc", bbox_to_anchor=(0.5, 0.02))
 
-fig.suptitle(f"E4 — 8-bit ALU layout ({W_D}×{H_D} grid, r={r_d})", fontsize=9, y=0.99)
-fig.savefig(OUT_DIR / "layout_diagram.pdf", bbox_inches="tight", pad_inches=0.02)
+out_svg = OUT_DIR / "layout_diagram.svg"
+fig.savefig(out_svg, bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
-print("Saved: layout_diagram.pdf")
+print("Saved: layout_diagram.svg")
 
 print(f"\nAll outputs in {OUT_DIR}/")

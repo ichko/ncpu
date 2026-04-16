@@ -125,28 +125,26 @@ for i, mt in enumerate(k_values_trained):
         if tk in final_acc[mt]:
             heatmap[i, j] = final_acc[mt][tk]
 
-fig, ax = plt.subplots(figsize=(7, 4))
+fig, ax = plt.subplots(figsize=(3.5, 3.5))
 im = ax.imshow(heatmap, vmin=0, vmax=100, cmap="RdYlGn", aspect="auto")
-fig.colorbar(im, ax=ax, label="accuracy (%)")
 
 ax.set_xticks(range(len(all_test_ks)))
-ax.set_xticklabels([f"k={k}" for k in all_test_ks])
+ax.set_xticklabels([f"k={k}" for k in all_test_ks], fontsize=12)
 ax.set_yticks(range(len(k_values_trained)))
-ax.set_yticklabels([f"train ≤{mt}" for mt in k_values_trained])
-ax.set_xlabel("test bit width")
-ax.set_ylabel("training ceiling")
-ax.set_title("Extrapolation accuracy (%, averaged over seeds)")
+ax.set_yticklabels([f"≤{mt}" for mt in k_values_trained], fontsize=12)
+ax.set_xlabel("test bit width", fontsize=12)
+ax.set_ylabel("train ceiling", fontsize=12)
 
 for i in range(len(k_values_trained)):
     for j in range(len(all_test_ks)):
         v = heatmap[i, j]
         if not np.isnan(v):
             ax.text(j, i, f"{v:.0f}", ha="center", va="center",
-                    fontsize=8, color="black" if 20 < v < 80 else "white")
+                    fontsize=12, color="black" if 20 < v < 80 else "white")
 
-fig.tight_layout()
+fig.tight_layout(pad=0.5)
 p = OUT_DIR / "extrap_heatmap.svg"
-fig.savefig(p)
+fig.savefig(p, bbox_inches="tight")
 plt.close(fig)
 print(f"Saved {p}")
 

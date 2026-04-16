@@ -347,7 +347,7 @@ print(f"\nSaved: layout_diagram.svg")
 # For each notable gate: rows = input combos, cols = timesteps (channel 0)
 # Plus an all-channels view for the most interesting combo.
 
-TSTEPS = [0, 8, 16, 32, 48, 64]
+TSTEPS = [0, 8, 16, 32, 64]
 
 SHOWCASE = {
     "AND": {
@@ -433,18 +433,20 @@ for gate, sc in SHOWCASE.items():
     out_bits = sc["out"]
     labels   = sc["labels"]
     n_rows   = len(combos)
-    n_cols   = len(TSTEPS) + 1  # +1 for target frame
+    n_cols   = len(TSTEPS)
 
     # ── Figure 1: channel 0, all input combos × timesteps ────────────────────
-    cell = 0.72
+    cell = 0.84
     fig, axes = plt.subplots(n_rows, n_cols,
-                             figsize=(n_cols * cell, n_rows * cell),
-                             gridspec_kw={"hspace": 0.02, "wspace": 0.02},
-                             constrained_layout=True)
+                             figsize=(n_cols * cell, n_rows * cell))
+    fig.subplots_adjust(hspace=0.01, wspace=0.01)
     if n_rows == 1:
         axes = [axes]
 
     for r, (inp_bits, tgt_bits, label) in enumerate(zip(combos, out_bits, labels)):
+        parts = label.split(" → ", 1)
+        in_label  = parts[0]
+        out_label = ("→ " + parts[1]) if len(parts) > 1 else ""
         rollout = get_rollout(nca, make_state(ds_cfg, inp_bits))
         for c, t in enumerate(TSTEPS):
             t_idx = min(t, rollout.shape[0] - 1)
@@ -455,7 +457,10 @@ for gate, sc in SHOWCASE.items():
             if r == 0:
                 ax.set_title(f"t={TSTEPS[c]}", fontsize=8, pad=2)
             if c == 0:
-                ax.set_ylabel(label, fontsize=7)
+                ax.set_ylabel(in_label, fontsize=9, labelpad=6)
+            if c == n_cols - 1:
+                ax.text(1.03, 0.5, out_label, transform=ax.transAxes,
+                        fontsize=9, va="center", ha="left")
 
         # red outline circles on last timestep frame showing output locations
         among_sp   = int(ds_cfg["spacing"][0])
@@ -465,29 +470,13 @@ for gate, sc in SHOWCASE.items():
         v_size     = n_out * rr * 2 + among_sp * (n_out - 1)
         top_margin = (ds_cfg["H"] - v_size) // 2
         cx         = ds_cfg["W"] - side_sp
-        ax_last    = axes[r][len(TSTEPS) - 1]
+        ax_last    = axes[r][n_cols - 1]
         for i in range(n_out):
             cy = top_margin + rr + i * (2 * rr + among_sp)
             ax_last.add_patch(mpatches.Circle(
-                (cx, cy), rr, fill=False, edgecolor="red", linewidth=1,
+                (cx, cy), rr, fill=False, edgecolor="#888888", linewidth=1.8,
             ))
 
-        # target frame: output circles only (matches training target)
-        target_screen = make_io_screen_cols1(
-            H=ds_cfg["H"], W=ds_cfg["W"], r=ds_cfg["r"],
-            spacing=ds_cfg["spacing"],
-            left_input=[],
-            right_input=tgt_bits,
-        )
-        target_img = torch.from_numpy(target_screen).float() / 128.0 - 1.0
-        ax = axes[r][n_cols - 1]
-        ax.imshow(target_img.numpy(), cmap="viridis", vmin=-1, vmax=1,
-                  interpolation="nearest", rasterized=True)
-        ax.set_xticks([]); ax.set_yticks([])
-        if r == 0:
-            ax.set_title("target", fontsize=8, pad=2)
-
-    fig.suptitle(f"{gate}  —  channel 0 over time", fontsize=10)
     out = OUT_DIR / f"rollout_{gate}_ch0.svg"
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)

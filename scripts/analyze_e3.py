@@ -265,7 +265,7 @@ print("\nSaved: layout_diagram.svg")
 
 # ── Rollout helpers ────────────────────────────────────────────────────────────
 
-TSTEPS = [0, 8, 16, 32, 64, 96]
+TSTEPS = [0, 8, 16, 32, 64]
 
 def best_run_dir():
     return min(runs,
@@ -324,7 +324,6 @@ def get_rollout(nca, state, max_t=96):
 
 # Showcase: zero, small, mid, full carry, max
 COMBOS = [
-    (0,   0,   "0+0=0"),
     (15,  17,  "15+17=32"),
     (100, 56,  "100+56=156"),
     (255, 1,   "255+1=256 (full carry)"),
@@ -340,25 +339,29 @@ nca     = load_nca(run_dir)
 print(f"  Using: {run_dir.name}")
 
 n_rows = len(COMBOS)
-n_cols = len(TSTEPS) + 1
+n_cols = len(TSTEPS)
 
 # ── ch0 rollout ────────────────────────────────────────────────────────────────
-# cell_w/cell_h respect the 80×112 grid aspect ratio.
-# dpi=300 ensures the embedded raster is large enough to stay crisp in the SVG.
-
 W_G, H_G = ds_cfg["W"], ds_cfg["H"]   # 80, 112
 cell_w = 0.80
 cell_h = cell_w * H_G / W_G           # 1.12"
 
+# Output circle geometry (same formula as E1)
+_asp    = int(ds_cfg["spacing"][0])
+_ssp    = int(ds_cfg["spacing"][1])
+_rr     = int(ds_cfg["r"])
+_n_out  = 9   # carry + sum[7:0]
+_v      = _n_out * _rr * 2 + _asp * (_n_out - 1)
+_tm     = (ds_cfg["H"] - _v) // 2
+_cx_out = ds_cfg["W"] - _ssp
+
 fig, axes = plt.subplots(n_rows, n_cols,
-                         figsize=(n_cols * cell_w, n_rows * cell_h),
-                         gridspec_kw={"hspace": 0, "wspace": 0},
-                         constrained_layout=True)
+                         figsize=(n_cols * cell_w, n_rows * cell_h))
+fig.subplots_adjust(hspace=0.01, wspace=0.01)
 
 for ri, (a, b, label) in enumerate(COMBOS):
     state   = make_state(ds_cfg, a, b)
     rollout = get_rollout(nca, state)
-    target  = make_target(ds_cfg, a, b)
 
     for ci, t in enumerate(TSTEPS):
         t_idx = min(t, rollout.shape[0] - 1)
@@ -367,18 +370,20 @@ for ri, (a, b, label) in enumerate(COMBOS):
                   vmin=-1, vmax=1, interpolation="nearest", rasterized=True)
         ax.set_xticks([]); ax.set_yticks([])
         if ri == 0:
-            ax.set_title(f"t={t}", fontsize=7, pad=2)
+            ax.set_title(f"t={t}", fontsize=9, pad=2)
         if ci == 0:
-            ax.set_ylabel(label, fontsize=6)
+            ax.set_ylabel(f"{a}+{b}", fontsize=8)
+        if ci == n_cols - 1:
+            ax.text(1.03, 0.5, f"={a+b}", transform=ax.transAxes,
+                    fontsize=8, va="center", ha="left")
+        # gray outline circles on last timestep only
+        if ci == n_cols - 1:
+            for i in range(_n_out):
+                cy = _tm + _rr + i * (2 * _rr + _asp)
+                ax.add_patch(mpatches.Circle(
+                    (_cx_out, cy), _rr, fill=False, edgecolor="#888888", linewidth=0.8,
+                ))
 
-    ax = axes[ri][n_cols - 1]
-    ax.imshow(target.numpy(), cmap="viridis", vmin=-1, vmax=1,
-              interpolation="nearest", rasterized=True)
-    ax.set_xticks([]); ax.set_yticks([])
-    if ri == 0:
-        ax.set_title("target", fontsize=7, pad=2)
-
-fig.suptitle("E3 — 8-bit adder, channel 0 over time", fontsize=10)
 fig.savefig(OUT_DIR / "rollout_ch0.svg", dpi=300, bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
 print("    Saved: rollout_ch0.svg")

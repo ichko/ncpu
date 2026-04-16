@@ -255,7 +255,7 @@ if snap_pairs:
 # ── Layout diagram ─────────────────────────────────────────────────────────────
 
 H_D, W_D = 112, 80
-r_d      = 4
+r_d      = 5
 among_sp = 2
 side_sp  = 21
 
@@ -269,17 +269,19 @@ def _col_centers(n, cx, H, r, sp):
     tm = (H - v) // 2
     return [(cx, tm + r + i*(2*r+sp)) for i in range(n)]
 
-def _draw_circle(ax, cx, cy, r, color, label, fontsize=5):
+def _draw_circle(ax, cx, cy, r, color, label, fontsize=9):
     ax.add_patch(mpatches.Circle((cx, cy), r, color=color, zorder=3))
     ax.text(cx, cy, label, ha="center", va="center",
             fontsize=fontsize, color="white", fontweight="bold", zorder=4)
 
-scale = 0.028
+scale    = 0.030
+lm, rm   = 0.10, 0.10
+gap      = 0.15
+tm_m     = 0.55
+bm_m     = 0.52
+
 p_w   = W_D * scale
 p_h   = H_D * scale
-gap   = 0.15
-lm, rm = 0.10, 0.10
-tm_m, bm_m = 0.55, 0.40
 fig_w = 2*p_w + gap + lm + rm
 fig_h = p_h + tm_m + bm_m
 
@@ -292,14 +294,13 @@ fig.subplots_adjust(
     wspace = gap / p_w,
 )
 
-# cols1: 8 input bits in one column, 5 output bits on right
 ax = axes[0]
 ax.set_xlim(0, W_D); ax.set_ylim(H_D, 0); ax.set_aspect("equal")
 ax.set_facecolor(COL_BG)
 ax.add_patch(mpatches.FancyBboxPatch((0,0), W_D, H_D,
     boxstyle="square,pad=0", linewidth=1, edgecolor="#aaaaaa", facecolor=COL_BG))
 ax.set_xticks([]); ax.set_yticks([])
-ax.set_title("cols1\n(8 inputs, 1 col)", fontsize=8, pad=4)
+ax.set_title("cols1", fontsize=11, pad=4)
 
 for (cx, cy), lbl in zip(_col_centers(8, side_sp, H_D, r_d, among_sp),
                           ["A3","A2","A1","A0","B3","B2","B1","B0"]):
@@ -308,7 +309,6 @@ for (cx, cy), lbl in zip(_col_centers(5, W_D-side_sp, H_D, r_d, among_sp),
                           ["S4","S3","S2","S1","S0"]):
     _draw_circle(ax, cx, cy, r_d, COL_OUT, lbl)
 
-# cols2: A in col 0, B in col 1, outputs on right
 step = 2 * r_d + among_sp
 ax = axes[1]
 ax.set_xlim(0, W_D); ax.set_ylim(H_D, 0); ax.set_aspect("equal")
@@ -316,7 +316,7 @@ ax.set_facecolor(COL_BG)
 ax.add_patch(mpatches.FancyBboxPatch((0,0), W_D, H_D,
     boxstyle="square,pad=0", linewidth=1, edgecolor="#aaaaaa", facecolor=COL_BG))
 ax.set_xticks([]); ax.set_yticks([])
-ax.set_title("cols2\n(A col + B col)", fontsize=8, pad=4)
+ax.set_title("cols2", fontsize=11, pad=4)
 
 for (cx, cy), lbl in zip(_col_centers(4, side_sp, H_D, r_d, among_sp),
                           ["A3","A2","A1","A0"]):
@@ -333,9 +333,8 @@ handles = [
     mpatches.Patch(color=COL_B,   label="B operand"),
     mpatches.Patch(color=COL_OUT, label="Sum output"),
 ]
-fig.legend(handles=handles, loc="lower center", fontsize=7, ncol=3,
+fig.legend(handles=handles, loc="lower center", fontsize=10, ncol=3,
            framealpha=0.9, edgecolor="#cccccc", bbox_to_anchor=(0.5, 0.02))
-fig.suptitle("E2 — 4-bit adder layouts (80×112 grid, r=4)", fontsize=9, y=0.99)
 fig.savefig(OUT_DIR / "layout_diagram.svg", bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
 print("\nSaved: layout_diagram.svg")

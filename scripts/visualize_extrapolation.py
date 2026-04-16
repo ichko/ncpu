@@ -198,82 +198,72 @@ print(f"  Failure final: {sum(failure_correct)}/{N_OUT} correct")
 
 # ── Plotting helpers ───────────────────────────────────────────────────────────
 
-DISPLAY_TS = [0, 16, 32, 48, 64, 96, 128]
+DISPLAY_TS = [0, 16, 32, 64, 128]
 DISPLAY_TS = [t for t in DISPLAY_TS if t <= STEPS]
 
-def plot_case(axes_row, rollout, inp_screen, o_bits, correct, title):
+def plot_case(axes_row, rollout, inp_screen, o_bits, correct, title, result, show_titles=True):
     """Fill one row of axes: spatial channel-0 snapshots + annotated final frame."""
-    # First len(DISPLAY_TS)-1 panels: channel 0 at each timestep
     for col, t in enumerate(DISPLAY_TS[:-1]):
         ax = axes_row[col]
-        ax.imshow(rollout[t, 0].numpy(), cmap="RdBu_r", vmin=-2, vmax=2,
-                  interpolation="nearest", origin="upper")
-        ax.set_xticks([]); ax.set_yticks([])
-        ax.set_title(f"t = {t}", fontsize=7, pad=2)
+        ax.imshow(rollout[t, 0].numpy(), cmap="viridis", vmin=-1, vmax=1,
+                  interpolation="nearest", origin="upper", rasterized=True)
+        ax.axis("off")
+        if col == 0 and title:
+            ax.text(-0.05, 0.5, title, transform=ax.transAxes,
+                    fontsize=11, rotation=0, va="center", ha="right")
+        if show_titles:
+            ax.set_title(f"t={t}", fontsize=11, pad=2, fontweight="bold")
 
     # Last panel: annotated final state
     ax = axes_row[-1]
-    ax.imshow(rollout[-1, 0].numpy(), cmap="RdBu_r", vmin=-2, vmax=2,
+    ax.imshow(rollout[-1, 0].numpy(), cmap="viridis", vmin=-1, vmax=1,
               interpolation="nearest", origin="upper")
-    ax.set_xticks([]); ax.set_yticks([])
-    ax.set_title(f"t = {STEPS} (final)", fontsize=7, pad=2)
+    ax.axis("off")
+    if show_titles:
+        ax.set_title(f"t={STEPS}", fontsize=11, pad=2, fontweight="bold")
 
-    # Annotate output circles: green ring = correct, red ring = wrong
-    # o_bits is MSB-first; out_ys[0] = LSB circle
+    ax.text(1.03, 0.5, result, transform=ax.transAxes,
+            fontsize=11, va="center", ha="left")
+
     for bit_i in range(N_OUT):
-        cy = out_ys[bit_i]          # bit_i=0 → LSB
-        is_correct = correct[bit_i]
-        circle = plt.Circle((OUT_X, cy), r + 2,
-                             color="lime" if is_correct else "red",
-                             fill=False, linewidth=1.5)
-        ax.add_patch(circle)
-
-    # Row label
-    axes_row[0].set_ylabel(title, fontsize=8, rotation=0, labelpad=60,
-                           va="center", ha="right")
+        cy = out_ys[bit_i]
+        color = "#5a9b5e" if correct[bit_i] else "#b85555"
+        ax.add_patch(mpatches.Circle((OUT_X, cy), r,
+                                     fill=False, edgecolor=color, linewidth=0.8))
 
 
 # ── Figure: combined success + failure ────────────────────────────────────────
 
 n_cols = len(DISPLAY_TS)
-fig, axes = plt.subplots(2, n_cols, figsize=(2.2 * n_cols, 5.5),
-                         gridspec_kw={"hspace": 0.35, "wspace": 0.04})
+fig_w, fig_h = 1.6 * n_cols, 4.5
+fig, axes = plt.subplots(2, n_cols, figsize=(fig_w, fig_h))
+_cw, _ch = fig_w / n_cols, fig_h / 2
+fig.subplots_adjust(hspace=0.02 * _cw / _ch, wspace=0.02)
 
-s_label = f"SUCCESS\n{a_succ} + {b_succ} = {a_succ+b_succ}\n(9/9 bits correct)"
-f_label = (f"FAILURE\n{a_fail} + {b_fail} = {a_fail+b_fail}\n"
-           f"({sum(not c for c in failure_correct)}/{N_OUT} bits correct)")
+s_label = f"{a_succ}+{b_succ}"
+f_label = f"{a_fail}+{b_fail}"
 
-plot_case(axes[0], success_rollout, success_inp, success_obits, success_correct, s_label)
-plot_case(axes[1], failure_rollout, failure_inp, failure_obits, failure_correct, f_label)
+plot_case(axes[0], success_rollout, success_inp, success_obits, success_correct, s_label, f"={a_succ+b_succ}", show_titles=True)
+plot_case(axes[1], failure_rollout, failure_inp, failure_obits, failure_correct, f_label, f"={a_fail+b_fail}", show_titles=False)
 
-correct_patch = mpatches.Patch(edgecolor="lime", facecolor="none", label="correct bit")
-wrong_patch   = mpatches.Patch(edgecolor="red",  facecolor="none", label="wrong bit")
-fig.legend(handles=[correct_patch, wrong_patch], loc="lower center",
-           ncol=2, fontsize=8, bbox_to_anchor=(0.5, -0.02))
-
-fig.suptitle("NCA trained on ≤3 bits extrapolating to 8-bit addition", fontsize=10)
 out = OUT_DIR / "extrap_cases.svg"
-fig.savefig(out, bbox_inches="tight")
+fig.savefig(out, bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
 print(f"\nSaved {out}")
 
 # ── Individual figures ─────────────────────────────────────────────────────────
 
-for label, rollout, o_bits, correct, fname in [
+for label, rollout, o_bits, correct, fname, res_label in [
     (f"SUCCESS: {a_succ}+{b_succ}={a_succ+b_succ}  (train ≤3 → test k=8,  {sum(success_correct)}/9 correct)",
-     success_rollout, success_obits, success_correct, "extrap_success.svg"),
+     success_rollout, success_obits, success_correct, "extrap_success.svg", f"={a_succ+b_succ}"),
     (f"FAILURE: {a_fail}+{b_fail}={a_fail+b_fail}  ({sum(failure_correct)}/9 correct)",
-     failure_rollout, failure_obits, failure_correct, "extrap_failure.svg"),
+     failure_rollout, failure_obits, failure_correct, "extrap_failure.svg", f"={a_fail+b_fail}"),
 ]:
-    fig2, axes2 = plt.subplots(1, n_cols, figsize=(2.2 * n_cols, 2.8),
-                               gridspec_kw={"wspace": 0.04})
-    plot_case(axes2, rollout, None, o_bits, correct, "")
-    fig2.suptitle(label, fontsize=9)
-    correct_patch = mpatches.Patch(edgecolor="lime", facecolor="none", label="correct bit")
-    wrong_patch   = mpatches.Patch(edgecolor="red",  facecolor="none", label="wrong bit")
-    fig2.legend(handles=[correct_patch, wrong_patch], loc="lower center",
-                ncol=2, fontsize=7, bbox_to_anchor=(0.5, -0.08))
+    fig2, axes2 = plt.subplots(1, n_cols, figsize=(2.2 * n_cols, 2.8))
+    fig2.subplots_adjust(wspace=0.02)
+    plot_case(axes2, rollout, None, o_bits, correct, "", res_label)
+    fig2.suptitle(label, fontsize=11)
     out2 = OUT_DIR / fname
-    fig2.savefig(out2, bbox_inches="tight")
+    fig2.savefig(out2, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig2)
     print(f"Saved {out2}")
