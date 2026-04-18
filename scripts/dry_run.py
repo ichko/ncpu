@@ -49,7 +49,7 @@ dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=NCA_CH
 nca = NeuralCA(
     channels=NCA_CHANNELS,
     hidden_channels=[128],
-    fire_rate=0.5,
+    fire_rate=0.99,
     alive_threshold=0.1,
     zero_initialization=False,
     kernel_size=KERNEL_SIZE,
@@ -177,14 +177,10 @@ for step in pbar:
             media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
             shutil.copy(gif_path, run_dir / "rollout_latest.gif")
 
-        # ── Rollout PNG snapshot ──────────────────────────────────────────
-        if rollout is not None:
+            # ── Rollout PNG snapshot ──────────────────────────────────────────
             png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
             expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
-            print("PNG: ", rollout.shape, expanded_target.shape)
             to_save = torch.cat([expanded_target, rollout], dim=2) 
-            # to_save = rollout 
-            print("to_save: ", to_save.shape)
             for gate in range(4):
                 save_rollout_png(
                     png_path, to_save[gate,:,:,:,:],
