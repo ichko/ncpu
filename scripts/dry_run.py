@@ -189,19 +189,19 @@ for step in pbar:
                 )
                 shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
 
-            # ── Save best rollout ─────────────────────────────────────────
-            if loss < best_loss:
-                best_loss = loss
-                torch.save({
-                    "step": step,
-                    "loss": loss,
-                    "rollout": rollout.cpu(),
-                    "inp": inp.cpu(),
-                    "out": out.cpu(),
-                    "nca_out": nca_out.detach().cpu(),
-                }, run_dir / "best_rollout.pt")
+        # ── Save best rollout ─────────────────────────────────────────
+        if rollout is not None and loss < best_loss:
+            best_loss = loss
+            torch.save({
+                "step": step,
+                "loss": loss,
+                "rollout": rollout.cpu(),
+                "inp": inp.cpu(),
+                "out": out.cpu(),
+                "nca_out": nca_out.detach().cpu(),
+            }, run_dir / "best_rollout.pt")
 
-            print(f"  -> saved artifacts for step {step}")
+        print(f"  -> saved artifacts for step {step}")
 
 trainer.save_checkpoint()
 print(f"\nDry run complete. Artifacts in: {run_dir}")

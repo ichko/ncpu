@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ncpu.utils import conv_stack, make_sobel_kernels
-
+from typing import Optional
 
 class NCARule(nn.Module):
     def __init__(self, rule_input, hidden_channels, channels, zero_initialization):
@@ -179,8 +179,13 @@ class GaussianNoise(nn.Module):
         # shape (C,) → broadcastable to (B, C, H, W)
         self.register_buffer("mask", mask.view(1, -1, 1, 1))
 
-    def forward(self, x):
-        if self.training and self.std > 0:
+    def forward(self, x, std : Optional[float] = None, fire_rate : Optional[float] = None):
+        if std:
+            self.std = std
+        if fire_rate:
+            self.fire_rate = fire_rate
+        
+        if self.std > 0:
             noise = torch.randn_like(x) * self.std
             noise = noise * self.mask
             if self.fire_rate < 1.0:

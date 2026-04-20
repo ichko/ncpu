@@ -10,7 +10,9 @@ from pathlib import Path
 from matplotlib import pyplot as plt
 from tqdm.auto import tqdm
 
-from ncpu.loss import output_masked_rollout_loss, combined_loss
+from typing import Callable
+
+from ncpu.loss import loss_white_black, output_masked_rollout_loss, fullscreen_rollout_loss, combined_loss
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
@@ -25,24 +27,28 @@ torch.set_default_device('cuda')
 
 LEARNING_RATE = 0.001
 BATCH_SIZE = 8
-STEPS = 30_000
+STEPS = 20_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 16
 N_OUTPUT_BITS = 1
 KERNEL_SIZE=7
 
-GAUSSIAN_NOISE = 1.0
-FIRE_RATES = [0.2, 0.4, 0.6, 0.8, 1.0]
+L0SS_FN = {
+    "combined_loss": combined_loss,
+    "loss_white_black" : loss_white_black, 
+    "output_masked_rollout_loss" : output_masked_rollout_loss, 
+    "fullscreen_rollout_loss" : fullscreen_rollout_loss,
+}
 
-def run_experiment(gaussian_noise, fire_rate):
+def run_experiment(loss_name : str, loss_fn : Callable):
     run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = Path("runs") / f"{run_name}_coded_gates_noise{int(gaussian_noise*100)}_fr{int(fire_rate*100)}"
+    run_dir = Path("runs") / f"{run_name}_gate_dynamic_{loss_name}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "rollouts").mkdir()
     (run_dir / "snapshots").mkdir()
     log_path = run_dir / "log.jsonl"
     print(f"\n{'='*60}")
-    print(f"  Experiment: noise={gaussian_noise}, fire_rate={fire_rate}")
+    print(f"  Experiment: loss = loss")
     print(f"  Logging to: {log_path}")
     print(f"{'='*60}\n")
 
@@ -55,9 +61,8 @@ def run_experiment(gaussian_noise, fire_rate):
         "NCA_CHANNELS": NCA_CHANNELS,
         "N_OUTPUT_BITS": N_OUTPUT_BITS,
         "KERNEL_SIZE": KERNEL_SIZE,
-        "GAUSSIAN_NOISE": gaussian_noise,  # use actual value, not global
-        "FIRE_RATES": FIRE_RATES,
-        "fire_rate": fire_rate,            # use actual value, not global
+        "GAUSSIAN_NOISE": False,  # use actual value, not global
+        "loss": loss_name,
     }
     with open(run_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
@@ -68,12 +73,10 @@ def run_experiment(gaussian_noise, fire_rate):
         channels=NCA_CHANNELS,
         hidden_channels=[128],
         fire_rate=0.99,
-        alive_threshold=0.1,
+        alive_threshold=0.0,
         zero_initialization=False,
         kernel_size=KERNEL_SIZE,
         read_only_dims=[-4, -3, -2, -1],
-        gaussian_noise=gaussian_noise,
-        gaussian_noise_fire_rate=fire_rate,
         padding_type = "constant",
     )
 
@@ -81,8 +84,8 @@ def run_experiment(gaussian_noise, fire_rate):
         nca,
         dataset.get_dataloader(batch_size=BATCH_SIZE),
         lr=LEARNING_RATE,
-        gaussian_noise=gaussian_noise,
-        loss_fn=combined_loss,
+        gaussian_noise=0.2,
+        loss_fn=loss_fn,
         input_implant_type="disabled",
         checkpoint_pattern=str(run_dir / "checkpoints" / "nca_{step:06d}.pt"),
     )
@@ -90,7 +93,7 @@ def run_experiment(gaussian_noise, fire_rate):
 
     best_loss = float("inf")
 
-    pbar = tqdm(range(STEPS), desc=f"noise={gaussian_noise} fr={fire_rate}")
+    pbar = tqdm(range(STEPS), desc=f"loss_fn={loss_name}")
     for step in pbar:
         info = trainer.optim_step(steps=(30, 80), return_rollout=(step % PLOT_EVERY == 0))
         loss = info["loss"]
@@ -98,7 +101,7 @@ def run_experiment(gaussian_noise, fire_rate):
 
         grad_norm = trainer.metrics[-1].get("grad_norm") if trainer.metrics else None
         pbar.set_description(
-            f"[n={gaussian_noise} fr={fire_rate}] loss={loss:.4f}  bits={num_valid_bits:.2f}/{N_OUTPUT_BITS}"
+            f"[{loss_name}] loss={loss:.4f}  bits={num_valid_bits:.2f}/{N_OUTPUT_BITS}"
             + (f"  gnorm={grad_norm:.3f}" if grad_norm else "")
         )
 
@@ -107,8 +110,7 @@ def run_experiment(gaussian_noise, fire_rate):
                 "step": step, "loss": loss,
                 "num_valid_bits": num_valid_bits,
                 "grad_norm": grad_norm,
-                "gaussian_noise": gaussian_noise,
-                "fire_rate": fire_rate,
+                "loss_name" : loss_name
             }) + "\n")
 
         if step % PLOT_EVERY == 0:
@@ -129,7 +131,7 @@ def run_experiment(gaussian_noise, fire_rate):
                 H, W = nca_out.shape[-2], nca_out.shape[-1]
 
             print(f"\n{'─'*60}")
-            print(f"  step: {step}  loss: {loss:.8f}  bits: {num_valid_bits:.2f}/{N_OUTPUT_BITS}  noise: {gaussian_noise}  fr: {fire_rate}")
+            print(f"  step: {step}  loss: {loss:.8f}  bits: {num_valid_bits:.2f}/{N_OUTPUT_BITS}")
             print(f"  nca_out: min={nca_out.min():.3f}  max={nca_out.max():.3f}  mean={nca_out.mean():.4f}")
 
             trainer.save_checkpoint()
@@ -150,14 +152,14 @@ def run_experiment(gaussian_noise, fire_rate):
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.scatter(range(len(losses_hist)), losses_hist, s=0.5, alpha=0.4, color="steelblue")
             ax.set_yscale("log"); ax.set_xlabel("step"); ax.set_ylabel("masked MSE loss")
-            ax.set_title(f"Multi-Gate NCA (noise={gaussian_noise}, fr={fire_rate}) — step {step}")
+            ax.set_title(f"NCA (loss_fn={loss_name}) — step {step}")
             fig.tight_layout(); fig.savefig(run_dir / "loss_curve.png", dpi=120); plt.close(fig)
 
             bits_vals = [m["num_valid_bits"] for m in trainer.metrics if "num_valid_bits" in m]
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.scatter(range(len(bits_vals)), bits_vals, s=0.5, alpha=0.4, color="darkorange")
             ax.set_ylim(0, N_OUTPUT_BITS + 0.5); ax.set_xlabel("step"); ax.set_ylabel("mean valid bits")
-            ax.set_title(f"Multi-Gate NCA (noise={gaussian_noise}, fr={fire_rate}) — bits — step {step}")
+            ax.set_title(f"NCA (loss_fn={loss_name}) — step {step}) — bits — step {step}")
             fig.tight_layout(); fig.savefig(run_dir / "bits_curve.png", dpi=120); plt.close(fig)
 
             if rollout is not None:
@@ -167,20 +169,25 @@ def run_experiment(gaussian_noise, fire_rate):
                 T_sub = r.shape[1]
                 target = out[:gif_b].detach().cpu()
 
-                _, _, _, cH, cW = r.shape
-                grid_H = (1 + gif_c) * cH + (gif_c) * 1
-                grid_W = gif_b * cW + (gif_b - 1) * 1
+                # Build grid with 1px black borders between cells
+                # Row: target + gif_c channel rows = (1 + gif_c) rows
+                # Col: gif_b batch samples
+                _, _, _, cH, cW = r.shape  # cell height/width
+                grid_H = (1 + gif_c) * cH + (gif_c) * 1      # rows + separators between them
+                grid_W = gif_b * cW + (gif_b - 1) * 1         # cols + separators between them
 
                 frame_list = []
                 for t in range(T_sub):
                     frame = torch.zeros(grid_H, grid_W)
 
+                    # Row 0: target
                     for b in range(gif_b):
                         col_start = b * (cW + 1)
                         frame[0:cH, col_start:col_start + cW] = target[b]
 
+                    # Rows 1..gif_c: NCA channels
                     for ci in range(gif_c):
-                        row_start = (ci + 1) * cH + ci * 1
+                        row_start = (ci + 1) * cH + ci * 1  # skip target row + separators
                         for b in range(gif_b):
                             col_start = b * (cW + 1)
                             frame[row_start:row_start + cH, col_start:col_start + cW] = r[b, t, ci].detach().cpu()
@@ -195,39 +202,36 @@ def run_experiment(gaussian_noise, fire_rate):
                 media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
                 shutil.copy(gif_path, run_dir / "rollout_latest.gif")
 
+                png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
+                expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
+                print("PNG: ", rollout.shape, expanded_target.shape)
+                to_save = torch.cat([expanded_target, rollout], dim=2) 
+                # to_save = rollout 
+                print("to_save: ", to_save.shape)
+                for gate in range(4):
+                    save_rollout_png(
+                        png_path, to_save[gate,:,:,:,:],
+                        n_snapshots=6,
+                        max_channels=NCA_CHANNELS,
+                    )
+                    shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
 
-        # ── Rollout PNG snapshot ──────────────────────────────────────────
-        if rollout is not None:
-            png_path = run_dir / "rollouts" / f"rollout_{step:07d}.png"
-            expanded_target = target.unsqueeze(1).unsqueeze(2).expand(rollout.shape[0], rollout.shape[1], 1, rollout.shape[3], rollout.shape[4]).contiguous()
-            print("PNG: ", rollout.shape, expanded_target.shape)
-            to_save = torch.cat([expanded_target, rollout], dim=2) 
-            # to_save = rollout 
-            print("to_save: ", to_save.shape)
-            for gate in range(4):
-                save_rollout_png(
-                    png_path, to_save[gate,:,:,:,:],
-                    n_snapshots=6,
-                    max_channels=NCA_CHANNELS,
-                )
-                shutil.copy(png_path, run_dir / f"rollout_latest_{gate}.png")
+                # ── Save best rollout ─────────────────────────────────────────
+                if loss < best_loss:
+                    best_loss = loss
+                    torch.save({
+                        "step": step,
+                        "loss": loss,
+                        "rollout": rollout.cpu(),
+                        "inp": inp.cpu(),
+                        "out": out.cpu(),
+                        "nca_out": nca_out.detach().cpu(),
+                    }, run_dir / "best_rollout.pt")
 
-            # ── Save best rollout ─────────────────────────────────────────
-            if rollout is not None and loss < best_loss:
-                best_loss = loss
-                torch.save({
-                    "step": step,
-                    "loss": loss,
-                    "rollout": rollout.cpu(),
-                    "inp": inp.cpu(),
-                    "out": out.cpu(),
-                    "nca_out": nca_out.detach().cpu(),
-                }, run_dir / "best_rollout.pt")
-
-            print(f"  -> saved artifacts for step {step}")
+                print(f"  -> saved artifacts for step {step}")
 
     trainer.save_checkpoint()
 
 
-for fr in FIRE_RATES:
-    run_experiment(GAUSSIAN_NOISE, fr)
+for loss_name, loss_fn in L0SS_FN.items():
+    run_experiment(loss_name, loss_fn)
