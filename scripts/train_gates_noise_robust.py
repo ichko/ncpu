@@ -28,7 +28,7 @@ torch.set_default_device('cuda')
 
 # ── Run directory ─────────────────────────────────────────────────────────────
 run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_dir = Path("runs") / f"{run_name}_coded_gates_noise{0}_fr{0}"
+run_dir = Path("runs") / f"{run_name}_coded_gates_noise_robust"
 run_dir.mkdir(parents=True, exist_ok=True)
 (run_dir / "rollouts").mkdir()
 (run_dir / "snapshots").mkdir()
@@ -39,7 +39,7 @@ print(f"{'─'*60}\n")
 LEARNING_RATE = 0.001
 BATCH_SIZE = 8
 GAUSSIAN_NOISE = 0.0
-STEPS = 20_000
+STEPS = 80_000
 PLOT_EVERY = 1_000
 NCA_CHANNELS = 16
 KERNEL_SIZE = 7
@@ -73,7 +73,15 @@ best_loss = float("inf")
 
 pbar = tqdm(range(STEPS))
 for step in pbar:
-    info = trainer.optim_step(steps=(30, 80), return_rollout=(step % PLOT_EVERY == 0))
+    std = np.random.choice([0.0,0.2,0.4,0.6,0.8,1.0])
+    fire_rate = np.random.choice([0.0,0.2,0.4,0.6,0.8,1.0])
+    info = trainer.optim_step(
+        steps=(30, 80), 
+        return_rollout=(step % PLOT_EVERY == 0),
+        init_noise = (std == 0.0 or fire_rate == 0.0),  # start with clean data for better initial convergence
+        noise_std = std,
+        noise_fire_rate = fire_rate
+    )
     loss = info["loss"]
     num_valid_bits = info["num_valid_bits"]
 

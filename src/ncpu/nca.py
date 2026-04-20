@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from typing import Optional
+
 from ncpu.nca_utils import (
     AliveMasking,
     BorderMask,
@@ -65,7 +67,7 @@ class NeuralCA(nn.Module):
         if self.learnable_initial_state:
             self.add_initial_state = LazyLearnableInitialState()
 
-    def forward(self, x, steps):
+    def forward(self, x, steps, noise_std : Optional[float] = None, noise_fire_rate : Optional[float] = None):
         if self.learnable_initial_state:
             x = self.add_initial_state(x)
         seq = [x]
@@ -79,7 +81,7 @@ class NeuralCA(nn.Module):
             # delta = self.border_mask(delta)
 
             x = x + delta
-            x = self.gaussian_noise(x)
+            x = self.gaussian_noise(x, noise_std, noise_fire_rate)
             torch.clip_(x, -10, 10)
             seq.append(x)
 
