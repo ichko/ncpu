@@ -182,6 +182,9 @@ if best_failure is None:
 
 _, a_succ, b_succ, _ = best_success
 n_wrong_f, a_fail, b_fail, _ = best_failure
+
+# Override success example with a manually chosen 5-bit carry case (mixed bits)
+a_succ, b_succ = 248, 127   # 11111000 + 01111111 = 375; single 5-bit carry chain
 print(f"  Best success : {a_succ} + {b_succ} = {a_succ+b_succ}  (9/9 correct)")
 print(f"  Worst failure: {a_fail} + {b_fail} = {a_fail+b_fail}  ({n_wrong_f} bits wrong)")
 
@@ -229,7 +232,7 @@ def plot_case(axes_row, rollout, inp_screen, o_bits, correct, title, result, sho
         cy = out_ys[bit_i]
         color = "#5a9b5e" if correct[bit_i] else "#b85555"
         ax.add_patch(mpatches.Circle((OUT_X, cy), r,
-                                     fill=False, edgecolor=color, linewidth=0.8))
+                                     fill=False, edgecolor=color, linewidth=1.9))
 
 
 # ── Figure: combined success + failure ────────────────────────────────────────

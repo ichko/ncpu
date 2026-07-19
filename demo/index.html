@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Computation in a Visual Substrate</title>
+<meta name="description" content="A neural cellular automaton — one small rule per cell — trained to perform Boolean logic and binary addition, running live in the browser." />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <h1 class="title">Computation in a <em>visual substrate</em></h1>
+    <p class="subtitle">A neural cellular automaton is a grid of cells that all run the same small rule and only see their neighbours. We train one on examples of inputs and the answers we want, and nothing else. Set the bits below and watch it compute Boolean logic and binary addition.</p>
+  </header>
+
+  <!-- DEMO -->
+  <section id="fig1">
+    <div class="panelbox">
+      <div class="hd"><span>Fig. 1 · Live automaton</span><span class="rt" id="simStatus"></span></div>
+      <div class="bd">
+        <div class="demo" id="demo">
+          <svg class="connectors" id="connSvg" aria-hidden="true"></svg>
+          <div class="panel">
+            <div><h4>Task</h4><div class="tabs" id="taskTabs"></div></div>
+            <div><h4>Input bits</h4><div id="inputBits"></div><div class="expr" id="exprLine"></div></div>
+            <div><h4>Output — read from the grid</h4><div class="readout" id="outputReadout"></div></div>
+            <div class="btn-row">
+              <button class="ctl" id="playBtn">Pause</button>
+              <button class="ctl" id="againBtn">Restart</button>
+              <button class="ctl" id="randBtn">Random</button>
+            </div>
+            <div class="knobs">
+              <span class="knob"><span class="lab">speed</span><input type="range" id="fpsSlider" min="2" max="60" value="20" /><span class="val" id="fpsVal">20</span></span>
+              <span class="knob"><span class="lab">fire</span><input type="range" id="fireSlider" min="10" max="100" value="50" /><span class="val" id="fireVal">.50</span></span>
+              <label class="toggle"><input type="checkbox" id="debugToggle" /> mark cells</label>
+            </div>
+            <div class="metaline">checkpoint <span id="runName">—</span></div>
+          </div>
+
+          <div class="stage">
+            <div class="screen" id="screen">
+              <canvas id="field"></canvas>
+              <svg class="overlay" id="ioOverlay" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="progress">
+              <div class="pbar"><i id="pbar"></i></div>
+              <div class="pmeta">step <span id="pstep">000</span> / <span id="phorizon">000</span></div>
+            </div>
+            <div class="verdict run" id="verdict"><span class="mk">▸</span> running…</div>
+          </div>
+        </div>
+      </div>
+      <div class="caption"><b>Reading it.</b> The input bits are the circles on the left; the answer forms in the circles on the right, which start blank. Colour is the visible channel under the viridis map (dark = 0, yellow = 1). The run pauses for a moment on the encoded input, then steps for as many steps as the model was trained on and stops. The output dots turn <span class="tag-pass">green</span> when they match the correct answer and <span class="tag-fail">red</span> when they do not.</div>
+    </div>
+
+    <div class="spec">
+      <div><div class="lab">Substrate</div>16-channel cellular automaton, one shared rule</div>
+      <div><div class="lab">Rule</div>fixed Sobel perception → 48·128·16 network (~24k weights)</div>
+      <div><div class="lab">Supervision</div>final-grid pixels only; no target for internal state</div>
+    </div>
+  </section>
+
+  <!-- 01 -->
+  <section id="setup">
+    <div class="seclabel">01 — Setup</div>
+    <h2>The task</h2>
+    <p class="lead">A cellular automaton is a grid of cells. Every cell holds a few numbers and is updated by the same rule, which only looks at the cell and its neighbours. In a neural cellular automaton, that rule is a small neural network trained by gradient descent instead of written by hand.</p>
+    <p>We give the model a task by drawing it on the grid. The input bits are placed as circles along the left edge: a bright circle for <code>1</code>, a dark circle for <code>0</code>. We want the answer to appear as circles on the right edge. The model is only trained on whether the final grid matches the target — it is never told where the input or output is, or which function to compute. For an answer to appear on the right, information has to travel there across the grid over many steps.</p>
+    <p>The rule is small. Each cell reads a 5×5 or 7×7 window around it, passes it through a two-layer network (about 24,000 weights in total), and updates its own numbers. We run the same rule on every cell for a few dozen steps and then read the grid. Gates use a 48×48 grid; the adders use 80×112.</p>
+  </section>
+
+  <!-- 02 -->
+  <section id="step">
+    <div class="seclabel">02 — Mechanism</div>
+    <h2>The update rule</h2>
+    <p>One step of the model does the same thing in every cell:</p>
+    <div class="steps">
+      <div class="step-item"><div class="st-body"><h4>Perceive</h4><p>The cell looks at its neighbourhood through three fixed filters: the cell itself, and the horizontal and vertical Sobel gradients. Across the 16 channels this produces 48 numbers.</p></div></div>
+      <div class="step-item"><div class="st-body"><h4>Apply the network</h4><p>The 48 numbers go through the trained network (48 → 128 → 16, with a ReLU in between). This is the only part that is learned, and it is the same in every cell.</p></div></div>
+      <div class="step-item"><div class="st-body"><h4>Update</h4><p>The 16 outputs are added to the cell's numbers. One channel is kept read-only and always holds the original input, so the model can still see the question after many steps.</p></div></div>
+      <div class="step-item"><div class="st-body"><h4>Fire and clamp</h4><p>Only a random fraction of cells update on each step, so the rule cannot depend on a global clock. The numbers are clamped to a fixed range. We repeat this and read the grid.</p></div></div>
+    </div>
+    <p class="note">In the browser, one step is a single WebGL pass over the grid. A deterministic step matches the original PyTorch model to about 1×10⁻⁶.</p>
+  </section>
+
+  <!-- 03 -->
+  <section id="carry">
+    <div class="seclabel">03 — Addition</div>
+    <h2>Addition</h2>
+    <p>Addition is not a local operation. The highest bit of <code>127 + 1</code> depends on a carry that starts at the lowest bit and passes through every bit above it. A rule that only sees a small neighbourhood cannot compute this in one step; the carry has to move across the grid over time. The images below show the visible channel of the 8-bit adder while it computes <code>127 + 1</code>.</p>
+    <figure class="fig">
+      <img src="assets/carry_8bit.png" alt="Eight snapshots of the 8-bit adder computing 127 + 1: activity spreads from the two input columns to the output column, and the carry settles last." />
+      <figcaption><b>127 + 1 = 128.</b> At <span class="mono">t = 0</span> only the two input columns are set (A = 127 on the left, B = 1 next to it). Over the following steps the activity spreads toward the output column on the right. The lower bits settle first; the carry, which has to travel the whole way up the column, settles last.</figcaption>
+    </figure>
+    <p>You can run this in Fig. 1 by choosing <b>ADD 4-BIT</b> or <b>ADD 8-BIT</b>. Both adders gave the correct sum on every random test we tried. The 8-bit adder reached a mean-squared error of about 0.12.</p>
+  </section>
+
+  <!-- 04 -->
+  <section id="findings">
+    <div class="seclabel">04 — Results</div>
+    <h2>Results</h2>
+    <div class="cards">
+      <div class="card"><span class="k">8</span><span class="kt">Boolean functions</span><p>AND, OR, XOR, NAND, NOR, XNOR, majority-of-3, and a two-output half-adder — each learned to full bit-accuracy on a 48×48 grid.</p></div>
+      <div class="card"><span class="k">8-bit</span><span class="kt">Addition</span><p>16 input bits, 9 output bits, and a carry chain of length eight, both operands.</p></div>
+      <div class="card"><span class="k">~24k</span><span class="kt">Weights in the rule</span><p>One two-layer network, used by every cell on every step.</p></div>
+    </div>
+
+    <h3>Some gates are harder than others</h3>
+    <p>Gates that a single threshold can separate — AND, OR, NAND, NOR — are learned quickly. XOR and XNOR are harder, because the output depends on whether the two inputs disagree. In our benchmark, OR reached full accuracy after tens to hundreds of training steps, while XOR sometimes took several thousand.</p>
+
+    <h3>Three settings that have to be right</h3>
+    <p>Three choices had to be set correctly for the model to learn at all. The table shows XOR (best seed of each setting).</p>
+    <table class="data">
+      <caption>Ablations · XOR (valid bits, max = 1.0)</caption>
+      <thead><tr><th>Setting</th><th>Value</th><th class="num">Valid bits</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Window size</td><td>3×3</td><td class="num">0.50–0.63</td><td><span class="tag-fail">does not learn</span></td></tr>
+        <tr><td>Window size</td><td>5×5</td><td class="num">1.00</td><td><span class="tag-pass">learns</span></td></tr>
+        <tr><td>Window size</td><td>7×7</td><td class="num">1.00</td><td><span class="tag-pass">learns (best)</span></td></tr>
+        <tr><td>Alive masking</td><td>on</td><td class="num">0.50–0.63</td><td><span class="tag-fail">does not learn</span></td></tr>
+        <tr><td>Alive masking</td><td>off</td><td class="num">1.00</td><td><span class="tag-pass">learns</span></td></tr>
+        <tr><td>Weight init</td><td>zeros</td><td class="num">0.50–0.63</td><td><span class="tag-fail">does not learn</span></td></tr>
+        <tr><td>Weight init</td><td>non-zero</td><td class="num">1.00</td><td><span class="tag-pass">learns</span></td></tr>
+      </tbody>
+    </table>
+    <p>A 3×3 window is too small for a signal to cross the grid in the number of steps we run. Alive masking is a technique from image-growing automata that stops updates in empty regions; here the empty background is used for computation, so masking it prevents learning. A rule whose weights start at zero produces no gradient, so training never starts.</p>
+
+    <h3>It works on longer inputs than it was trained on</h3>
+    <p>Because the rule is local and the bits are aligned to a fixed edge, an adder trained on short sums also works on longer ones. Trained on sums of up to 4 bits, it adds 8-bit numbers with more than 99% of bits correct.</p>
+    <table class="data">
+      <caption>Adder trained on ≤ k-bit sums, tested on wider ones (% bits correct, 2 seeds)</caption>
+      <thead><tr><th>Trained up to</th><th class="num">4-bit</th><th class="num">6-bit</th><th class="num">8-bit</th></tr></thead>
+      <tbody>
+        <tr><td>2-bit sums</td><td class="num">95.3</td><td class="num">93.7</td><td class="num">90.5</td></tr>
+        <tr><td>3-bit sums</td><td class="num">99.8</td><td class="num">98.4</td><td class="num">98.1</td></tr>
+        <tr><td>4-bit sums</td><td class="num">99.9</td><td class="num">99.9</td><td class="num">99.7</td></tr>
+        <tr><td>6-bit sums</td><td class="num">100.0</td><td class="num">100.0</td><td class="num">99.8</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 05 -->
+  <section id="limits">
+    <div class="seclabel">05 — Limitations</div>
+    <h2>Limitations</h2>
+    <p>This is a research prototype, and there are clear limits.</p>
+    <p><strong>A full ALU is hard.</strong> We tried to train a single model to do eight operations (add, subtract, the bitwise gates, shifts and rotates), chosen by an opcode, and to also output a carry and a conditional branch. One run reached a loss near 0.10 after about 900,000 steps: the result was correct about 99.7% of the time, but the carry-out (78%) and branch (86%) outputs were still improving slowly. This is one working run, not a solved task.</p>
+    <p><strong>The outputs are soft.</strong> The target is a grey-scale grid and we read it by thresholding brightness, so a model that gets every bit right still has a mean-squared error of about 0.2–0.4. We report bit accuracy, not loss.</p>
+    <p><strong>The model is stochastic.</strong> Because only some cells update each step, the grid keeps changing slightly, and a bit near the threshold can flip before it settles. Fig. 1 averages the output over the last steps, which helps. XOR and XNOR are the cases where you are most likely to see a wrong bit.</p>
+  </section>
+
+  <footer>
+    <p>Each model here runs as a WebGL2 fragment shader: 16 channels in four floating-point textures, one pass per step, with weights exported from the training checkpoints. Nothing on this page is pre-rendered.</p>
+    <p class="mono">Neural cellular automata for spatial computation · trained models from this repository.</p>
+  </footer>
+
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

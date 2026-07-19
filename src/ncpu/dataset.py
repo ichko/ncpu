@@ -539,13 +539,13 @@ def _compute_alu2(a_int, b_int, carry_in, op, cond):
     elif op == 2: result = a_int & b_int; carry_out = 0   # AND
     elif op == 3: result = a_int | b_int; carry_out = 0   # OR
     elif op == 4: result = a_int ^ b_int; carry_out = 0   # XOR
-    elif op == 5: result = (~a_int) & 0xFF; carry_out = 0 # NOT
-    elif op == 6: # RCL — rotate left through carry
-        carry_out = (a_int >> 7) & 1
-        result    = ((a_int << 1) | ci) & 0xFF
-    else:         # RCR — rotate right through carry
-        carry_out = a_int & 1
-        result    = ((a_int >> 1) | (ci << 7)) & 0xFF
+    elif op == 5: result = (~b_int) & 0xFF; carry_out = 0 # NOT (operates on B)
+    elif op == 6: # RCL — rotate left through carry (operates on B)
+        carry_out = (b_int >> 7) & 1
+        result    = ((b_int << 1) | ci) & 0xFF
+    else:         # RCR — rotate right through carry (operates on B)
+        carry_out = b_int & 1
+        result    = ((b_int >> 1) | (ci << 7)) & 0xFF
 
     zero  = int(result == 0)
     neg   = (result >> 7) & 1
@@ -630,6 +630,13 @@ class ALU2Dataset(IterableDataset):
         op       = random.choice(self._active_ops())
         cond     = random.randint(0, 7)
 
+        # NOT/RCL/RCR are single-operand ops; they operate on B (the column
+        # closer to ctrl/output). A is forced to zero and drawn as all-zero
+        # bits so the unused side is explicit, not blank.
+        single_input_op = op in (5, 6, 7)
+        if single_input_op:
+            a_int = 0
+
         result, cout, branch = _compute_alu2(a_int, b_int, carry_in, op, cond)
 
         ctrl_bits = (_int_to_bits_msb(op, 3)
@@ -638,11 +645,9 @@ class ALU2Dataset(IterableDataset):
         out_bits  = (_int_to_bits_msb(result, 8)
                      + [cout, branch])                   # 10 bits
 
-        uses_b = op not in (5, 6, 7)   # NOT/RCL/RCR don't use B
-
         inp = self._screen(
             a_bits    = _int_to_bits_msb(a_int, 8),
-            b_bits    = _int_to_bits_msb(b_int, 8) if uses_b else None,
+            b_bits    = _int_to_bits_msb(b_int, 8),
             ctrl_bits = ctrl_bits,
         )
         out = self._screen(out_bits=out_bits)

@@ -240,7 +240,7 @@ def _col_centers(n, cx):
     tm = (H_D - v) // 2
     return [(cx, tm + r_d + i*step_px) for i in range(n)]
 
-def _draw_circle(ax, cx, cy, r, color, label, fontsize=4.5):
+def _draw_circle(ax, cx, cy, r, color, label, fontsize=6.5):
     ax.add_patch(mpatches.Circle((cx, cy), r, color=color, zorder=3))
     ax.text(cx, cy, label, ha="center", va="center",
             fontsize=fontsize, color="white", fontweight="bold", zorder=4)
@@ -248,16 +248,24 @@ def _draw_circle(ax, cx, cy, r, color, label, fontsize=4.5):
 scale = 0.028
 p_w   = W_D * scale
 p_h   = H_D * scale
+lm, rm       = 0.10, 0.10
+tm_m, bm_m   = 0.05, 0.35
+fig_w = p_w + lm + rm
+fig_h = p_h + tm_m + bm_m
 
-fig, ax = plt.subplots(figsize=(p_w + 0.4, p_h + 1.1))
-fig.subplots_adjust(left=0.10, right=0.92, bottom=0.22, top=0.88)
+fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+fig.subplots_adjust(
+    left   = lm / fig_w,
+    right  = 1 - rm / fig_w,
+    bottom = bm_m / fig_h,
+    top    = 1 - tm_m / fig_h,
+)
 
 ax.set_xlim(0, W_D); ax.set_ylim(H_D, 0); ax.set_aspect("equal")
 ax.set_facecolor(COL_BG)
 ax.add_patch(mpatches.FancyBboxPatch((0,0), W_D, H_D,
     boxstyle="square,pad=0", linewidth=1, edgecolor="#aaaaaa", facecolor=COL_BG))
 ax.set_xticks([]); ax.set_yticks([])
-ax.set_title("ALU v2 layout  (96×112, r=4)", fontsize=8, pad=4)
 
 # A col (8 bits)
 for (cx, cy), lbl in zip(_col_centers(8, x_a), [f"A{7-i}" for i in range(8)]):
@@ -274,26 +282,15 @@ out_labels = [f"r{7-i}" for i in range(8)] + ["co","bt"]
 for (cx, cy), lbl in zip(_col_centers(10, x_out), out_labels):
     _draw_circle(ax, cx, cy, r_d, COL_OUT, lbl)
 
-# Distance annotations
-for x0, x1, y_off, lbl in [
-    (x_a,   x_b,   H_D+4, f"A–B {x_b-x_a}px"),
-    (x_b,   x_ctrl, H_D+4, f"B→ctrl {x_ctrl-x_b}px"),
-    (x_ctrl, x_out, H_D+4, f"ctrl→out {x_out-x_ctrl}px"),
-]:
-    ax.annotate("", xy=(x1, y_off), xytext=(x0, y_off),
-                arrowprops=dict(arrowstyle="<->", color="#777777", lw=0.9))
-    ax.text((x0+x1)/2, y_off+4, lbl, ha="center", va="top",
-            fontsize=5, color="#555555")
-
 handles = [
-    mpatches.Patch(color=COL_A,   label="A[7:0]"),
-    mpatches.Patch(color=COL_B,   label="B[7:0]  (blank: NOT/RCL/RCR)"),
-    mpatches.Patch(color=COL_OP,  label="CTRL: op[2:0]+carry_in+cond[2:0]"),
-    mpatches.Patch(color=COL_OUT, label="OUT: result[7:0]+carry_out+branch_taken"),
+    mpatches.Patch(color=COL_A,   label="A"),
+    mpatches.Patch(color=COL_B,   label="B"),
+    mpatches.Patch(color=COL_OP,  label="Control"),
+    mpatches.Patch(color=COL_OUT, label="Output"),
 ]
-fig.legend(handles=handles, loc="lower center", fontsize=6, ncol=2,
-           framealpha=0.9, edgecolor="#cccccc", bbox_to_anchor=(0.5, 0.01))
-fig.suptitle("E_alu2 — 8-bit ALU v2 layout", fontsize=9, y=0.97)
+fig.legend(handles=handles, loc="lower center", fontsize=9, ncol=4,
+           framealpha=0.9, edgecolor="#cccccc", bbox_to_anchor=(0.5, 0.01),
+           handlelength=1.0, handletextpad=0.3, columnspacing=0.6)
 fig.savefig(OUT_DIR / "layout_diagram.svg", bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
 print("Saved: layout_diagram.svg")
@@ -439,7 +436,7 @@ ax.legend(fontsize=10, loc="upper center", bbox_to_anchor=(0.5, -0.12),
           handlelength=1.2, handletextpad=0.4, columnspacing=1.0)
 
 fig.tight_layout(rect=[0, 0.10, 1, 1])
-fig.savefig(OUT_DIR / "per_op_accuracy.svg")
+fig.savefig(OUT_DIR / "per_op_accuracy.svg", bbox_inches="tight")
 plt.close(fig)
 print("Saved: per_op_accuracy.svg")
 
@@ -462,46 +459,45 @@ COMBOS = [(A_FIXED, B_FIXED, CI_FIXED, COND_FIXED, op) for op in range(8)]
 
 print("\n── Rollout figures ──")
 
-n_rows = len(COMBOS)
-n_cols = len(TSTEPS) + 1
+n_rows_full = len(COMBOS)
 
-# ── ch0 rollout ────────────────────────────────────────────────────────────────
+# ── ch0 rollout (compact, 3 representative ops) ────────────────────────────────
 
-cell = 0.48
-fig, axes = plt.subplots(n_rows, n_cols,
-                         figsize=(n_cols * cell, n_rows * cell),
-                         gridspec_kw={"hspace": 0.02, "wspace": 0.02},
-                         constrained_layout=True)
+SHOWCASE_OPS = [0, 4, 6]   # ADD (carry-heavy), XOR (clean bitwise), RCL (rotate+carry)
+showcase_combos = [c for c in COMBOS if c[-1] in SHOWCASE_OPS]
 
-for ri, (a, b, ci, cond, op) in enumerate(COMBOS):
+out_circles = _col_centers(10, x_out)   # 10 ALU output bits: r7..r0, cout, bt
+
+n_cols = len(TSTEPS)
+cell_w = 0.80
+cell_h = cell_w * H_D / W_D
+fig_w  = n_cols * cell_w
+fig_h  = len(showcase_combos) * cell_h
+
+fig, axes = plt.subplots(len(showcase_combos), n_cols,
+                         figsize=(fig_w, fig_h))
+fig.subplots_adjust(hspace=0.02 * cell_w / cell_h, wspace=0.02)
+
+for ri, (a, b, ci, cond, op) in enumerate(showcase_combos):
     state   = make_state(a, b, ci, op, cond)
     rollout = get_rollout(state)
-    result, cout, branch = _compute_alu2(a, b, ci, op, cond)
-    target  = make_target_screen(result, cout, branch)
 
     for ci_idx, t in enumerate(TSTEPS):
         t_idx = min(t, rollout.shape[0] - 1)
         ax = axes[ri][ci_idx]
         ax.imshow(rollout[t_idx, 0].numpy(), cmap="viridis",
                   vmin=-1, vmax=1, interpolation="nearest", rasterized=True)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.axis("off")
         if ri == 0:
-            ax.set_title(f"t={t}", fontsize=7, pad=2)
+            ax.set_title(f"t={t}", fontsize=9, pad=2, fontweight="bold")
         if ci_idx == 0:
-            ax.set_ylabel(_op_label(op), fontsize=5.5)
+            ax.text(-0.05, 0.5, ALU2_OP_NAMES[op], transform=ax.transAxes,
+                    fontsize=8, va="center", ha="right")
+        if ci_idx == n_cols - 1:
+            for (cx, cy) in out_circles:
+                ax.add_patch(mpatches.Circle((cx, cy), r_d,
+                    fill=False, edgecolor="#888888", linewidth=1.6))
 
-    ax = axes[ri][n_cols - 1]
-    ax.imshow(target.numpy(), cmap="viridis", vmin=-1, vmax=1,
-              interpolation="nearest", rasterized=True)
-    ax.set_xticks([]); ax.set_yticks([])
-    if ri == 0:
-        ax.set_title("target", fontsize=7, pad=2)
-
-fig.suptitle(
-    f"E_alu2 — ch0 over time  "
-    f"(A=0x{A_FIXED:02X}, B=0x{B_FIXED:02X}, carry_in={CI_FIXED}, cond=AL)",
-    fontsize=10
-)
 fig.savefig(OUT_DIR / "rollout_ch0.svg", dpi=150, bbox_inches="tight", pad_inches=0.02)
 plt.close(fig)
 print("    Saved: rollout_ch0.svg")
