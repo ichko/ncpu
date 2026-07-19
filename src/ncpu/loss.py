@@ -128,3 +128,15 @@ def fullscreen_rollout_loss(rollout, out, **kwargs):
     nca_outs = rollout[:, 1:, 0]
     out_rep = out.unsqueeze(1).expand(B, T, *out.shape[1:])
     return F.mse_loss(nca_outs, out_rep)
+
+
+def combined_loss(rollout, out, inp, mask, **kwargs):
+    return 0.8 * output_masked_rollout_loss(rollout, out, mask =  mask) + 0.2 * fullscreen_rollout_loss(rollout, out, inp=inp)
+
+
+def loss_mse_whole_seq(rollout, out, **kwargs):
+    N = rollout.shape[1]
+    nca_outs = rollout[:, -N:, 0]
+    out_rep = torch.unsqueeze(out, dim=1).repeat(1, N, 1, 1)
+    loss = F.mse_loss(nca_outs, out_rep)
+    return loss

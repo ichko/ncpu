@@ -17,6 +17,8 @@ import mediapy as media
 import numpy as np
 import torch
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import tempfile
 from pathlib import Path
 
@@ -624,3 +626,329 @@ def save_grid_image(
         dim=0,
     )
     media.write_image(str(path), full.numpy())
+
+
+def bit_accuracy(frame, target):
+    mask = torch.abs(target) > 0.5
+    bits_number = mask.sum().item()
+
+    frame_bit = (frame[mask].sum()).int()/bits_number
+    target_bit = (target[mask].sum()).int()/bits_number
+    return np.abs(1.0 - np.abs(frame_bit - target_bit))
+
+
+def save_cross_section_x(rollout, path, cross_section=-4, channel=0):
+    path = Path(path)
+    B, T, C, H, W = rollout.shape
+
+    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+              "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+
+    for batch in range(B):
+        line = torch.abs(rollout[batch, -1, channel, cross_section, :]).numpy()
+        ax.plot(line, color="#1f77b4", linewidth=0.5, linestyle="--")
+
+
+    ax.set_xlabel("H index", fontsize=9)
+    ax.set_ylabel("Magnitude", fontsize=9)
+    ax.set_title(f"Cross-section  idx={cross_section}  C={channel}", fontsize=10)
+
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.grid(which="major", linewidth=0.5, linestyle="--", color="#cccccc")
+    ax.grid(which="minor", linewidth=0.25, linestyle=":", color="#dddddd")
+    ax.tick_params(axis="both", labelsize=8, direction="in",
+                   which="both", top=True, right=True)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    if B > 1:
+        ax.legend(fontsize=7, frameon=True, framealpha=0.9,
+                  edgecolor="#cccccc", loc="best")
+
+    fig.tight_layout(pad=0.5)
+    fig.savefig(str(path), dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
+def save_cross_section_y(rollout, path, cross_section=-4, channel=0):
+    path = Path(path)
+    B, T, C, H, W = rollout.shape
+
+    COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+              "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+
+    fig, ax = plt.subplots(figsize=(5, 3.2))
+
+    for batch in range(B):
+        line = torch.abs(rollout[batch, -1, channel, :, cross_section]).numpy()
+        ax.plot(line, color="#1f77b4", linewidth=0.5, linestyle="--")
+
+
+    ax.set_xlabel("H index", fontsize=9)
+    ax.set_ylabel("Magnitude", fontsize=9)
+    ax.set_title(f"Cross-section  idx={cross_section}  C={channel}", fontsize=10)
+
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.grid(which="major", linewidth=0.5, linestyle="--", color="#cccccc")
+    ax.grid(which="minor", linewidth=0.25, linestyle=":", color="#dddddd")
+    ax.tick_params(axis="both", labelsize=8, direction="in",
+                   which="both", top=True, right=True)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+
+    if B > 1:
+        ax.legend(fontsize=7, frameon=True, framealpha=0.9,
+                  edgecolor="#cccccc", loc="best")
+
+    fig.tight_layout(pad=0.5)
+    fig.savefig(str(path), dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
+def save_matrix(out_dir, matrix, labels_x, labels_y, title):
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(matrix.T.numpy(), cmap="coolwarm", vmin=0, vmax=1)
+
+    # Annotate each cell with the value
+    for i in range(matrix.T.shape[0]):
+        for j in range(matrix.T.shape[1]):
+            val = matrix.T[i, j].item()
+            text_color = "black" if 0.3 < val < 0.8 else "white"
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center",
+                    fontsize=9, color=text_color, fontweight="bold")
+
+    # Axis labels
+    ax.set_xticks(range(len(labels_x)))
+    ax.set_yticks(range(len(labels_y)))
+    ax.set_xticklabels(labels_x, rotation=45, ha="right")
+    ax.set_yticklabels(labels_y)
+
+    ax.set_xlabel("Noise Std", labelpad=10)
+    ax.set_ylabel("Frame Rate", labelpad=10)
+    ax.set_title(title, pad=12)
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Bit Accuracy", rotation=270, labelpad=15)
+
+    plt.tight_layout()
+    plt.savefig(out_dir, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def save_rollout_gif(rollout, out, batch_size, nca_channels, gif_path):
+    gif_b = batch_size
+    gif_c = nca_channels
+    r = rollout[:gif_b, ::2, :gif_c]
+    T_sub = r.shape[1]
+    target = out[:gif_b].detach().cpu()
+
+    # Build grid with 1px black borders between cells
+    # Row: target + gif_c channel rows = (1 + gif_c) rows
+    # Col: gif_b batch samples
+    _, _, _, cH, cW = r.shape  # cell height/width
+    grid_H = (1 + gif_c) * cH + (gif_c) * 1      # rows + separators between them
+    grid_W = gif_b * cW + (gif_b - 1) * 1         # cols + separators between them
+
+    frame_list = []
+    for t in range(T_sub):
+        frame = torch.zeros(grid_H, grid_W)
+
+        # Row 0: target
+        for b in range(gif_b):
+            col_start = b * (cW + 1)
+            frame[0:cH, col_start:col_start + cW] = target[b]
+
+        # Rows 1..gif_c: NCA channels
+        for ci in range(gif_c):
+            row_start = (ci + 1) * cH + ci * 1  # skip target row + separators
+            for b in range(gif_b):
+                col_start = b * (cW + 1)
+                frame[row_start:row_start + cH, col_start:col_start + cW] = r[b, t, ci].detach().cpu()
+
+        frame_list.append(frame)
+
+    frames = torch.stack(frame_list)
+    frames_np = frames.cpu().numpy()
+    frames_rgb = media.to_rgb(frames_np, vmin=-1, vmax=1, cmap="viridis")
+    frames_rgb = freeze_frame(torch.from_numpy(frames_rgb), timesteps=[0, -1], repeat=8)
+    # gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
+    media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
+    # shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+
+
+def save_rollout_png(
+    path,
+    rollout,          # (T, C, H, W)
+    n_snapshots=6,
+    snapshot_indices=None,
+    max_channels=None,
+    vmin=-1,
+    vmax=1,
+    cmap="viridis",
+    dpi=150,
+    channels = [], # if non-empty, only plot these channels (0-indexed); otherwise plot all up to max_channels 
+    labels_x = [],
+    labels_y = [],
+    mark_right_output_circle=False,
+    output_circle_radius_px=5,
+    output_circle_color="gray",
+):
+    """Save a labelled rollout grid as PNG via matplotlib.
+
+    Rows  = channels (+ one 'target' row at the top if *target* is given).
+    Cols  = evenly-spaced timestep snapshots from the rollout.
+    One figure per batch element in *batch_indices*.
+    """
+
+    path = Path(path)
+    T, C, H, W = rollout.shape
+    if max_channels is not None:
+        C = min(C, max_channels)
+
+    if snapshot_indices is not None and len(snapshot_indices) > 0:
+        ts = torch.as_tensor(snapshot_indices, dtype=torch.long)
+    else:
+        ts = torch.linspace(0, T - 1, n_snapshots).long()
+
+    if channels:
+        n_rows = len(channels)
+    else:
+        n_rows = C + 1
+    n_cols = len(ts)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(n_cols * 1.4 + 0.8, n_rows * 1.4 + 0.6),
+        squeeze=False,
+    )
+
+    for col_idx, t_idx in enumerate(ts):
+        # Target row
+        row_offset = 0
+        
+        # Channel rows
+        for ci in range(n_rows):
+            ax = axes[ci + row_offset, col_idx]
+            if channels:
+                tile = rollout[t_idx, channels[ci]]
+            else:
+                tile = rollout[t_idx, ci]
+            ax.imshow(tile, vmin=vmin, vmax=vmax, cmap=cmap, aspect="equal", interpolation="nearest")
+            if mark_right_output_circle:
+                cx = W - output_circle_radius_px - 12
+                cy = H // 2
+                circ = plt.Circle(
+                    (cx, cy),
+                    radius=output_circle_radius_px,
+                    fill=False,
+                    edgecolor=output_circle_color,
+                    linewidth=4.0,
+                )
+                ax.add_patch(circ)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if col_idx == 0:
+                if labels_y:
+                    ax.set_ylabel(labels_y[ci], fontsize=20)
+                else:
+                    ax.set_ylabel(f"ch {ci}", fontsize=20)
+            if ci == 0:
+                if labels_x:
+                    ax.set_title(labels_x[col_idx], fontsize=20)
+                else:
+                    ax.set_title(f"t={t_idx.item()}", fontsize=20)
+
+    fig.tight_layout(pad=0.3)
+    fig.savefig(str(path), dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_rollout_svg(path, rollout, target, n_snapshots=6, batch_indices=None, max_channels=None, vmin=-1, vmax=1, cmap="viridis", display_size=32):
+    """Save a rollout as a vector SVG with a matplotlib grid.
+
+    Parameters
+    ----------
+    path : str or Path
+        Output file path (should end in .svg).
+    rollout : Tensor (B, T, C, H, W)
+        Full rollout tensor.
+    target : Tensor (B, H, W)
+        Target output for the first row.
+    n_snapshots : int
+        Number of timesteps to sample (evenly spaced).
+    batch_indices : list[int] or None
+        Which batch samples to show. Default: first 4.
+    max_channels : int or None
+        Max NCA channels to display. Default: all.
+    display_size : int
+        Downsample spatial dims to this size before plotting.
+    """
+    from matplotlib import pyplot as plt
+    import numpy as np
+    import torch.nn.functional as F
+
+    B_total, T, C, H, W = rollout.shape
+    if batch_indices is None:
+        batch_indices = list(range(min(B_total, 4)))
+    if max_channels is not None:
+        C = min(C, max_channels)
+
+    # Downsample rollout: (B, T, C, H, W) → (B, T, C, ds, ds)
+    ds = display_size
+    if H != ds or W != ds:
+        r_flat = rollout[:, :, :C].reshape(-1, 1, H, W).float()
+        r_flat = F.interpolate(r_flat, size=(ds, ds), mode='nearest')
+        rollout_ds = r_flat.reshape(B_total, T, C, ds, ds)
+    else:
+        rollout_ds = rollout[:, :, :C]
+
+    # Downsample target: (B, H, W) → (B, ds, ds)
+    if target.shape[-2] != ds or target.shape[-1] != ds:
+        target_ds = F.interpolate(target.unsqueeze(1).float(), size=(ds, ds), mode='nearest').squeeze(1)
+    else:
+        target_ds = target
+
+    # pick evenly-spaced timestep indices, always including first and last
+    ts = list(dict.fromkeys([0] + list(np.linspace(0, T - 1, n_snapshots, dtype=int)) + [T - 1]))
+
+    n_b = len(batch_indices)
+    n_rows = n_b * (1 + C)
+    n_cols = len(ts)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(n_cols * 1.2, n_rows * 1.2),
+        squeeze=False,
+    )
+
+    for bi, b in enumerate(batch_indices):
+        row_offset = bi * (1 + C)
+        for col, t in enumerate(ts):
+            # target row
+            ax = axes[row_offset, col]
+            data = target_ds[b].detach().cpu().numpy()
+            ax.pcolormesh(np.flipud(data), vmin=vmin, vmax=vmax, cmap=cmap, rasterized=False)
+            ax.set_aspect("equal")
+            ax.set_xticks([]); ax.set_yticks([])
+            if col == 0:
+                ax.set_ylabel(f"b{b} tgt", fontsize=6)
+            if bi == 0:
+                ax.set_title(f"t={t}", fontsize=7)
+
+            # channel rows
+            for ci in range(C):
+                ax = axes[row_offset + 1 + ci, col]
+                data = rollout_ds[b, t, ci].detach().cpu().numpy()
+                ax.pcolormesh(np.flipud(data), vmin=vmin, vmax=vmax, cmap=cmap, rasterized=False)
+                ax.set_aspect("equal")
+                ax.set_xticks([]); ax.set_yticks([])
+                if col == 0:
+                    ax.set_ylabel(f"ch{ci}", fontsize=6)
+
+    fig.tight_layout(pad=0.3)
+    fig.savefig(str(path), format="svg", bbox_inches="tight")
+    plt.close(fig)

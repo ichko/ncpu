@@ -4,6 +4,7 @@ import sys
 
 import sys
 import torch
+from argparse import Namespace
 from torch.utils.data import DataLoader, IterableDataset
 
 import random
@@ -722,6 +723,113 @@ class DynamicDataset(IterableDataset):
     def __iter__(self):
         while True:
             yield self.get_sample()
+
+    def get_dataloader(self, batch_size):
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=False,  # can't shuffle IterableDataset
+        )
+
+
+class MultiGateDataset(IterableDataset):
+
+    GATE_NAMES = ["AND", "OR", "XOR", "NAND"]
+
+    def __init__(self, config, nca_channels):
+
+        self.W = config.W
+        self.H = config.H
+        self.r = config.r
+        self.spacing = config.spacing
+        self.nca_channels = nca_channels
+
+        self.AND_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_AND_gate,
+            )
+        )
+        self.OR_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_OR_gate,
+            )
+        )
+        self.XOR_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_XOR_gate,
+            )
+        )
+        self.NAND_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_NAND_gate,
+            )
+        )
+
+        self.datasets = [self.AND_Dataset, self.OR_Dataset, self.XOR_Dataset, self.NAND_Dataset]
+        self.counter = 0
+
+    def _return_dataset(self):
+        return self.datasets[self.counter % 4]
+
+    def _code_dataset(self, inp, gate_idx):
+        """Write a one-hot gate code into the last 4 channels of inp.
+
+        inp shape: (nca_channels, H, W)
+        Channels [-4], [-3], [-2], [-1] encode AND, OR, XOR, NAND respectively.
+        Only the left half (columns 0..W//2) is set to 1 for the active gate;
+        the right half and all inactive gate channels remain 0.
+        """
+        mid = self.W // 2
+        # Zero out all code channels
+        inp[-4:] = 256 // 2 
+        # Set the left half of the active gate's channel to 1
+        inp[-(4 - gate_idx), :, :mid] = 256
+        return inp
+
+    def get_output_bit_masks(self):
+        """Returns (n_bits, H, W) float tensor — one binary mask per output circle."""
+        return self._return_dataset().get_output_bit_masks()
+
+    def get_io_mask(self):
+        return self._return_dataset().get_io_mask()
+
+    def get_sample(self):
+        gate_idx = self.counter % 4
+        dataset = self.datasets[gate_idx]
+        left, right = dataset.get_sample()
+
+        # Expand single-channel (H, W) input to (nca_channels, H, W)
+        inp = left.unsqueeze(0).expand(self.nca_channels, self.H, self.W).clone()
+
+        # Encode which gate is active into the last 4 channels
+        inp = self._code_dataset(inp, gate_idx)
+
+        return inp, right
+
+    def __iter__(self):
+        while True:
+            yield self.get_sample()
+            self.counter += 1
 
     def get_dataloader(self, batch_size):
         return DataLoader(
