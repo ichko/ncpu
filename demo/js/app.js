@@ -21,15 +21,14 @@ const TASKS = {
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  canvas: $('field'), overlay: $('ioOverlay'), screen: $('screen'),
+  canvas: $('field'), overlay: $('ioOverlay'), screen: $('screen'), plate: $('plate'),
   demo: $('demo'), conn: $('connSvg'),
   tabs: $('taskTabs'), inputs: $('inputBits'), outputs: $('outputReadout'),
-  expr: $('exprLine'), verdict: $('verdict'),
+  expr: $('exprLine'), liveNum: $('liveNum'),
   bar: $('pbar'), pstep: $('pstep'), phorizon: $('phorizon'),
   play: $('playBtn'), again: $('againBtn'), rand: $('randBtn'),
   fps: $('fpsSlider'), fpsVal: $('fpsVal'),
-  fire: $('fireSlider'), fireVal: $('fireVal'),
-  debug: $('debugToggle'), runName: $('runName'), status: $('simStatus'),
+  debug: $('debugToggle'), status: $('simStatus'),
 };
 
 let sim = null, cfg = null, geo = null, masks = null, taskKey = null;
@@ -37,21 +36,48 @@ let inputBits = [], step = 0, horizon = 64;
 let phase = 'hold';                 // 'hold' (show input) | 'run' | 'done'
 let holdUntil = 0;
 let ema = null, expArr = [];        // per-output-bit moving average + expected bits
-let fps = 20, fireRate = 0.5, debug = true;
+let fps = 30, debug = true;         // fire rate is fixed to the trained value
 let raf = null, lastT = 0;
 const cache = {};
-const HOLD_MS = 1000;               // pause on the encoded input before running
+const HOLD_MS = 1500;               // pause on the encoded input before running
 
-// overlay markers: monochrome white with opacity, red only to flag a wrong bit
-const ERR = '#ff5a3c';
+const ERR = '#c23b2a';                 // only to flag a wrong output bit
 let inputRings = [], outputRings = [];
 let inputBtns = [], inPaths = [], outPaths = [];
-const TRACE = '#4a443b', TRACE_ERR = '#ab3520';
-function setRing(el, stroke, op, w, fillOp) {
-  el.setAttribute('stroke', stroke);
-  el.setAttribute('stroke-opacity', op);
-  el.setAttribute('stroke-width', w);
-  el.setAttribute('fill', stroke === '#fff' ? `rgba(255,255,255,${fillOp})` : `rgba(255,90,60,${fillOp})`);
+
+// viridis colormap (same fit as the display shader): value in [-1,1] -> css rgb,
+// so a wire is exactly the colour its circle shows on the grid.
+function viridis(v) {
+  const t = Math.max(0, Math.min(1, v * 0.5 + 0.5));
+  const C = [
+    [0.2777, 0.0054, 0.3341], [0.1051, 1.4046, 1.3846], [-0.3309, 0.2148, 0.0951],
+    [-4.6342, -5.7991, -19.3324], [6.2283, 14.1799, 56.6906], [4.7764, -13.7451, -65.3530],
+    [-5.4355, 4.6459, 26.3124],
+  ];
+  const ch = (k) => {
+    let s = C[6][k];
+    for (let j = 5; j >= 0; j--) s = C[j][k] + t * s;
+    return Math.round(Math.max(0, Math.min(1, s)) * 255);
+  };
+  return `rgb(${ch(0)},${ch(1)},${ch(2)})`;
+}
+
+// orthogonal polyline with rounded corners (from web/wires.js)
+function roundedPath(pts, r) {
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [x, y] = pts[i], [nx, ny] = pts[i + 1];
+    const rIn = Math.min(r, Math.hypot(x - px, y - py) / 2, Math.hypot(nx - x, ny - y) / 2);
+    const [ix, iy] = towards(x, y, px, py, rIn);
+    const [ox, oy] = towards(x, y, nx, ny, rIn);
+    d += ` L ${ix.toFixed(1)} ${iy.toFixed(1)} Q ${x.toFixed(1)} ${y.toFixed(1)} ${ox.toFixed(1)} ${oy.toFixed(1)}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L ${last[0].toFixed(1)} ${last[1].toFixed(1)}`;
+}
+function towards(x, y, tx, ty, dist) {
+  const len = Math.hypot(tx - x, ty - y) || 1;
+  return [x + ((tx - x) / len) * dist, y + ((ty - y) / len) * dist];
 }
 
 const loadModel = async (k) => (cache[k] ||= await fetch(`data/${k}.json`).then((r) => r.json()));
@@ -59,8 +85,9 @@ const intBits = (v, w) => { const o = []; for (let i = w - 1; i >= 0; i--) o.pus
 const bitsInt = (a) => a.reduce((x, b) => x * 2 + b, 0);
 const nInputs = (k) => TASKS[k].group === 'gate' ? (k === 'majority3' ? 3 : 2) : TASKS[k].bits * 2;
 
-// display scale: keep the grid modest on screen (~300px on its long side)
-function scaleFor(W, H) { return Math.max(2, Math.round(300 / Math.max(W, H))); }
+// the plate is a FIXED box; every grid is scaled to fit inside it so switching
+// tasks (which have different aspect ratios) never shifts the surrounding layout
+const BOX_W = 244, BOX_H = 330;
 
 async function selectTask(key) {
   taskKey = key;
@@ -69,16 +96,13 @@ async function selectTask(key) {
   masks = outputMasks(cfg, geo);
   horizon = TASKS[key].horizon;
 
-  const s = scaleFor(cfg.W, cfg.H);
-  els.canvas.style.width = cfg.W * s + 'px';
-  els.canvas.style.height = cfg.H * s + 'px';
+  const s = Math.min(BOX_W / cfg.W, BOX_H / cfg.H);
+  const cw = Math.round(cfg.W * s), ch = Math.round(cfg.H * s);
+  els.plate.style.width = cw + 'px'; els.plate.style.height = ch + 'px';
+  els.canvas.style.width = cw + 'px'; els.canvas.style.height = ch + 'px';
   // reserve gutters for the wire ribbon so traces route around the plate rather
   // than over it: a top band (one lane per input) and a left gutter (the input
   // circles sit on the grid's far edge, opposite the control panel).
-  const band = 7 + geo.inputs.length * 3;   // one thin 3px lane per input wire
-  els.demo.style.paddingTop = band + 'px';
-  const stageEl = els.demo.querySelector('.stage');
-  if (stageEl) stageEl.style.marginLeft = band + 'px';
 
   try {
     if (sim) sim.dispose();
@@ -92,9 +116,9 @@ async function selectTask(key) {
   } else {
     inputBits = new Array(nInputs(key)).fill(1);
   }
-  els.runName.textContent = cfg.run;
-  buildTabs(); buildInputUI(); drawOverlay();
-  restart();
+  // build the DOM and wires ONCE per task; reseed() reuses them thereafter
+  buildTabs(); buildInputUI(); buildOutputUI(); drawOverlay(); drawConnectors();
+  reseed();
 }
 
 function buildTabs() {
@@ -109,6 +133,15 @@ function buildTabs() {
   [...els.tabs.children].forEach((c) => c.classList.toggle('active', c.dataset.key === taskKey));
 }
 
+// input order matching the grid: rows top→bottom, columns left→right, so each
+// toggle sits at a unique height and lines up with its circle's row. This is
+// what lets every wire keep its own lane.
+function inputOrder() {
+  return geo.inputs.map((c, i) => i).sort((a, b) =>
+    (geo.inputs[a].y - geo.inputs[b].y) || (geo.inputs[a].x - geo.inputs[b].x));
+}
+function inColumns() { return [...new Set(geo.inputs.map((c) => c.x))].sort((a, b) => a - b); }
+
 function buildInputUI() {
   els.inputs.innerHTML = '';
   inputBtns = [];
@@ -117,19 +150,58 @@ function buildInputUI() {
     els.inputs.appendChild(operandRow('A', 0, t.bits));
     els.inputs.appendChild(operandRow('B', t.bits, t.bits));
   } else {
+    // one input per row (A, B, [C]) — same shape as the adders, so the wires
+    // never have to cross a neighbouring control
     const names = taskKey === 'majority3' ? ['A', 'B', 'C'] : ['A', 'B'];
-    const row = document.createElement('div'); row.className = 'bit-row';
-    names.forEach((nm, i) => row.appendChild(bitToggle(i)));
-    els.inputs.appendChild(row);
+    names.forEach((nm, i) => {
+      const row = document.createElement('div'); row.className = 'bit-row';
+      const tag = document.createElement('span'); tag.className = 'operand-tag'; tag.textContent = nm;
+      row.append(tag, bitToggle(i));
+      els.inputs.appendChild(row);
+    });
   }
   updateExpr();
 }
 function operandRow(name, off, w) {
   const row = document.createElement('div'); row.className = 'bit-row';
-  const tag = document.createElement('span'); tag.className = 'operand-tag'; tag.textContent = name; row.appendChild(tag);
-  for (let i = 0; i < w; i++) row.appendChild(bitToggle(off + i));
-  const val = document.createElement('span'); val.className = 'operand-val'; val.dataset.for = name; row.appendChild(val);
+  const tag = document.createElement('span'); tag.className = 'operand-tag'; tag.textContent = name; row.append(tag);
+  // a real number input: type a value, it becomes bits that wire to the grid
+  const num = document.createElement('input');
+  num.type = 'number'; num.className = 'num-in'; num.min = 0; num.max = (1 << w) - 1;
+  num.dataset.off = off; num.dataset.w = w;
+  num.value = bitsInt(inputBits.slice(off, off + w));
+  num.oninput = () => {
+    let v = parseInt(num.value, 10); if (isNaN(v)) return;
+    v = Math.max(0, Math.min((1 << w) - 1, v));
+    setOperand(off, w, v);
+  };
+  row.append(num);
+  const bits = document.createElement('span'); bits.className = 'bit-cluster';
+  for (let i = 0; i < w; i++) bits.append(bitToggle(off + i));
+  row.append(bits);
   return row;
+}
+function setOperand(off, w, v) {
+  for (let i = 0; i < w; i++) inputBits[off + i] = (v >> (w - 1 - i)) & 1;
+  refreshInputVisuals(); updateExpr(); reseed();
+}
+// sync the bit buttons and number fields to inputBits
+function refreshInputVisuals() {
+  inputBtns.forEach((b, idx) => {
+    if (!b) return;
+    b.classList.toggle('on', !!inputBits[idx]); b.textContent = inputBits[idx] ? '1' : '0';
+  });
+  els.inputs.querySelectorAll('.num-in').forEach((n) => {
+    if (document.activeElement === n) return;
+    const off = +n.dataset.off, w = +n.dataset.w;
+    n.value = bitsInt(inputBits.slice(off, off + w));
+  });
+}
+// row layout of an input: which operand row it's in and its position there
+function rowInfo(i) {
+  const t = TASKS[taskKey];
+  if (t.group === 'adder') return { pos: i % t.bits, len: t.bits };
+  return { pos: i, len: nInputs(taskKey) };
 }
 function bitToggle(idx) {
   const b = document.createElement('button');
@@ -137,8 +209,7 @@ function bitToggle(idx) {
   b.textContent = inputBits[idx] ? '1' : '0';
   b.onclick = () => {
     inputBits[idx] ^= 1;
-    b.classList.toggle('on', !!inputBits[idx]); b.textContent = inputBits[idx] ? '1' : '0';
-    updateExpr(); restart();
+    refreshInputVisuals(); updateExpr(); reseed();
   };
   inputBtns[idx] = b;
   return b;
@@ -148,7 +219,6 @@ function updateExpr() {
   if (t.group === 'adder') {
     const b = t.bits, a = bitsInt(inputBits.slice(0, b)), bb = bitsInt(inputBits.slice(b, 2 * b));
     els.expr.textContent = `${a} + ${bb} = ${a + bb}`;
-    els.inputs.querySelectorAll('.operand-val').forEach((s) => { s.textContent = s.dataset.for === 'A' ? a : bb; });
   } else {
     els.expr.textContent = `${t.label}(${inputBits.join(', ')}) → ${t.fn(inputBits).join(', ')}`;
   }
@@ -163,7 +233,7 @@ function expected() {
   return t.fn(inputBits);
 }
 
-// ---- overlay: rings that react to state (input activation, output validity)
+// ---- overlay: rings on the circles, coloured to match the field so wires blend
 function drawOverlay() {
   const { W, H } = cfg, ns = 'http://www.w3.org/2000/svg';
   els.overlay.setAttribute('viewBox', `0 0 ${W} ${H}`);
@@ -172,7 +242,8 @@ function drawOverlay() {
   const ring = (c) => {
     const el = document.createElementNS(ns, 'circle');
     el.setAttribute('cx', c.x + 0.5); el.setAttribute('cy', c.y + 0.5);
-    el.setAttribute('r', geo.r + 1.5); el.setAttribute('fill', 'none');
+    el.setAttribute('r', geo.r + 1.2); el.setAttribute('fill', 'none');
+    el.setAttribute('stroke-width', 1.2);
     els.overlay.appendChild(el);
     return el;
   };
@@ -183,22 +254,33 @@ function drawOverlay() {
 
 function updateOverlay() {
   inputRings.forEach((el, i) => {
-    const on = !!inputBits[i];
-    setRing(el, '#fff', on ? 0.95 : 0.32, on ? 1.1 : 0.7, on ? 0.14 : 0);
+    el.setAttribute('stroke', '#fff');
+    el.setAttribute('stroke-opacity', inputBits[i] ? 0.95 : 0.35);
   });
   outputRings.forEach((el, i) => {
-    if (phase === 'hold' || !ema) { setRing(el, '#fff', 0.4, 0.8, 0); return; }
+    if (phase === 'hold' || !ema) { el.setAttribute('stroke', '#fff'); el.setAttribute('stroke-opacity', 0.4); return; }
     const got = ema[i] > 0, ok = (got ? 1 : 0) === expArr[i];
-    if (!ok) setRing(el, ERR, 0.95, 1.2, got ? 0.18 : 0.05);        // wrong bit -> red
-    else setRing(el, '#fff', got ? 0.95 : 0.4, got ? 1.2 : 0.8, got ? 0.16 : 0);
+    el.setAttribute('stroke', (!ok && phase === 'done') ? ERR : '#fff');
+    el.setAttribute('stroke-opacity', got ? 0.95 : 0.4);
   });
 }
 
-// ---- circuit-style connector traces between controls and grid circles ----
+// ---- chip-style traces (after web/wires.js of the classification demo):
+// each wire leaves its circle radially, hops onto its own nested ring around the
+// plate, and runs out to its control. Colour matches the circle; the only part
+// over the simulation is a faint stub from the rim to the plate edge.
+const LANE0 = 22, CORNER = 5;   // how far the nearest wire bends out from the grid
 function drawConnectors() {
   const ns = 'http://www.w3.org/2000/svg';
   els.conn.innerHTML = '';
-  const mk = () => { const p = document.createElementNS(ns, 'path'); els.conn.appendChild(p); return p; };
+  const mk = () => {
+    const stub = document.createElementNS(ns, 'path');
+    const route = document.createElementNS(ns, 'path');
+    stub.setAttribute('fill', 'none'); route.setAttribute('fill', 'none');
+    route.setAttribute('stroke-linecap', 'round');
+    els.conn.append(stub, route);
+    return { stub, route };
+  };
   inPaths = geo.inputs.map(mk);
   outPaths = geo.outputs.map(mk);
   requestAnimationFrame(layoutConnectors);
@@ -208,10 +290,9 @@ function layoutConnectors() {
   if (!cfg || !inPaths.length) return;
   const dRect = els.demo.getBoundingClientRect();
   const cRect = els.canvas.getBoundingClientRect();
-  // hide when the panel has wrapped below the grid (narrow screens)
   const btn0 = inputBtns[0] && inputBtns[0].getBoundingClientRect();
   const stacked = !cRect.width || (btn0 && btn0.top > cRect.bottom - 4);
-  if (stacked) { els.conn.style.display = 'none'; return; }
+  if (stacked || !debug) { els.conn.style.display = 'none'; return; }
   els.conn.style.display = '';
   els.conn.setAttribute('viewBox', `0 0 ${dRect.width} ${dRect.height}`);
   els.conn.setAttribute('width', dRect.width); els.conn.setAttribute('height', dRect.height);
@@ -219,56 +300,70 @@ function layoutConnectors() {
   const gL = cRect.left - dRect.left, gT = cRect.top - dRect.top;
   const gR = cRect.right - dRect.left, gB = cRect.bottom - dRect.top;
   const LX = (x) => gL + (x + 0.5) * sc, LY = (y) => gT + (y + 0.5) * sc;
+  const rr = (geo.r + 1.2) * sc;                       // ring rim in px
+  const cols = inColumns(), nCols = cols.length;
 
-  const scr = els.screen.getBoundingClientRect();     // outer plate boundary
-  const sL = scr.left - dRect.left, sR = scr.right - dRect.left, sT = scr.top - dRect.top;
-  // Grid is on the LEFT, controls on the RIGHT. Traces live only in the empty
-  // gutters around the plate — never over the simulation and never over another
-  // control. They meet the plate at its edge (aligned with each circle's row)
-  // and meet a control at its edge. Each wire keeps its own thin 3px lane.
-  //
-  // inputs sit on the plate's FAR (left) edge, so each trace leaves its bit
-  // button's top edge, rises into its own lane in the top band, crosses left,
-  // drops down its own lane in the left gutter, and meets the left plate edge.
-  const N = geo.inputs.length;
+  // lane spacing — wide enough to fan out clearly, capped so the nest fits the gutter
+  const gapFor = (n) => Math.max(2.2, Math.min(4, 34 / Math.max(1, n - 1)));
+  // rank each side top→bottom (then left→right) so the lanes nest in order
+  const byRow = (arr) => arr.map((c, i) => i).sort((a, b) => (arr[a].y - arr[b].y) || (arr[a].x - arr[b].x));
+  const rankIn = new Array(geo.inputs.length); byRow(geo.inputs).forEach((idx, k) => rankIn[idx] = k);
+  const rankOut = new Array(geo.outputs.length); byRow(geo.outputs).forEach((idx, k) => rankOut[idx] = k);
+  const gIn = gapFor(geo.inputs.length), gOut = gapFor(geo.outputs.length);
+
+  // A wire leaves its circle sideways (L for inputs, R for outputs), rides its
+  // own lane just outside the grid, and rises/falls to its control. It never
+  // dips below the grid, so it never reaches the progress bar. The stub from the
+  // rim to the grid edge is the only part over the simulation.
+  function route(c, target, off, side, yoff) {
+    const px = LX(c.x), py = LY(c.y) + yoff;
+    const dir = side === 'L' ? -1 : 1;
+    const edgeX = side === 'L' ? gL : gR;
+    const rimX = px + dir * rr;
+    const railX = edgeX + dir * off;
+    const ty = Math.min(target.y, gB - 3);             // clamp: stay above the grid bottom
+    const pts = [[edgeX, py], [railX, py], [railX, ty], [target.x, ty]];
+    return { stubD: `M ${rimX.toFixed(1)} ${py.toFixed(1)} L ${edgeX.toFixed(1)} ${py.toFixed(1)}`,
+             routeD: roundedPath(pts, CORNER) };
+  }
+
   geo.inputs.forEach((c, i) => {
     const btn = inputBtns[c.bit]; if (!btn) return;
     const r = btn.getBoundingClientRect();
-    const bx = r.left + r.width / 2 - dRect.left;     // meet the button at its top edge
-    const bTop = r.top - dRect.top;
-    const cy = LY(c.y);
-    const topBus = sT - 5 - (N - 1 - i) * 3;
-    const leftBus = sL - 4 - i * 3;
-    inPaths[i].setAttribute('d', `M ${bx} ${bTop} V ${topBus} H ${leftBus} V ${cy} H ${sL}`);
+    const target = { x: r.right - dRect.left, y: r.top + r.height / 2 - dRect.top };
+    const yoff = (cols.indexOf(c.x) - (nCols - 1) / 2) * 3.2;   // split same-row A/B
+    const d = route(c, target, LANE0 + rankIn[i] * gIn, 'L', yoff);
+    inPaths[i].stub.setAttribute('d', d.stubD);
+    inPaths[i].route.setAttribute('d', d.routeD);
   });
-  // outputs sit on the plate's NEAR (right) edge: each trace leaves the right
-  // plate edge, runs out into its own lane in the gutter, and meets its readout
-  // dot at the dot's left edge.
   geo.outputs.forEach((c, i) => {
     const dot = outCells[i] && outCells[i].dot; if (!dot) return;
     const r = dot.getBoundingClientRect();
-    const dLeft = r.left - dRect.left, dy = r.top + r.height / 2 - dRect.top;
-    const cy = LY(c.y);
-    const rightBus = sR + 4 + i * 3;
-    outPaths[i].setAttribute('d', `M ${sR} ${cy} H ${rightBus} V ${dy} H ${dLeft}`);
+    const target = { x: r.left - dRect.left, y: r.top + r.height / 2 - dRect.top };
+    const d = route(c, target, LANE0 + rankOut[i] * gOut, 'R', 0);
+    outPaths[i].stub.setAttribute('d', d.stubD);
+    outPaths[i].route.setAttribute('d', d.routeD);
   });
   updateConnectors();
 }
 
+// wires: fixed hair-thin width; only opacity responds. Black over the paper,
+// white where the stub crosses the (dark) simulation.
+const WIRE_W = 0.75;
+function paintWire(w, a, err) {
+  w.route.setAttribute('stroke', err ? ERR : '#000');
+  w.route.setAttribute('stroke-width', WIRE_W);
+  w.route.setAttribute('opacity', (0.13 + 0.42 * a).toFixed(3));
+  w.stub.setAttribute('stroke', err ? ERR : '#fff');
+  w.stub.setAttribute('stroke-width', WIRE_W);
+  w.stub.setAttribute('opacity', (0.16 + 0.5 * a).toFixed(3));
+}
 function updateConnectors() {
-  inPaths.forEach((p, i) => {
-    const on = !!inputBits[geo.inputs[i].bit];
-    p.setAttribute('stroke', TRACE);
-    p.setAttribute('stroke-opacity', on ? 0.8 : 0.26);
-    p.setAttribute('stroke-width', on ? 2.2 : 1);
-  });
-  outPaths.forEach((p, i) => {
-    const got = ema && ema[i] > 0;
-    const settled = phase === 'run' || phase === 'done' || phase === '__paused';
-    const bad = settled && ema && (got ? 1 : 0) !== expArr[i];
-    p.setAttribute('stroke', bad ? TRACE_ERR : TRACE);
-    p.setAttribute('stroke-opacity', got ? 0.8 : 0.26);
-    p.setAttribute('stroke-width', got ? 2.2 : 1);
+  inPaths.forEach((w, i) => paintWire(w, inputBits[geo.inputs[i].bit] ? 1 : 0.28, false));
+  outPaths.forEach((w, i) => {
+    const v = ema ? ema[i] : -1;
+    const bad = phase === 'done' && ema && ((v > 0 ? 1 : 0) !== expArr[i]);
+    paintWire(w, Math.min(1, Math.max(0, v * 0.5 + 0.5)), bad);
   });
 }
 
@@ -276,13 +371,19 @@ let outCells = [];
 function buildOutputUI() {
   els.outputs.innerHTML = '';
   const exp = expected();
+  // one line per output circle, stacked top→bottom to match the grid's output
+  // column, so each output wire keeps its own lane
   outCells = exp.map((e, i) => {
-    const cell = document.createElement('div'); cell.className = 'out-bit';
-    const dot = document.createElement('div'); dot.className = 'out-dot';
+    const line = document.createElement('div'); line.className = 'out-line';
     const lbl = document.createElement('span'); lbl.className = 'out-lbl'; lbl.textContent = bitLabel(i);
-    cell.append(dot, lbl); els.outputs.appendChild(cell);
+    const dot = document.createElement('div'); dot.className = 'out-dot';
+    line.append(dot, lbl); els.outputs.appendChild(line);
     return { dot, exp: e };
   });
+}
+function updateExpectations() {
+  expArr = expected();
+  outCells.forEach((c, i) => { if (c) c.exp = expArr[i]; });
 }
 function bitLabel(i) {
   const t = TASKS[taskKey];
@@ -299,21 +400,39 @@ function updateLiveDots() {
   if (!ema) return;
   ema.forEach((v, i) => { const c = outCells[i]; if (c) c.dot.classList.toggle('hi', v > 0); });
 }
+// the number the grid is currently spelling out, and whether it's right yet
+function updateLive() {
+  if (!els.liveNum) return;
+  const t = TASKS[taskKey];
+  if (!ema || phase === 'hold') { els.liveNum.textContent = ''; els.liveNum.className = 'live-num'; return; }
+  const got = ema.map((v) => v > 0 ? 1 : 0);
+  let text, ok;
+  if (t.group === 'adder') {
+    const n = bitsInt(got);
+    const a = bitsInt(inputBits.slice(0, t.bits)), b = bitsInt(inputBits.slice(t.bits, 2 * t.bits));
+    ok = n === a + b; text = '= ' + n;
+  } else {
+    text = got.join(''); ok = got.join('') === expArr.join('');
+  }
+  // once the run finishes, mark the number with a simple ✓ / ✗
+  if (phase === 'done') text += ok ? '  ✓' : '  ✗';
+  els.liveNum.textContent = text;
+  els.liveNum.className = 'live-num ' + (ok ? 'ok' : (phase === 'done' ? 'bad' : ''));
+}
 
-function restart() {
+// re-seed the grid and reset the run WITHOUT rebuilding any DOM or wires — the
+// controls and connector geometry are stable, so toggling an input never makes
+// the output wires jump.
+function reseed() {
   if (!sim) return;
   sim.seed(buildImage(cfg, geo, inputBits));
   sim.draw();
   step = 0; ema = null; lastT = 0;
   phase = 'hold'; holdUntil = performance.now() + HOLD_MS;
-  expArr = expected();
-  buildOutputUI();
-  drawConnectors();
-  updateOverlay();
+  updateExpectations();
+  outCells.forEach((c) => { if (c) c.dot.classList.remove('hi', 'ok', 'bad'); });
   els.play.textContent = 'Pause';
-  els.verdict.className = 'verdict run';
-  els.verdict.innerHTML = '<span class="mk">▸</span> encoded input…';
-  updateProgress();
+  updateLive(); updateOverlay(); updateConnectors(); updateProgress();
 }
 
 function finish() {
@@ -327,18 +446,8 @@ function finish() {
     c.dot.classList.toggle('bad', g !== c.exp);
     if (g !== c.exp) ok = false;
   });
-  const t = TASKS[taskKey], gs = got.join('');
-  let expr;
-  if (t.group === 'adder') {
-    const b = t.bits, a = bitsInt(inputBits.slice(0, b)), bb = bitsInt(inputBits.slice(b, 2 * b));
-    expr = `${a} + ${bb} = ${bitsInt(got)}` + (ok ? '' : `  (want ${a + bb})`);
-  } else {
-    expr = `read ${gs}` + (ok ? '' : `  · want ${exp.join('')}`);
-  }
-  els.verdict.className = 'verdict ' + (ok ? 'pass' : 'fail');
-  els.verdict.innerHTML = `<span class="mk">${ok ? '✓' : '✗'}</span> ${expr}`;
   els.play.textContent = 'Replay';
-  updateOverlay(); updateConnectors();
+  updateLive(); updateOverlay(); updateConnectors();
 }
 
 function updateProgress() {
@@ -350,21 +459,21 @@ function updateProgress() {
 function frame(ts) {
   raf = requestAnimationFrame(frame);
   if (!sim) return;
-  if (phase === 'hold') { if (ts >= holdUntil) { phase = 'run'; lastT = 0; els.verdict.innerHTML = '<span class="mk">▸</span> running…'; } return; }
+  if (phase === 'hold') { if (ts >= holdUntil) { phase = 'run'; lastT = 0; } return; }
   if (phase !== 'run') return;
   if (ts - lastT < 1000 / fps) return;
   lastT = ts;
-  sim.step(fireRate); step++;
+  sim.step(cfg.fire_rate); step++;   // always the trained fire rate
   const m = readMeans();
   ema = ema ? ema.map((v, i) => v * 0.8 + m[i] * 0.2) : m;
   sim.draw();
-  updateLiveDots(); updateOverlay(); updateConnectors(); updateProgress();
+  updateLiveDots(); updateLive(); updateOverlay(); updateConnectors(); updateProgress();
   if (step >= horizon) { phase = 'done'; finish(); }
 }
 
 // ---- controls ------------------------------------------------------------
 els.play.onclick = () => {
-  if (phase === 'done') { restart(); return; }        // "Replay"
+  if (phase === 'done') { reseed(); return; }          // "Replay"
   if (phase === 'hold') { phase = 'run'; lastT = 0; els.play.textContent = 'Pause'; return; }
   // toggle run/pause
   if (els.play.textContent === 'Pause') { phase = '__paused'; els.play.textContent = 'Play'; }
@@ -372,24 +481,26 @@ els.play.onclick = () => {
 };
 els.again.onclick = () => {
   const wasPaused = els.play.textContent === 'Play';   // don't resume a paused run
-  restart();
-  if (wasPaused) {
-    phase = '__paused'; els.play.textContent = 'Play';
-    els.verdict.className = 'verdict run';
-    els.verdict.innerHTML = '<span class="mk">▮</span> paused — encoded input';
-  }
+  reseed();
+  if (wasPaused) { phase = '__paused'; els.play.textContent = 'Play'; }
 };
-els.rand.onclick = () => { inputBits = inputBits.map(() => Math.random() < 0.5 ? 0 : 1); buildInputUI(); restart(); };
+els.rand.onclick = () => {
+  inputBits = inputBits.map(() => Math.random() < 0.5 ? 0 : 1);
+  buildInputUI(); updateExpr(); layoutConnectors(); reseed();
+};
 els.fps.oninput = () => { fps = +els.fps.value; els.fpsVal.textContent = fps; };
-els.fire.oninput = () => { fireRate = +els.fire.value / 100; els.fireVal.textContent = fireRate.toFixed(2).slice(1); };
-els.debug.onchange = () => { debug = els.debug.checked; els.overlay.style.display = debug ? '' : 'none'; };
+els.debug.onchange = () => {
+  debug = els.debug.checked;
+  els.overlay.style.display = debug ? '' : 'none';
+  els.conn.style.display = debug ? '' : 'none';   // "mark cells" also shows/hides the wires
+};
 
 (async function () {
   els.fpsVal.textContent = fps;
-  els.fireVal.textContent = fireRate.toFixed(2).slice(1);
   els.debug.checked = debug;
   if (window.ResizeObserver) new ResizeObserver(() => layoutConnectors()).observe(els.demo);
   window.addEventListener('resize', layoutConnectors);
-  try { await selectTask('adder4'); raf = requestAnimationFrame(frame); }
+  const initTask = TASKS[location.hash.slice(1)] ? location.hash.slice(1) : 'adder4';
+  try { await selectTask(initTask); raf = requestAnimationFrame(frame); }
   catch (e) { console.error(e); }
 })();

@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Computation in a Visual Substrate</title>
+<title>Self-organized boolean computation</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="description" content="A neural cellular automaton — one small rule per cell — trained to perform Boolean logic and binary addition, running live in the browser." />
 <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -11,53 +12,62 @@
 <div class="wrap">
 
   <header class="masthead">
-    <h1 class="title">Computation in a <em>visual substrate</em></h1>
-    <p class="subtitle">A neural cellular automaton is a grid of cells that all run the same small rule and only see their neighbours. We train one on examples of inputs and the answers we want, and nothing else. Set the bits below and watch it compute Boolean logic and binary addition.</p>
+    <h1 class="title">Self-organized <em>boolean</em> computation</h1>
+    <p class="subtitle">Neural cellular automata are usually trained to grow and repair shapes<a href="#ref-1" class="cite">1</a><a href="#ref-3" class="cite">3</a>; this one computes. A single learned update rule, applied locally over many steps, self-organises the answer from spatially encoded inputs. Set the bits below and watch it compute Boolean logic and binary addition.</p>
   </header>
 
   <!-- DEMO -->
   <section id="fig1">
     <div class="panelbox">
-      <div class="hd"><span>Fig. 1 · Live automaton</span><span class="rt" id="simStatus"></span></div>
+      <div class="hd"><span>Fig. 1 · Live Demo</span><span class="rt" id="simStatus"></span></div>
       <div class="bd">
         <div class="demo" id="demo">
           <svg class="connectors" id="connSvg" aria-hidden="true"></svg>
-          <div class="panel">
+
+          <!-- INPUT side — aligned with the input circles on the grid's left edge -->
+          <div class="col col-in">
             <div><h4>Task</h4><div class="tabs" id="taskTabs"></div></div>
             <div><h4>Input bits</h4><div id="inputBits"></div><div class="expr" id="exprLine"></div></div>
-            <div><h4>Output — read from the grid</h4><div class="readout" id="outputReadout"></div></div>
             <div class="btn-row">
               <button class="ctl" id="playBtn">Pause</button>
               <button class="ctl" id="againBtn">Restart</button>
               <button class="ctl" id="randBtn">Random</button>
             </div>
             <div class="knobs">
-              <span class="knob"><span class="lab">speed</span><input type="range" id="fpsSlider" min="2" max="60" value="20" /><span class="val" id="fpsVal">20</span></span>
-              <span class="knob"><span class="lab">fire</span><input type="range" id="fireSlider" min="10" max="100" value="50" /><span class="val" id="fireVal">.50</span></span>
-              <label class="toggle"><input type="checkbox" id="debugToggle" /> mark cells</label>
+              <span class="knob"><span class="lab">speed</span><input type="range" id="fpsSlider" min="2" max="60" value="30" /><span class="val" id="fpsVal">30</span></span>
+              <label class="toggle"><input type="checkbox" id="debugToggle" /> visual guide</label>
             </div>
-            <div class="metaline">checkpoint <span id="runName">—</span></div>
           </div>
 
+          <!-- the automaton -->
           <div class="stage">
             <div class="screen" id="screen">
-              <canvas id="field"></canvas>
-              <svg class="overlay" id="ioOverlay" preserveAspectRatio="none"></svg>
+              <div class="plate-wrap">
+                <div class="plate" id="plate">
+                  <canvas id="field"></canvas>
+                  <svg class="overlay" id="ioOverlay" preserveAspectRatio="none"></svg>
+                </div>
+                <div class="progress">
+                  <div class="pbar"><i id="pbar"></i></div>
+                  <div class="pmeta">step <span id="pstep">000</span> / <span id="phorizon">000</span></div>
+                </div>
+              </div>
             </div>
-            <div class="progress">
-              <div class="pbar"><i id="pbar"></i></div>
-              <div class="pmeta">step <span id="pstep">000</span> / <span id="phorizon">000</span></div>
-            </div>
-            <div class="verdict run" id="verdict"><span class="mk">▸</span> running…</div>
+          </div>
+
+          <!-- OUTPUT side — aligned with the output circles on the grid's right edge -->
+          <div class="col col-out">
+            <div><h4>Grid output</h4><div class="readout" id="outputReadout"></div></div>
+            <div class="live-num" id="liveNum"></div>
           </div>
         </div>
       </div>
-      <div class="caption"><b>Reading it.</b> The input bits are the circles on the left; the answer forms in the circles on the right, which start blank. Colour is the visible channel under the viridis map (dark = 0, yellow = 1). The run pauses for a moment on the encoded input, then steps for as many steps as the model was trained on and stops. The output dots turn <span class="tag-pass">green</span> when they match the correct answer and <span class="tag-fail">red</span> when they do not.</div>
+      <div class="caption"><b>Reading it.</b> The input bits are the circles on the left; the answer forms in the circles on the right, which start out blank. Each cell's colour shows its value — dark for 0, bright yellow for 1.</div>
     </div>
 
     <div class="spec">
       <div><div class="lab">Substrate</div>16-channel cellular automaton, one shared rule</div>
-      <div><div class="lab">Rule</div>fixed Sobel perception → 48·128·16 network (~24k weights)</div>
+      <div><div class="lab">Rule</div>fixed Sobel perception → 48·128·16 network (~8k weights)</div>
       <div><div class="lab">Supervision</div>final-grid pixels only; no target for internal state</div>
     </div>
   </section>
@@ -66,23 +76,22 @@
   <section id="setup">
     <div class="seclabel">01 — Setup</div>
     <h2>The task</h2>
-    <p class="lead">A cellular automaton is a grid of cells. Every cell holds a few numbers and is updated by the same rule, which only looks at the cell and its neighbours. In a neural cellular automaton, that rule is a small neural network trained by gradient descent instead of written by hand.</p>
-    <p>We give the model a task by drawing it on the grid. The input bits are placed as circles along the left edge: a bright circle for <code>1</code>, a dark circle for <code>0</code>. We want the answer to appear as circles on the right edge. The model is only trained on whether the final grid matches the target — it is never told where the input or output is, or which function to compute. For an answer to appear on the right, information has to travel there across the grid over many steps.</p>
-    <p>The rule is small. Each cell reads a 5×5 or 7×7 window around it, passes it through a two-layer network (about 24,000 weights in total), and updates its own numbers. We run the same rule on every cell for a few dozen steps and then read the grid. Gates use a 48×48 grid; the adders use 80×112.</p>
+    <p class="lead">A cellular automaton is a grid of cells, like Conway's Game of Life<a href="#ref-10" class="cite">10</a>: every cell holds a few numbers and is updated by the same rule, which only looks at the cell and its neighbours. In a neural cellular automaton the rule is a small neural network trained by gradient descent<a href="#ref-1" class="cite">1</a> instead of written by hand. Such rules have grown shapes<a href="#ref-1" class="cite">1</a>, synthesised textures<a href="#ref-3" class="cite">3</a>, built functional 3D machines<a href="#ref-4" class="cite">4</a>, classified digits<a href="#ref-2" class="cite">2</a>, and solved graph problems<a href="#ref-5" class="cite">5</a>.</p>
+    <p>We give the model a task by drawing it on the grid. The input bits are placed as circles along the left edge: a bright circle for <code>1</code>, a dark circle for <code>0</code>. We want the answer to appear as circles on the right edge. The model is only trained on whether the final grid matches the target — it is never told where the input or output is, or which function to compute. For an answer to appear on the right, information has to travel across the grid over many steps — much as living tissue routes positional information<a href="#ref-8" class="cite">8</a> and turns local chemistry into global pattern<a href="#ref-9" class="cite">9</a>. Specifying a task this way, as a picture, is a different route to computation than wiring logic gates into the cells directly<a href="#ref-6" class="cite">6</a> or building toward universal automata<a href="#ref-7" class="cite">7</a>.</p>
+    <p>The rule is small. Each cell views its 5×5 or 7×7 neighbourhood through three fixed filters — its own value, and the horizontal and vertical Sobel gradients — then feeds those through a small two-layer network (about 8,000 weights) that updates its numbers. The same rule runs on every cell for a few dozen steps, and then we read the grid.</p>
   </section>
 
   <!-- 02 -->
   <section id="step">
     <div class="seclabel">02 — Mechanism</div>
     <h2>The update rule</h2>
-    <p>One step of the model does the same thing in every cell:</p>
+    <p>The design follows the Growing Neural Cellular Automata of Mordvintsev et al.<a href="#ref-1" class="cite">1</a> — a fixed perception step, a small learned update network, and stochastic per-cell updates. One step does the same thing in every cell:</p>
     <div class="steps">
       <div class="step-item"><div class="st-body"><h4>Perceive</h4><p>The cell looks at its neighbourhood through three fixed filters: the cell itself, and the horizontal and vertical Sobel gradients. Across the 16 channels this produces 48 numbers.</p></div></div>
       <div class="step-item"><div class="st-body"><h4>Apply the network</h4><p>The 48 numbers go through the trained network (48 → 128 → 16, with a ReLU in between). This is the only part that is learned, and it is the same in every cell.</p></div></div>
       <div class="step-item"><div class="st-body"><h4>Update</h4><p>The 16 outputs are added to the cell's numbers. One channel is kept read-only and always holds the original input, so the model can still see the question after many steps.</p></div></div>
       <div class="step-item"><div class="st-body"><h4>Fire and clamp</h4><p>Only a random fraction of cells update on each step, so the rule cannot depend on a global clock. The numbers are clamped to a fixed range. We repeat this and read the grid.</p></div></div>
     </div>
-    <p class="note">In the browser, one step is a single WebGL pass over the grid. A deterministic step matches the original PyTorch model to about 1×10⁻⁶.</p>
   </section>
 
   <!-- 03 -->
@@ -94,7 +103,7 @@
       <img src="assets/carry_8bit.png" alt="Eight snapshots of the 8-bit adder computing 127 + 1: activity spreads from the two input columns to the output column, and the carry settles last." />
       <figcaption><b>127 + 1 = 128.</b> At <span class="mono">t = 0</span> only the two input columns are set (A = 127 on the left, B = 1 next to it). Over the following steps the activity spreads toward the output column on the right. The lower bits settle first; the carry, which has to travel the whole way up the column, settles last.</figcaption>
     </figure>
-    <p>You can run this in Fig. 1 by choosing <b>ADD 4-BIT</b> or <b>ADD 8-BIT</b>. Both adders gave the correct sum on every random test we tried. The 8-bit adder reached a mean-squared error of about 0.12.</p>
+    <p>You can run this in Fig. 1 by choosing <b>ADD 4-BIT</b> or <b>ADD 8-BIT</b>. Both adders gave the correct sum on every random test we tried.</p>
   </section>
 
   <!-- 04 -->
@@ -104,7 +113,7 @@
     <div class="cards">
       <div class="card"><span class="k">8</span><span class="kt">Boolean functions</span><p>AND, OR, XOR, NAND, NOR, XNOR, majority-of-3, and a two-output half-adder — each learned to full bit-accuracy on a 48×48 grid.</p></div>
       <div class="card"><span class="k">8-bit</span><span class="kt">Addition</span><p>16 input bits, 9 output bits, and a carry chain of length eight, both operands.</p></div>
-      <div class="card"><span class="k">~24k</span><span class="kt">Weights in the rule</span><p>One two-layer network, used by every cell on every step.</p></div>
+      <div class="card"><span class="k">~8k</span><span class="kt">Weights in the rule</span><p>One two-layer network, used by every cell on every step.</p></div>
     </div>
 
     <h3>Some gates are harder than others</h3>
@@ -139,6 +148,13 @@
         <tr><td>6-bit sums</td><td class="num">100.0</td><td class="num">100.0</td><td class="num">99.8</td></tr>
       </tbody>
     </table>
+
+    <h3>An eight-operation ALU</h3>
+    <p>Pushed further, one rule can drive a small arithmetic–logic unit. On a 96×112 grid we encode two 8-bit operands and a control column — a 3-bit opcode, a carry-in, and a 3-bit condition code — and ask a single NCA to produce the 8-bit result, a carry-out, and a branch flag. Trained across all eight operations, the model gets the result byte right about 99.7% of the time; the two flag outputs are weaker, so we treat this as one promising run rather than a solved task (see below). The panels show its settled grid for one example of each operation — operands and control on the left, the answer read from the column on the right.</p>
+    <figure class="fig">
+      <img src="assets/alu_batch.png" alt="Eight panels, one per ALU operation (add, subtract, AND, OR, XOR, NOT, rotate-left, rotate-right), each showing the automaton's settled grid with the result read from the right-hand column." />
+      <figcaption><b>One 8-bit ALU, eight operations.</b> Each panel is the same trained automaton, given a different opcode. The noisy left region is its working state; the clean bars on the right are the output it settles on.</figcaption>
+    </figure>
   </section>
 
   <!-- 05 -->
@@ -151,9 +167,26 @@
     <p><strong>The model is stochastic.</strong> Because only some cells update each step, the grid keeps changing slightly, and a bit near the threshold can flip before it settles. Fig. 1 averages the output over the last steps, which helps. XOR and XNOR are the cases where you are most likely to see a wrong bit.</p>
   </section>
 
+  <!-- 06 -->
+  <section id="refs">
+    <div class="seclabel">06 — References</div>
+    <h2>References</h2>
+    <ol class="refs">
+      <li id="ref-1">Mordvintsev, A., Randazzo, E., Niklasson, E., &amp; Levin, M. (2020). <a href="https://distill.pub/2020/growing-ca/">Growing Neural Cellular Automata</a>. <em>Distill</em>. The perception + learned-update-rule + stochastic-update architecture this work builds on.</li>
+      <li id="ref-2">Randazzo, E., Mordvintsev, A., Niklasson, E., Levin, M., &amp; Greydanus, S. (2020). <a href="https://distill.pub/2020/selforg/mnist/">Self-classifying MNIST Digits</a>. <em>Distill</em>.</li>
+      <li id="ref-3">Niklasson, E., Mordvintsev, A., Randazzo, E., &amp; Levin, M. (2021). <a href="https://distill.pub/selforg/2021/textures/">Self-Organising Textures</a>. <em>Distill</em>.</li>
+      <li id="ref-4">Sudhakaran, S., Glanois, C., Najarro, E., et al. (2021). Growing 3D Artefacts and Functional Machines with Neural Cellular Automata. <em>Proc. ALIFE</em>.</li>
+      <li id="ref-5">Grattarola, D., Livi, L., &amp; Alippi, C. (2021). Learning Graph Cellular Automata. <em>NeurIPS</em>.</li>
+      <li id="ref-6">Miotti, P., Niklasson, E., Randazzo, E., &amp; Mordvintsev, A. (2025). <a href="https://google-research.github.io/self-organising-systems/difflogic-ca/">Differentiable Logic Cellular Automata</a>. <em>Proc. ALIFE</em>.</li>
+      <li id="ref-7">Béna, G., &amp; Faldor, M. (2025). A Path to Universal Neural Cellular Automata. <em>Proc. ALIFE</em>.</li>
+      <li id="ref-8">Wolpert, L. (1969). Positional Information and the Spatial Pattern of Cellular Differentiation. <em>J. Theoretical Biology</em>.</li>
+      <li id="ref-9">Turing, A. M. (1952). The Chemical Basis of Morphogenesis. <em>Phil. Trans. R. Soc. B</em>.</li>
+      <li id="ref-10">Gardner, M. (1970). The Fantastic Combinations of John Conway's New Solitaire Game "Life". <em>Scientific American</em>.</li>
+    </ol>
+  </section>
+
   <footer>
-    <p>Each model here runs as a WebGL2 fragment shader: 16 channels in four floating-point textures, one pass per step, with weights exported from the training checkpoints. Nothing on this page is pre-rendered.</p>
-    <p class="mono">Neural cellular automata for spatial computation · trained models from this repository.</p>
+    <p class="mono">Neural cellular automata for spatial computation.</p>
   </footer>
 
 </div>
