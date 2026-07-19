@@ -206,5 +206,18 @@ ol.refs li { font-size: 0.9rem; color: var(--ink-2); margin-bottom: 0.7rem; line
 ol.refs li::marker { color: var(--accent); font-family: var(--mono); font-size: 0.85rem; }
 ol.refs em { color: var(--ink-3); }
 
-footer { border-top: 1px solid var(--ink); margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.84rem; color: var(--ink-2); }
+footer { border-top: 1px solid var(--rule); margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.84rem; color: var(--ink-2); }
 footer .mono { color: var(--ink-3); font-size: 0.7rem; }
+
+/* always-visible link to the source */
+.gh-btn {
+  position: fixed; top: 1rem; right: 1rem; z-index: 100;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--paper); background: var(--accent); border: 1px solid var(--ink);
+  padding: 0.45rem 0.7rem; text-decoration: none;
+  box-shadow: 2px 2px 0 rgba(34,31,25,0.25);
+}
+.gh-btn:hover { background: var(--ink); }
+.gh-btn svg { width: 15px; height: 15px; display: block; }
+@media (max-width: 560px) { .gh-btn span { display: none; } .gh-btn { padding: 0.45rem; } }
