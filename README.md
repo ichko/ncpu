@@ -1,5 +1,7 @@
 # NCPU
 
+**NCPU** explores whether a Neural Cellular Automaton — a single small update rule applied identically to every cell of a grid, seeing only its neighbours — can learn to perform exact digital computation. Inputs and outputs are drawn as circles on a 2D grid, and the rule is trained end-to-end (only on pixel targets) to move information across space and produce the right answer. It learns all standard 2- and 3-input Boolean gates, multi-bit binary addition (with visible ripple-carry propagation), length-generalises to wider operands, and — less reliably — a small 8-operation ALU.
+
 ## Research plan:
 
 PIOTR
