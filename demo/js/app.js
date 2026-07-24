@@ -110,12 +110,8 @@ async function selectTask(key) {
     els.status.textContent = '';
   } catch (e) { els.status.textContent = 'needs WebGL2 + float buffers · ' + e.message; throw e; }
 
-  if (TASKS[key].group === 'adder') {
-    const b = TASKS[key].bits;
-    inputBits = intBits((1 << b) - 1, b).concat(intBits(1, b)); // e.g. 15 + 1
-  } else {
-    inputBits = new Array(nInputs(key)).fill(1);
-  }
+  // random inputs each time a task loads, so every refresh shows a fresh example
+  inputBits = Array.from({ length: nInputs(key) }, () => Math.random() < 0.5 ? 0 : 1);
   // build the DOM and wires ONCE per task; reseed() reuses them thereafter
   buildTabs(); buildInputUI(); buildOutputUI(); drawOverlay(); drawConnectors();
   reseed();
@@ -500,7 +496,7 @@ els.debug.onchange = () => {
   els.debug.checked = debug;
   if (window.ResizeObserver) new ResizeObserver(() => layoutConnectors()).observe(els.demo);
   window.addEventListener('resize', layoutConnectors);
-  const initTask = TASKS[location.hash.slice(1)] ? location.hash.slice(1) : 'adder4';
+  const initTask = TASKS[location.hash.slice(1)] ? location.hash.slice(1) : 'adder8';
   try { await selectTask(initTask); raf = requestAnimationFrame(frame); }
   catch (e) { console.error(e); }
 })();
