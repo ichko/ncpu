@@ -26,7 +26,7 @@ const els = {
   tabs: $('taskTabs'), inputs: $('inputBits'), outputs: $('outputReadout'),
   expr: $('exprLine'), liveNum: $('liveNum'),
   bar: $('pbar'), pstep: $('pstep'), phorizon: $('phorizon'),
-  play: $('playBtn'), again: $('againBtn'), rand: $('randBtn'),
+  play: $('playBtn'), again: $('againBtn'), rand: $('randBtn'), carry: $('carryBtn'),
   fps: $('fpsSlider'), fpsVal: $('fpsVal'),
   debug: $('debugToggle'), status: $('simStatus'),
 };
@@ -95,6 +95,7 @@ async function selectTask(key) {
   geo = geometry(cfg);
   masks = outputMasks(cfg, geo);
   horizon = TASKS[key].horizon;
+  els.carry.style.display = TASKS[key].group === 'adder' ? '' : 'none';  // adders only
 
   const s = Math.min(BOX_W / cfg.W, BOX_H / cfg.H);
   const cw = Math.round(cfg.W * s), ch = Math.round(cfg.H * s);
@@ -482,6 +483,14 @@ els.again.onclick = () => {
 };
 els.rand.onclick = () => {
   inputBits = inputBits.map(() => Math.random() < 0.5 ? 0 : 1);
+  buildInputUI(); updateExpr(); layoutConnectors(); reseed();
+};
+// longest carry chain: all-ones + 1 (e.g. 255 + 1, or 15 + 1 for 4-bit)
+els.carry.onclick = () => {
+  const t = TASKS[taskKey];
+  if (t.group !== 'adder') return;
+  const b = t.bits;
+  inputBits = intBits((1 << b) - 1, b).concat(intBits(1, b));
   buildInputUI(); updateExpr(); layoutConnectors(); reseed();
 };
 els.fps.oninput = () => { fps = +els.fps.value; els.fpsVal.textContent = fps; };
