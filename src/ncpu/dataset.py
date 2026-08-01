@@ -22,6 +22,23 @@ def sample_8bit_adder(*args):
     return torch.cat([a, b]), out
 
 
+def sample_8bit_subleq(*args):
+    """subleq ALU with the SAME I/O shape as the 8-bit adder (16 in -> 9 out).
+
+    input  = [A(8), B(8)]  (MSB-first, A in column 0, B in column 1)
+    output = [R(8), branch] where R = (B - A) mod 256 and
+             branch = 1 iff signed(R) <= 0  (i.e. R == 0 or R's sign bit set)
+    """
+    a = torch.randint(0, 2, size=(8,))
+    b = torch.randint(0, 2, size=(8,))
+    a_int = int("".join(map(str, a.tolist())), 2)
+    b_int = int("".join(map(str, b.tolist())), 2)
+    r_int = (b_int - a_int) & 0xFF
+    branch = 1 if (r_int == 0 or r_int >= 128) else 0
+    out = torch.tensor(list(map(int, f"{r_int:08b}")) + [branch])
+    return torch.cat([a, b]), out
+
+
 def sample_4bit_multiplier(*args):
     a = torch.randint(0, 2, size=(4,))
     b = torch.randint(0, 2, size=(4,))

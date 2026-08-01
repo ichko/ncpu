@@ -1,4 +1,4 @@
-# NCPU — computation in a visual cellular-automaton substrate
+# NCPU — spatial computation in neural cellular automata
 
 **Project page: [ncpu.pages.dev](https://ncpu.pages.dev/)**
 

@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>subleq NCA — datapath</title>
+<style>
+  :root{ --bg:#0f1417; --panel:#161d21; --ink:#e7edf0; --dim:#8aa0a8;
+         --a:#4aa3ff; --b:#e08a3c; --r:#39c26a; --br:#e0524a; --hi:#f2e64d; --bad:#e0524a;
+         --on:#f2e64d; --off:#2d1b4e; --mono:ui-monospace,Menlo,Consolas,monospace;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,sans-serif}
+  header{padding:12px 20px;border-bottom:1px solid #24303650}
+  header h1{margin:0;font-size:16px;font-weight:650}
+  header p{margin:3px 0 0;color:var(--dim);font-size:12.5px}
+  .wrap{display:grid;grid-template-columns:1fr 290px;grid-template-areas:"dp side" "mem mem";gap:14px;padding:14px 18px;align-items:start}
+  section{background:var(--panel);border:1px solid #24303650;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+  h2{margin:0 0 7px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  pre{margin:0;font-family:var(--mono);font-size:12px;white-space:pre}
+  .srcline{padding:0 6px;border-radius:4px}
+  .srcline.on{background:#f2e64d22;box-shadow:inset 2px 0 0 var(--hi)}
+  .asm{font-family:var(--mono);font-size:11.5px;max-height:200px;overflow:auto}
+  .ins{display:flex;gap:8px;padding:2px 6px;border-radius:4px;color:var(--dim)}
+  .ins .op{color:var(--ink)} .ins .by{color:#5f7883;margin-left:auto}
+  .ins.on{background:#4aa3ff22;color:var(--ink);box-shadow:inset 2px 0 0 var(--a)}
+
+  .memlab{font-size:10px;color:var(--dim);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.06em}
+  .memgrid{display:flex;flex-wrap:wrap;gap:6px}
+  .itriple{display:flex;gap:2px;align-items:center;padding:3px 4px;border:1px solid #24303a;border-radius:6px}
+  .itriple .ilabel{font-size:9px;color:#5f7883;font-family:var(--mono);min-width:18px}
+  .itriple.fetch{border-color:var(--hi);box-shadow:0 0 9px #f2e64d55}
+  .cell{width:26px;height:34px;border-radius:4px;background:#0e1417;border:1px solid #26333a;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px}
+  .cell.code{opacity:.55} .cell.aop{border-color:var(--a)} .cell.bop{border-color:var(--b)}
+  .cell.wrote{border-color:var(--r);box-shadow:0 0 0 1px var(--r)}
+  .cell.data{background:#10201a;border-color:#2a4a38;opacity:1}
+  .cell .clab{font-size:8px;color:var(--dim);margin-top:1px}
+
+  /* datapath */
+  #stage{position:relative;min-height:360px;display:grid;grid-template-columns:150px 1fr 130px;align-items:center;padding:8px 4px}
+  #wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+  .regcol{display:flex;flex-direction:column;gap:7px;z-index:2}
+  .reg{display:flex;align-items:center;justify-content:space-between;gap:6px;background:#0e1417;border:1px solid #2a373e;border-radius:8px;padding:5px 9px;font-family:var(--mono);position:relative}
+  .reg .rn{color:var(--dim);font-size:12px} .reg .rv{font-size:15px;min-width:26px;text-align:right}
+  .reg.aop{border-color:var(--a);box-shadow:0 0 0 1px var(--a)}
+  .reg.bop{border-color:var(--b);box-shadow:0 0 0 1px var(--b)}
+  .reg.wrote{border-color:var(--r);box-shadow:0 0 14px var(--r)}
+  .reg.result{border-color:var(--hi);box-shadow:0 0 16px var(--hi);background:#2a2410}
+  .badge{position:absolute;left:-6px;top:-9px;font-size:9px;padding:1px 6px;border-radius:8px;font-family:system-ui}
+  .badge.in{background:var(--a);color:#04121f} .badge.out{background:var(--hi);color:#221d02}
+  .alu{justify-self:center;display:flex;align-items:center;gap:12px;z-index:2}
+  .bitside{display:flex;flex-direction:column;gap:16px}
+  .bitrow{display:flex;align-items:center;gap:3px}
+  .bitrow .bl{font-family:var(--mono);font-size:11px;width:16px;text-align:right}
+  .bitrow.A .bl{color:var(--a)} .bitrow.B .bl{color:var(--b)} .bitrow.R .bl{color:var(--r)} .bitrow.Br .bl{color:var(--br)}
+  .bit{width:12px;height:12px;border-radius:50%;border:1px solid #3a4750}
+  .bit.on{background:var(--on);border-color:#b9ab1e} .bit.off{background:var(--off)} .bit.dim{background:#1a2226;opacity:.4}
+  .ringlab{font-size:9px;color:var(--dim);margin-left:4px}
+  #core{width:190px;height:190px;border-radius:12px;background:#440154;display:block;image-rendering:pixelated;border:1px solid #3aa}
+  .corewrap{text-align:center} .corewrap .lbl{font-size:10px;color:var(--dim);margin-top:5px}
+  .rightcol{z-index:2}
+  #pcbox{background:#0e1417;border:1px solid #33434b;border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px}
+  #pcbox b{color:var(--hi)}
+  .flow{stroke-dasharray:7 5;animation:flow .7s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-24}}
+  #info{font-family:var(--mono);font-size:12.5px;color:var(--dim);margin-top:10px;text-align:center;min-height:22px}
+  .ok{color:var(--r)} .no{color:var(--bad)}
+  #banner{text-align:center;font-size:14px;margin-top:6px;min-height:20px}
+  #bar{display:flex;gap:10px;align-items:center;padding:10px 20px;border-top:1px solid #24303650}
+  button{background:#1d262b;color:var(--ink);border:1px solid #2c3a42;border-radius:7px;padding:7px 14px;cursor:pointer}
+  button:hover{background:#26323a}
+  #prog{color:var(--dim);font-family:var(--mono);font-size:12px;margin-left:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>subleq NCA — datapath</h1>
+  <p id="sub">Registers feed their bytes as <b style="color:#4aa3ff">A</b> / <b style="color:#e08a3c">B</b> bits into the NCA (outer / inner ring); it computes <b style="color:#39c26a">R = B−A</b> and the <b style="color:#e0524a">≤0 branch</b>, which flow back to memory and the PC. Input <code>n</code> · answer <code>a</code>.</p>
+</header>
+
+<div class="wrap">
+  <div style="grid-area:side">
+    <section><h2>C-like source</h2><pre id="src"></pre></section>
+    <section><h2>compiled subleq</h2><div id="asm" class="asm"></div></section>
+  </div>
+
+  <section style="grid-area:mem"><h2>memory (bytes) — program + data</h2><div id="membar"></div></section>
+
+  <section style="grid-area:dp">
+    <h2>datapath — registers → bits → NCA → bits → memory</h2>
+    <div id="stage">
+      <svg id="wires"><defs>
+        <marker id="ah" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="context-stroke"/></marker></defs></svg>
+      <div class="regcol" id="regs"></div>
+      <div class="alu">
+        <div class="bitside" id="inbits">
+          <div class="bitrow A" id="bitsA"><span class="bl">A</span></div>
+          <div class="bitrow B" id="bitsB"><span class="bl">B</span></div>
+        </div>
+        <div class="corewrap">
+          <canvas id="core" width="72" height="72"></canvas>
+          <div class="lbl">NCA — channel 0 (real rollout)</div>
+        </div>
+        <div class="bitside" id="outbits">
+          <div class="bitrow R" id="bitsR"><span class="bl">R</span></div>
+          <div class="bitrow Br" id="bitsBr"><span class="bl">br</span></div>
+        </div>
+      </div>
+      <div class="rightcol"><div id="pcbox">PC → instr <b id="pcv">#0</b></div></div>
+    </div>
+    <div id="info"></div>
+    <div id="banner"></div>
+  </section>
+</div>
+
+<div id="bar">
+  <button id="play">▶ Play</button>
+  <button id="step">Step ▸</button>
+  <button id="restart">⟲ Restart</button>
+  <label style="color:#8aa0a8;font-size:12px">speed <input id="speed" type="range" min="1" max="10" value="4"></label>
+  <span id="prog"></span>
+  <span id="dbg" style="color:#5f7883;font-family:var(--mono);font-size:11px;margin-left:12px"></span>
+</div>
+
+<script>
+let D=null, cur=-1, mode="idle", running=false, phase="idle";
+let img=null, imgFor=-1, frame=0, tPhase=0, tFrame=0, imgs=[];
+const $=id=>document.getElementById(id);
+window.onerror=(m,src,ln)=>{ const d=document.getElementById("dbg"); if(d) d.textContent="ERR: "+m+" @L"+ln; };
+const ctx=$("core").getContext("2d");
+const fps =()=> 12*Math.pow(50, ((+$("speed").value)-1)/9);    // 12 .. ~600 fps
+const hold=()=> Math.max(0, 500*(10-(+$("speed").value))/9);   // 0.5s .. 0s
+const bitsMSB=(v,n)=>{ const o=[]; for(let i=0;i<n;i++) o.push((v>>(n-1-i))&1); return o; };
+
+function fillBits(rowId, n){ const row=$(rowId); [...row.querySelectorAll(".bit,.ringlab")].forEach(e=>e.remove());
+  for(let i=0;i<n;i++){ const c=document.createElement("div"); c.className="bit dim"; row.appendChild(c); } }
+function setBits(rowId, val, n){ const cs=$(rowId).querySelectorAll(".bit"), bits=bitsMSB(val,n);
+  cs.forEach((c,i)=>{ c.className="bit "+(bits[i]?"on":"off"); }); }
+function dimBits(rowId){ $(rowId).querySelectorAll(".bit").forEach(c=>c.className="bit dim"); }
+function liveOut(k){                                   // decoded NCA output at frame k, live
+  const p=D.trace[cur].fb[Math.min(k, D.trace[cur].fb.length-1)];
+  const R=$("bitsR").querySelectorAll(".bit"); for(let i=0;i<8;i++) R[i].className="bit "+(((p>>i)&1)?"on":"off");
+  $("bitsBr").querySelectorAll(".bit")[0].className="bit "+(((p>>8)&1)?"on":"off");
+}
+
+function buildStatic(){
+  $("src").innerHTML = D.csrc.map(l=>`<span class="srcline" data-src="${l.trim()}">${l}</span>`).join("\n");
+  $("asm").innerHTML = D.instrs.map(i=>
+    `<div class="ins" data-idx="${i.idx}"><span class="op">subleq ${i.a} ${i.b} ${i.c}</span><span class="by">${i.bytes.join(" ")}</span></div>`).join("");
+  $("regs").innerHTML = D.data.map(d=>{
+    const badge = d.name===D.input_cell? '<span class="badge in">input n</span>'
+               : d.name===D.result_cell? '<span class="badge out">answer</span>':'';
+    return `<div class="reg" data-name="${d.name}" data-addr="${d.addr}">${badge}<span class="rn">${d.name}</span><span class="rv" id="rv-${d.name}">${d.init}</span></div>`;
+  }).join("");
+  fillBits("bitsA",8); fillBits("bitsB",8); fillBits("bitsR",8); fillBits("bitsBr",1);
+  $("bitsA").insertAdjacentHTML("beforeend",'<span class="ringlab">→ outer ring</span>');
+  $("bitsB").insertAdjacentHTML("beforeend",'<span class="ringlab">→ inner ring</span>');
+  $("bitsBr").insertAdjacentHTML("beforeend",'<span class="ringlab">→ hub</span>');
+  // memory: program grouped by instruction + data cells
+  let mh='<div class="memlab">program — 18 subleq instructions × 3 address bytes (a b c)</div><div class="memgrid">';
+  for(let i=0;i<D.instrs.length;i++){ mh+=`<div class="itriple" data-idx="${i}"><span class="ilabel">#${i}</span>`;
+    for(let j=0;j<3;j++){ const ad=i*3+j; mh+=`<div class="cell code" data-addr="${ad}"><span id="mc${ad}">${D.init_mem[ad]}</span></div>`; } mh+='</div>'; }
+  mh+='</div><div class="memlab">data cells — the registers</div><div class="memgrid">';
+  D.data.forEach(d=>{ mh+=`<div class="cell data" data-addr="${d.addr}"><span id="mc${d.addr}">${d.init}</span><span class="clab">${d.name}</span></div>`; });
+  $("membar").innerHTML = mh+'</div>';
+}
+
+function anchor(el, side){ const s=$("stage").getBoundingClientRect(), r=el.getBoundingClientRect();
+  const y=r.top+r.height/2-s.top;
+  const x=side==='r'? r.right-s.left : side==='l'? r.left-s.left : r.left+r.width/2-s.left;
+  return [x,y]; }
+function addWire(p0,p1,color,flow){ const mx=(p0[0]+p1[0])/2;
+  const el=document.createElementNS("http://www.w3.org/2000/svg","path");
+  el.setAttribute("d",`M${p0[0].toFixed(1)},${p0[1].toFixed(1)} C${mx.toFixed(1)},${p0[1].toFixed(1)} ${mx.toFixed(1)},${p1[1].toFixed(1)} ${p1[0].toFixed(1)},${p1[1].toFixed(1)}`);
+  el.setAttribute("stroke",color); el.setAttribute("fill","none"); el.setAttribute("stroke-width","2.5"); el.setAttribute("marker-end","url(#ah)");
+  if(flow) el.setAttribute("class","flow"); $("wires").appendChild(el); }
+function clearWires(){ [...$("wires").querySelectorAll("path")].forEach(p=>p.remove()); }
+function reg(n){ return document.querySelector(`.reg[data-name="${n}"]`); }
+function clearHi(){
+  document.querySelectorAll(".srcline.on,.ins.on,.itriple.fetch").forEach(e=>e.classList.remove("on","fetch"));
+  document.querySelectorAll(".reg,.cell").forEach(e=>e.classList.remove("aop","bop","wrote","result"));
+}
+function paintMem(mem){ for(let i=0;i<mem.length;i++){ const e=$("mc"+i); if(e) e.textContent=mem[i]; }
+  D.data.forEach(d=>{ const e=$("rv-"+d.name); if(e) e.textContent=mem[d.addr]; }); }
+function drawFrame(k){ if(!img) return; ctx.imageSmoothingEnabled=false; ctx.drawImage(img, k*D.frame_w,0, D.frame_w,D.frame_h, 0,0, 72,72); }
+
+function highlightCommon(t){
+  clearHi(); clearWires();
+  document.querySelectorAll(".srcline").forEach(e=>{ if(e.dataset.src===t.src.trim()) e.classList.add("on"); });
+  const ins=document.querySelector(`.ins[data-idx="${t.idx}"]`); if(ins){ins.classList.add("on"); ins.scrollIntoView({block:"nearest"});}
+  document.querySelector(`.itriple[data-idx="${t.idx}"]`)?.classList.add("fetch");
+  $("pcv").textContent="#"+t.idx;
+}
+function renderIn(i){
+  const t=D.trace[i]; highlightCommon(t);
+  paintMem(i>0?D.trace[i-1].mem:D.init_mem);
+  setBits("bitsA",t.opA,8); setBits("bitsB",t.opB,8); dimBits("bitsR"); dimBits("bitsBr");
+  reg(t.a_name)?.classList.add("aop"); reg(t.b_name)?.classList.add("bop");
+  document.querySelector(`.cell[data-addr="${t.a}"]`)?.classList.add("aop");
+  document.querySelector(`.cell[data-addr="${t.b}"]`)?.classList.add("bop");
+  requestAnimationFrame(()=>{ clearWires();
+    const ra=reg(t.a_name), rb=reg(t.b_name);
+    if(ra) addWire(anchor(ra,'r'), anchor($("bitsA"),'l'), "#4aa3ff", true);
+    if(rb) addWire(anchor(rb,'r'), anchor($("bitsB"),'l'), "#e08a3c", true);
+  });
+  $("info").innerHTML = `instr <b>#${t.idx}</b> &nbsp; <b>subleq ${t.a_name} ${t.b_name}</b> &nbsp; computing mem[${t.b_name}] = ${t.opB} − ${t.opA} …`;
+  $("prog").textContent=`${i+1} / ${D.n_steps}`;
+}
+function renderOut(i){
+  const t=D.trace[i]; highlightCommon(t);
+  paintMem(t.mem);
+  setBits("bitsA",t.opA,8); setBits("bitsB",t.opB,8); setBits("bitsR",t.result,8); setBits("bitsBr",t.branch,1);
+  const ra=reg(t.a_name), rb=reg(t.b_name);
+  ra?.classList.add("aop"); rb?.classList.add("wrote");
+  document.querySelector(`.cell[data-addr="${t.a}"]`)?.classList.add("aop");
+  document.querySelector(`.cell[data-addr="${t.b}"]`)?.classList.add("wrote");
+  requestAnimationFrame(()=>{ clearWires();
+    if(ra) addWire(anchor(ra,'r'), anchor($("bitsA"),'l'), "#4aa3ff", false);
+    if(rb) addWire(anchor(rb,'r'), anchor($("bitsB"),'l'), "#e08a3c", false);
+    if(rb) addWire(anchor($("bitsR"),'r'), anchor(rb,'r'), "#39c26a", true);
+    addWire(anchor($("bitsBr"),'r'), anchor($("pcbox"),'l'), t.branch?"#e0524a":"#3a4a52", t.branch);
+  });
+  const mark=t.ok?"✓":"✗";
+  $("info").innerHTML = `<span class="${t.ok?'ok':'no'}">NCA: R=${t.result} branch=${t.branch} ${mark}</span> &nbsp;·&nbsp; expected R=${t.exp_result} branch=${t.exp_branch} &nbsp;·&nbsp; branch ${t.branch?'taken ↷':'not taken →'}`;
+  if(i===D.n_steps-1){ reg(D.result_cell)?.classList.add("result");
+    const good=D.actual_answer===D.expected;
+    $("banner").innerHTML = `<span class="${good?'ok':'no'}">answer ${D.result_cell} = ${D.actual_answer} &nbsp;·&nbsp; expected fib(${D.N}) = ${D.expected} &nbsp; ${good?'✓ correct':'✗ wrong'}</span>`;
+  }
+}
+
+function preload(){ imgs = D.trace.map(t=>{ const im=new Image(); im.src=t.strip; return im; }); }
+function loadStrip(i, cb){ const im=imgs[i]||(imgs[i]=new Image());
+  if(im.complete && im.naturalWidth){ img=im; imgFor=i; cb(); return; }
+  im.onload=()=>{ img=im; imgFor=i; cb(); };
+  im.onerror=()=>{ $("dbg").textContent="IMG ERROR: "+D.trace[i].strip; };
+  if(!im.src) im.src=D.trace[i].strip;
+  if(im.complete && im.naturalWidth){ img=im; imgFor=i; cb(); }   // race re-check
+}
+function beginStep(i){ cur=i; renderIn(i); $("banner").textContent=""; phase="loading";
+  loadStrip(i, ()=>{ frame=0; drawFrame(0); phase="pre"; tPhase=performance.now(); }); }
+function endStep(){ if(cur>=D.n_steps-1){ running=false; phase="idle"; setBtn(); return; }
+  if(mode==="play"){ beginStep(cur+1); } else { running=false; phase="idle"; setBtn(); } }
+function loop(ts){ requestAnimationFrame(loop);
+  $("dbg").textContent = `${mode}/${phase} f${frame}/${D?D.nframes:'?'} cur${cur}`;
+  if(!running||phase==="idle"||phase==="loading") return;
+  if(phase==="pre"){ if(ts-tPhase>=hold()){ phase="run"; tFrame=ts; frame=0; drawFrame(0); } }
+  else if(phase==="run"){ const per=1000/fps();
+    if(ts-tFrame>500) tFrame=ts;
+    while(ts-tFrame>=per && frame<D.nframes-1){ frame++; tFrame+=per; }
+    drawFrame(frame); liveOut(frame);
+    if(frame>=D.nframes-1){ phase="post"; tPhase=ts; renderOut(cur); } }
+  else if(phase==="post"){ if(ts-tPhase>=hold()) endStep(); } }
+function setBtn(){ $("play").textContent = (running&&mode==="play") ? "⏸ Pause" : "▶ Play"; }
+
+$("play").onclick=()=>{ if(running&&mode==="play"){ running=false; setBtn(); return; }
+  mode="play"; if(phase==="idle"){ if(cur>=D.n_steps-1) cur=-1; running=true; beginStep(cur+1); } else running=true; setBtn(); };
+$("step").onclick=()=>{ if(running) return; mode="step"; if(cur>=D.n_steps-1) cur=-1; running=true; beginStep(cur+1); setBtn(); };
+$("restart").onclick=()=>{ running=false; mode="idle"; phase="idle"; cur=-1; imgFor=-1; img=null;
+  clearHi(); clearWires(); paintMem(D.init_mem); ctx.clearRect(0,0,72,72);
+  dimBits("bitsA"); dimBits("bitsB"); dimBits("bitsR"); dimBits("bitsBr");
+  $("info").innerHTML=""; $("banner").textContent=""; $("pcv").textContent="#0"; $("prog").textContent=`0 / ${D.n_steps}`; setBtn(); };
+window.addEventListener("resize", ()=>{ if(cur>=0) (phase==="post"?renderOut:renderIn)(cur); });
+
+fetch("data/subleq_fib.json").then(r=>r.json()).then(d=>{
+  D=d; buildStatic(); preload(); requestAnimationFrame(loop);
+  $("prog").textContent=`0 / ${D.n_steps}`;
+  $("sub").innerHTML += ` &nbsp;·&nbsp; computing <b>fib(${D.input_val}) = ${D.expected}</b> in ${D.n_steps} instructions.`;
+});
+</script>
+</body>
+</html>
