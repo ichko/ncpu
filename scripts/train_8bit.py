@@ -32,7 +32,7 @@ from argparse import ArgumentParser, Namespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from ncpu.dataset import NCPUDataset, sample_8bit_adder
+from ncpu.dataset import NCPUDataset, sample_8bit_adder, sample_8bit_subleq
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
@@ -110,13 +110,19 @@ def save_media(step, run_dir, snapshots_dir, rollouts_dir, inp, out, nca_out, ro
 #   input col 0 at x=17, col 1 at x=27, output at x=111
 #   ~76px edge-to-edge gap between input and output
 
-DEVICE = "cuda"
-TOTAL_STEPS = 200_000
 PLOT_EVERY = 500
 MEDIA_EVERY = 5000
 _parser = ArgumentParser()
 _parser.add_argument("--resume", type=str, default=None, help="Run name to resume, or 'last'")
+_parser.add_argument("--task", choices=["adder", "subleq"], default="adder",
+                     help="target function: A+B (adder) or B-A + branch (subleq) — same layout/hparams")
+_parser.add_argument("--steps", type=int, default=100_000)
+_parser.add_argument("--device", default="cuda")
 _args = _parser.parse_args()
+
+DEVICE = _args.device
+TOTAL_STEPS = _args.steps
+SAMPLER = sample_8bit_subleq if _args.task == "subleq" else sample_8bit_adder
 
 if _args.resume == "last":
     _runs = sorted([d.name for d in Path("runs").iterdir() if (d / "checkpoints" / "trainer.pkl").exists()])
@@ -131,7 +137,7 @@ ds_config = Namespace(
     H=112,
     r=4,
     spacing=(2, 21),
-    sampler=sample_8bit_adder,
+    sampler=SAMPLER,
     balanced=False,
 )
 
@@ -143,7 +149,7 @@ nca_config = Namespace(
     zero_initialization=False,
     kernel_size=7,
     num_perception_kernels=3,
-    read_only_dims=[],
+    read_only_dims=[1],   # matches the best-run adder config.json
     padding_type="zeros",
 )
 
@@ -163,7 +169,7 @@ if RESUME_RUN is not None:
     if not run_dir.exists():
         raise FileNotFoundError(f"Run directory not found: {run_dir}")
 else:
-    run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{_args.task.upper()}8_cols2"
     run_dir = Path("runs") / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.json", "w") as f:

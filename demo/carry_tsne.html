@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Carry-wave analysis — hidden channels</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="description" content="A baked long-carry (255+1) rollout of the 8-bit adder NCA: the movie with a row of key hidden-channel maps, a t-SNE map of the hidden state, and every channel drawn as a path in one shared t-SNE space — all scrubbable in sync." />
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  .cw-stage { display: flex; gap: 1.1rem; flex-wrap: wrap; align-items: flex-start; padding: 0.9rem; }
+  .cw-col { display: flex; flex-direction: column; gap: 0.55rem; flex: 0 0 auto; }
+  .cw-plate { position: relative; line-height: 0; border: 1px solid var(--ink); background: #3b0f4f; width: max-content; }
+  canvas.cw-movie { display: block; background: #3b0f4f; image-rendering: pixelated; image-rendering: crisp-edges; }
+  svg.cw-scatter { display: block; background: var(--panel); background-image: radial-gradient(circle at 50% 42%, #fbf7ec 0%, #efe6cf 100%); }
+  .cw-ctrl { display: flex; align-items: center; gap: 0.55rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); height: 1.6rem; }
+  .cw-ctrl input[type=range] { accent-color: var(--accent); }
+  .cw-scrub { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent); }
+  .cw-status { font-family: var(--mono); font-size: 0.7rem; line-height: 1.5; color: var(--ink-3); width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cw-controls { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--paper-2); padding: 0.55rem 0.9rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); }
+  .cw-controls input[type=range] { accent-color: var(--accent); }
+  .cw-lbl { color: var(--ink-3); }
+  .cw-vsep { width: 1px; height: 1.3em; background: var(--rule); }
+  .cw-status b { color: var(--accent); font-weight: 600; }
+  .cw-legend { font-family: var(--mono); font-size: 0.66rem; color: var(--ink-3); line-height: 1.6; width: 400px; }
+  .cw-swatch { display: inline-block; width: 0.7em; height: 0.7em; border: 1px solid var(--ink-3); vertical-align: -1px; margin-right: 0.25em; }
+  .cw-sechd { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); border-top: 1px solid var(--rule); padding: 0.7rem 0.9rem 0.2rem; }
+  .cw-grp { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .cw-sel { font-family: var(--mono); font-size: 0.7rem; padding: 0.15rem 0.35rem; border: 1px solid var(--ink-3); background: var(--paper); color: var(--ink); border-radius: 2px; cursor: pointer; }
+  .cw-play { width: 56px; text-align: center; }
+  .cw-range { width: 150px; }
+  .cw-range-sm { width: 72px; }
+  .cw-viewtabs { display: inline-flex; gap: 0.7rem; font-family: var(--mono); font-size: 0.68rem; color: var(--ink-2); }
+  .cw-viewtabs label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+  .cw-viewtabs input { accent-color: var(--accent); }
+  .cw-keymaps { display: flex; gap: 4px; align-items: flex-start; padding: 0.3rem 0.9rem 0.7rem; }
+  .cw-km { flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+  .cw-km canvas { display: block; width: 100%; height: auto; border: 1px solid var(--ink); background: #faf6ea; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .cw-km figcaption { font-family: var(--mono); font-size: 0.6rem; text-align: center; color: var(--ink-3); }
+  .cw-overlaywrap { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; padding: 0.3rem 0.9rem 0.9rem; }
+  .cw-collegend { display: grid; grid-template-columns: repeat(2, max-content); gap: 0.18rem 1rem; font-family: var(--mono); font-size: 0.64rem; color: var(--ink-2); }
+  .cw-cl { display: flex; align-items: center; gap: 0.35rem; }
+  .cw-cl i { width: 0.9em; height: 0.9em; border: 1px solid var(--ink-3); display: inline-block; }
+  .cw-cl.frozen { color: var(--ink-3); opacity: 0.6; }
+</style>
+</head>
+<body>
+<a class="gh-btn" href="https://github.com/ichko/ncpu" target="_blank" rel="noopener" aria-label="View source on GitHub">
+  <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+  <span>GitHub</span>
+</a>
+<div class="wrap">
+
+  <header class="masthead">
+    <h1 class="title">Carry-wave <em>analysis</em></h1>
+    <p class="subtitle">We ran several additions on the 8-bit adder NCA and baked each rollout frame-by-frame. Pick one from the menu at the top: a long carry chain, an all-ones sum, a no-carry case, and more. Scrub the movie, and every view moves with it. Under the movie, a row of the most active <em>hidden</em> channels appears as spatial maps. Watch the carry "spine" move up the column. On the right, a t-SNE map shows the hidden-channel state of every active cell, and the current frame's cells light up. Below, each channel appears as a path in one shared t-SNE space. <a href="index.html">← back to the live demo</a></p>
+  </header>
+
+  <section>
+    <div class="panelbox">
+      <div class="hd">
+        <span>Fig. 2 · Carry wave — hidden-channel visualization</span>
+        <span class="rt" id="cwHead"></span>
+      </div>
+      <div class="bd">
+        <div class="cw-controls">
+          <span class="cw-grp"><span class="cw-lbl">example</span>
+            <select id="cwExample" class="cw-sel"></select></span>
+          <span class="cw-vsep"></span>
+          <span class="cw-viewtabs">
+            <label title="t-SNE of every active cell's hidden-channel state (ch2–15): each dot is one cell at one frame, coloured by its output-bit value. The current frame's cells light up as you scrub."><input type="radio" name="cwView" value="cells" checked /> cells</label>
+            <label title="Each of the 16 channels as a path in one shared t-SNE space — one point per frame. A coloured dot per channel marks the current frame, so you watch all channels move together."><input type="radio" name="cwView" value="paths" /> channel paths</label>
+          </span>
+        </div>
+
+        <div class="cw-stage">
+
+          <div class="cw-col">
+            <div class="cw-plate"><canvas id="cwMovie" class="cw-movie"></canvas></div>
+            <div class="cw-ctrl">
+              <button class="ctl cw-play" id="cwPlay">Pause</button>
+              <input type="range" id="cwTime" min="0" max="0" value="0" class="cw-scrub" />
+            </div>
+            <div class="cw-status" id="cwStatus"></div>
+            <div class="cw-ctrl">
+              <span class="cw-lbl">speed</span>
+              <input type="range" id="cwSpeed" min="1" max="60" value="18" class="cw-range-sm" />
+            </div>
+          </div>
+
+          <div class="cw-col">
+            <div class="cw-plate">
+              <svg id="cwScatter" class="cw-scatter"></svg>
+              <svg id="cwOverlay" class="cw-scatter" style="display:none"></svg>
+            </div>
+            <div class="cw-legend" id="cwScatterLegend">
+              <div>each dot = one active cell's hidden-channel state (ch2–15) at one frame · perplexity <span id="cwPerp"></span></div>
+              <div>colour = channel-0 value: <span class="cw-swatch" style="background:#ab3520"></span>&gt; 0 (bit 1) &nbsp; <span class="cw-swatch" style="background:#3b0f4f"></span>&lt; 0 (bit 0)</div>
+              <div><span class="cw-swatch" style="background:#f5d90a;border-color:#221f19"></span>outlined = cells in the current frame (light up as you scrub)</div>
+            </div>
+            <div class="cw-collegend" id="cwColorLegend" style="display:none"></div>
+          </div>
+
+        </div>
+
+        <div class="cw-sechd">key hidden channels — spatial maps, live (most dynamic channels; red +, blue −)</div>
+        <div class="cw-keymaps" id="cwKeymaps"></div>
+      </div>
+      <div class="caption" id="cwCaption">Loading baked rollout…</div>
+    </div>
+  </section>
+
+</div>
+<script type="module" src="js/carry_tsne.js"></script>
+</body>
+</html>
