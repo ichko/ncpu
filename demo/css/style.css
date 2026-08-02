@@ -39,6 +39,10 @@ body {
 
 /* ---- masthead ----------------------------------------------------------- */
 header.masthead { margin-bottom: 2.4rem; }
+/* work-in-progress pin: flat, square, tiny */
+.wip { display: inline-block; font-family: var(--mono); font-size: 0.56rem; font-weight: 700;
+       letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2);
+       background: var(--paper-2); border: 1px solid var(--rule); padding: 0.2em 0.4em; }
 h1.title {
   font-family: var(--sans); font-weight: 700;
   font-size: clamp(1.7rem, 4.4vw, 2.4rem); line-height: 1.08;

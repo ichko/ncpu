@@ -6,8 +6,22 @@ browser runs live (same weights / geometry / fire rate) and dump, per example:
 
   * a channel-0 FILMSTRIP PNG (the movie);
   * RdBu FILMSTRIP PNGs for a FIXED set of key hidden channels (live spatial maps);
-  * a t-SNE embedding of every active cell's hidden-channel state (frame-tagged);
+  * a t-SNE embedding of a FIXED set of tracked cells at EVERY frame, so each cell
+    has a continuous trajectory (one curve per cell), as a compact BINARY blob;
   * a t-SNE "paths" embedding of the per-(channel,frame) states (one curve/channel).
+
+The tracked-cell set is drawn once and reused for every frame and every example. A
+uniform draw over (cell, frame) pairs instead — what this script used to do — gives
+~1.3 frames per cell, so consecutive frames light up disjoint dots and the animation
+flashes instead of moving.
+
+The cell embedding goes out as carry_<eid>_cells.bin, not JSON: at 5 bytes per state
+a thousand cells cost ~650 KB, where the same numbers as JSON text cost ~14 MB. Layout
+is frame-major (all cells at frame 0, then frame 1, ...), three arrays back to back:
+
+    uint16 x[T*n]   uint16 y[T*n]   int8 v[T*n]
+
+x/y are the embedding scaled to 0..65535; v is the channel-0 value scaled by 127.
 
 Everything is baked offline (the embeddings are too slow to run live) into one
 JSON (demo/data/carry_tsne.json) that the page switches between with tabs.
@@ -22,6 +36,7 @@ from PIL import Image
 import torch
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
+from openTSNE import TSNE as OpenTSNE
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ncpu.nca import NeuralCA
@@ -38,10 +53,14 @@ EXAMPLES = [
     ("170 + 85",  170, 85),    # 10101010 + 01010101 = 11111111 — NO carry anywhere
     ("15 + 1",    15, 1),      # short 4-bit ripple
     ("127 + 1",   127, 1),     # 7-bit ripple that flips to a single high bit (128)
+    ("239 + 33",  239, 33),    # TWO chains, one per nibble: bits 0-3 ripple into bit 4, which
+                               # absorbs the carry; then bits 5-7 ripple out into bit 8
+    ("1 + 255",   1, 255),     # the long chain again, operands swapped between the input columns
 ]
 PERPLEXITY = 50            # scatter t-SNE
 OVR_PERPLEXITY = 30        # overlay ("paths") t-SNE
-POINT_CAP, ACT_THRESH = 5000, 0.4
+GRID_STRIDE = 2            # tracked cells: a regular grid over the field, every STRIDE px
+                           # (a plain lattice: no I/O-disk extras, see tracked_cells)
 N_KEYMAPS = 4              # number of key hidden channels rendered as live maps
 IMG_FMT = "png"           # filmstrip format: "webp" (small) or "png" (revert with a re-bake)
 WEBP_QUALITY = 90         # near-lossless for these flat colormap strips; raise toward 100 if unhappy
@@ -67,6 +86,50 @@ def col_centers(n, x):
 
 IN_CENTERS = two_col_left_centers(N_LEFT)
 OUT_CENTERS = col_centers(N_RIGHT, W - side)
+
+
+def lattice(n, stride):
+    """Centred 1-D lattice: as many points as fit at this stride, with the leftover
+    margin split evenly so the pattern is symmetric about the middle of the axis."""
+    count = (n - 1) // stride + 1
+    off = (n - 1 - (count - 1) * stride) // 2
+    return np.arange(count) * stride + off
+
+
+def tracked_cells():
+    """One even, symmetric lattice over the whole field. Nothing else.
+
+    Earlier versions bolted extras onto the grid — a whole patch per I/O disk, then just
+    the disk centres — and both broke the lattice: the off-grid points read as clumps and
+    the picture stopped looking regular. At a fine enough stride every disk already holds
+    a dozen grid cells, so the bits are covered without special cases.
+    """
+    ys, xs = np.meshgrid(lattice(H, GRID_STRIDE), lattice(W, GRID_STRIDE), indexing="ij")
+    return np.unique((ys * W + xs).ravel())
+
+
+def cell_roles(cells):
+    """Per tracked cell: 0 = field, 1 = inside an input disk, 2 = inside an output disk,
+    3 = the band strictly between the two columns, plus which bit slot it belongs to
+    (-1 for anything that is not a bit).
+
+    Band 3 is where the computation has to happen: it holds no input and no output, so
+    whatever crosses it is the NCA moving information across the grid.
+    """
+    role = np.zeros(len(cells), np.int8)
+    slot = np.full(len(cells), -1, np.int8)
+    x_all = cells % W
+    lo = max(cx for cx, _ in IN_CENTERS) + r + 1                 # right edge of the input column
+    hi = min(cx for cx, _ in OUT_CENTERS) - r - 1                # left edge of the output column
+    role[(x_all >= lo) & (x_all <= hi)] = 3
+    pos = {c: i for i, c in enumerate(cells.tolist())}
+    for kind, cs in ((1, IN_CENTERS), (2, OUT_CENTERS)):
+        for k, (cx, cy) in enumerate(cs):
+            for y, x in disk_idx(cx, cy):
+                i = pos.get(y * W + x)
+                if i is not None:
+                    role[i], slot[i] = kind, k
+    return role, slot
 
 
 def disk_idx(cx, cy):
@@ -119,74 +182,136 @@ def save_film(m_thw, path, cmap, lim):
     if str(path).endswith(".webp"):
         img.save(path, "WEBP", quality=WEBP_QUALITY, method=6)
     else:
-        img.save(path)
+        # A colormapped strip holds a couple of hundred distinct colours, so an 8-bit
+        # palette stores it exactly at a third of the size. scripts/shrink_carry_films.py
+        # does the same job to strips baked before this.
+        img.convert("P", palette=Image.ADAPTIVE, colors=256).save(path, "PNG", optimize=True)
 
 
-# fresh assets
 DATA = Path("demo/data")
+MANIFEST = DATA / "carry_tsne.json"
 DATA.mkdir(parents=True, exist_ok=True)
-for pat in ("carry_*.png", "carry_*.webp"):
-    for p in DATA.glob(pat):
-        p.unlink()
 
-rng = np.random.default_rng(SEED)
-KEY = None
-examples = []
-for label, a, b in EXAMPLES:
-    roll, got = rollout(a, b)
-    T = roll.shape[0]
-    eid = f"e{a}_{b}"
-    tvar = roll.reshape(T, C, -1).std(0).mean(1)
-    if KEY is None:                                          # fix key channels from the first example
-        KEY = sorted(range(2, C), key=lambda c: -tvar[c])[:N_KEYMAPS]
-    print(f"{label}: decoded {got} ({'OK' if got == a + b else f'!= {a + b}'})")
+# Importable: everything above is definitions, so other scripts (bake_path_space.py)
+# can reuse the exact geometry, cell set and rollout without triggering a bake.
+if __name__ == "__main__":
+    # Pass example indices to bake a subset ("bake ... 0 1 2"); the rest are carried over
+    # from the existing manifest. One t-SNE per example is minutes of work, so re-baking
+    # all five to change one is wasteful.
+    ONLY = sorted({int(v) for v in sys.argv[1:] if v.isdigit()}) or list(range(len(EXAMPLES)))
+    prev = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
+    prev_ex = {e["id"]: e for e in prev.get("examples", [])}
+    KEY = list(prev["keymap_channels"]) if ONLY != list(range(len(EXAMPLES))) and "keymap_channels" in prev else None
 
-    # (movie) channel-0 filmstrip
-    save_film(roll[:, 0], DATA / f"carry_{eid}_film.{IMG_FMT}", cm.viridis, 1.0)
+    CELLS = tracked_cells()                                      # same cells for every example
+    ROLE, SLOT = cell_roles(CELLS)
+    print(f"tracking {len(CELLS)} cells ({100 * len(CELLS) / (H * W):.1f}% of the {H}x{W} field): "
+          f"symmetric lattice, stride {GRID_STRIDE} — {(ROLE == 1).sum()} input, "
+          f"{(ROLE == 2).sum()} output, {(ROLE == 3).sum()} in the compute band")
 
-    # (key maps) RdBu filmstrips for the fixed key hidden channels
-    keymaps = []
-    for c in KEY:
-        lim = float(max(abs(roll[:, c].min()), abs(roll[:, c].max()), 1e-3))
-        save_film(roll[:, c], DATA / f"carry_{eid}_ch{c}_film.{IMG_FMT}", cm.RdBu_r, lim)
-        keymaps.append({"ch": c, "tvar": round(float(tvar[c]), 3), "film": f"data/carry_{eid}_ch{c}_film.{IMG_FMT}"})
+    # An old example can only be carried over if its blob was baked against THIS cell set —
+    # otherwise the page would read the wrong stride's coordinates.
+    if prev.get("cells", {}).get("n") != len(CELLS) or prev.get("cells", {}).get("stride") != GRID_STRIDE:
+        if prev_ex:
+            print(f"cell set changed (was {prev.get('cells', {}).get('n')} @ stride "
+                  f"{prev.get('cells', {}).get('stride')}) — old examples cannot be reused")
+        prev_ex, KEY = {}, None
+    print(f"baking examples {ONLY}: {', '.join(EXAMPLES[i][0] for i in ONLY)}")
 
-    # (scatter) t-SNE of per-(cell,frame) hidden-channel vectors
-    hidden = list(range(2, C))
-    vecs = roll[:, hidden].transpose(0, 2, 3, 1).reshape(T * H * W, len(hidden))
-    ts = np.repeat(np.arange(T), H * W)
-    ch0v = roll[:, 0].reshape(T * H * W)
-    idx = np.where(np.linalg.norm(vecs, axis=1) > ACT_THRESH)[0]
-    if idx.size > POINT_CAP:
-        idx = rng.choice(idx, POINT_CAP, replace=False)
-    Xn = (vecs[idx] - vecs[idx].mean(0)) / (vecs[idx].std(0) + 1e-6)
-    emb = TSNE(n_components=2, perplexity=PERPLEXITY, init="pca", learning_rate="auto",
-               random_state=SEED).fit_transform(Xn)
-    emb = (emb - emb.min(0)) / (emb.max(0) - emb.min(0) + 1e-9)
-    points = {"ex": [round(float(v), 4) for v in emb[:, 0]], "ey": [round(float(v), 4) for v in emb[:, 1]],
-              "t": [int(v) for v in ts[idx]], "v": [round(float(v), 3) for v in ch0v[idx]]}
+    def write_manifest():
+        """Rewrite the manifest from whatever is baked now plus whatever survived from the
+        previous run. Called after EVERY example so a chunked bake that gets cut short
+        still leaves a loadable page and does not have to redo finished work."""
+        examples = [baked.get(f"e{a}_{b}", prev_ex.get(f"e{a}_{b}")) for _, a, b in EXAMPLES]
+        missing = [EXAMPLES[i][0] for i, e in enumerate(examples) if e is None]
+        examples = [e for e in examples if e is not None]
+        out = {
+            "H": H, "W": W, "T": T,
+            "perplexity": PERPLEXITY, "overlay_method": f"t-SNE (perplexity {OVR_PERPLEXITY})",
+            "keymap_channels": list(KEY),
+            # the tracked-cell set is shared by every example, so it lives here once
+            "cells": {"n": len(CELLS), "stride": GRID_STRIDE,
+                      "y": [int(c // W) for c in CELLS], "x": [int(c % W) for c in CELLS],
+                      "role": [int(v) for v in ROLE], "slot": [int(v) for v in SLOT]},
+            "examples": examples,
+        }
+        MANIFEST.write_text(json.dumps(out))
+        return examples, missing
 
-    # (paths) t-SNE of per-(channel,frame) states -> one curve per channel
-    feats = [roll[:, c].reshape(T, -1) / (roll[:, c].std() + 1e-6) for c in range(C)]
-    Xp = PCA(n_components=50, random_state=SEED).fit_transform(np.concatenate(feats, 0))
-    Eall = TSNE(n_components=2, perplexity=OVR_PERPLEXITY, init="pca", learning_rate="auto",
-                random_state=SEED).fit_transform(Xp)
-    Eall = (Eall - Eall.min(0)) / (Eall.max(0) - Eall.min(0) + 1e-9)
-    role_of = lambda c: "output" if c == 0 else ("input (frozen)" if c == 1 else "hidden")
-    overlay = [{"ch": c, "role": role_of(c), "tvar": round(float(tvar[c]), 3),
-                "ex": [round(float(v), 4) for v in Eall[c * T:(c + 1) * T, 0]],
-                "ey": [round(float(v), 4) for v in Eall[c * T:(c + 1) * T, 1]]} for c in range(C)]
 
-    examples.append({"id": eid, "label": label, "a": a, "b": b, "sum": a + b, "decoded": got,
-                     "film": f"data/carry_{eid}_film.{IMG_FMT}", "n_points": len(points["ex"]),
-                     "points": points, "keymaps": keymaps, "overlay": {"channels": overlay}})
-    print(f"  baked {eid}: {len(points['ex'])} scatter pts, {len(keymaps)} key maps")
 
-out = {
-    "H": H, "W": W, "T": T,
-    "perplexity": PERPLEXITY, "overlay_method": f"t-SNE (perplexity {OVR_PERPLEXITY})",
-    "keymap_channels": list(KEY),
-    "examples": examples,
-}
-(DATA / "carry_tsne.json").write_text(json.dumps(out))
-print(f"saved demo/data/carry_tsne.json  ({len(examples)} examples, key channels {list(KEY)})")
+    baked = {}
+    for label, a, b in [EXAMPLES[i] for i in ONLY]:
+        roll, got = rollout(a, b)
+        T = roll.shape[0]
+        eid = f"e{a}_{b}"
+        for p in list(DATA.glob(f"carry_{eid}_*.png")) + list(DATA.glob(f"carry_{eid}_*.webp")):
+            p.unlink()                                           # drop this example's stale assets
+        tvar = roll.reshape(T, C, -1).std(0).mean(1)
+        if KEY is None:                                          # fix key channels from the first example
+            KEY = sorted(range(2, C), key=lambda c: -tvar[c])[:N_KEYMAPS]
+        print(f"{label}: decoded {got} ({'OK' if got == a + b else f'!= {a + b}'})")
+
+        # (movie) channel-0 filmstrip
+        save_film(roll[:, 0], DATA / f"carry_{eid}_film.{IMG_FMT}", cm.viridis, 1.0)
+
+        # (key maps) RdBu filmstrips for the fixed key hidden channels
+        keymaps = []
+        for c in KEY:
+            lim = float(max(abs(roll[:, c].min()), abs(roll[:, c].max()), 1e-3))
+            save_film(roll[:, c], DATA / f"carry_{eid}_ch{c}_film.{IMG_FMT}", cm.RdBu_r, lim)
+            keymaps.append({"ch": c, "tvar": round(float(tvar[c]), 3), "film": f"data/carry_{eid}_ch{c}_film.{IMG_FMT}"})
+
+        # (cells) t-SNE of the tracked cells' hidden-channel vectors at EVERY frame, so the
+        # page can move the SAME dots along continuous trajectories as it scrubs. openTSNE,
+        # not sklearn: this is ~10x the point count sklearn's Barnes-Hut is comfortable with.
+        hidden = list(range(2, C))
+        vecs = roll[:, hidden].transpose(0, 2, 3, 1).reshape(T, H * W, len(hidden))
+        flat = vecs[:, CELLS].reshape(-1, len(hidden))           # rows are frame-major: (t, cell)
+        Xn = ((flat - flat.mean(0)) / (flat.std(0) + 1e-6)).astype(np.float32)
+        emb = np.asarray(OpenTSNE(n_components=2, perplexity=PERPLEXITY, initialization="pca",
+                                  n_jobs=-1, random_state=SEED).fit(Xn), dtype=np.float64)
+        emb = (emb - emb.min(0)) / (emb.max(0) - emb.min(0) + 1e-9)
+        ch0v = roll[:, 0].reshape(T, H * W)[:, CELLS].reshape(-1)
+        xq = np.clip(np.rint(emb[:, 0] * 65535), 0, 65535).astype("<u2")
+        yq = np.clip(np.rint(emb[:, 1] * 65535), 0, 65535).astype("<u2")
+        vq = np.clip(np.rint(ch0v * 127), -127, 127).astype("<i1")
+        (DATA / f"carry_{eid}_cells.bin").write_bytes(xq.tobytes() + yq.tobytes() + vq.tobytes())
+
+        # (paths) t-SNE of per-(channel,frame) states -> one curve per channel. A channel that
+        # is constant in time (the frozen input) contributes ONE row: its T duplicates would
+        # otherwise be degenerate for t-SNE and its marker would random-walk across the map.
+        static = [bool(roll[:, c].std(0).max() < 1e-6) for c in range(C)]
+        rows, keys = [], []
+        for c in range(C):
+            for f in ([0] if static[c] else range(T)):
+                rows.append(roll[f, c].ravel() / (roll[:, c].std() + 1e-6))
+                keys.append(c)
+        keys = np.array(keys)
+        Xp = PCA(n_components=50, random_state=SEED).fit_transform(np.stack(rows))
+        Eall = TSNE(n_components=2, perplexity=OVR_PERPLEXITY, init="pca", learning_rate="auto",
+                    random_state=SEED).fit_transform(Xp)
+        Eall = (Eall - Eall.min(0)) / (Eall.max(0) - Eall.min(0) + 1e-9)
+        role_of = lambda c: "output" if c == 0 else ("input (frozen)" if c == 1 else "hidden")
+        overlay = []
+        for c in range(C):
+            E = Eall[keys == c]
+            if static[c]:
+                E = np.repeat(E, T, axis=0)                      # frozen: parked at one spot
+            overlay.append({"ch": c, "role": role_of(c), "static": static[c], "tvar": round(float(tvar[c]), 3),
+                            "ex": [round(float(v), 4) for v in E[:, 0]],
+                            "ey": [round(float(v), 4) for v in E[:, 1]]})
+
+        baked[eid] = {"id": eid, "label": label, "a": a, "b": b, "sum": a + b, "decoded": got,
+                      "film": f"data/carry_{eid}_film.{IMG_FMT}", "n_points": T * len(CELLS),
+                      "cellbin": f"data/carry_{eid}_cells.bin",
+                      "keymaps": keymaps, "overlay": {"channels": overlay}}
+        write_manifest()
+        print(f"  baked {eid}: {len(CELLS)} tracked cells x {T} frames, {len(keymaps)} key maps", flush=True)
+
+    examples, missing = write_manifest()
+    if missing:
+        print(f"note: not in this run and not in the old manifest, so dropped: {', '.join(missing)}")
+    sz = sum(p.stat().st_size for p in DATA.glob("carry_*_cells.bin")) / 1e6
+    print(f"saved {MANIFEST} ({MANIFEST.stat().st_size / 1e6:.2f} MB) + {len(examples)} cell blobs "
+          f"({sz:.2f} MB total), {len(CELLS)} tracked cells, key channels {list(KEY)}")
