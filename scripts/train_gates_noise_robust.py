@@ -352,8 +352,12 @@ for step in pbar:
             frames_rgb = media.to_rgb(frames_np, vmin=-1, vmax=1, cmap="viridis")
             frames_rgb = freeze_frame(torch.from_numpy(frames_rgb), timesteps=[0, -1], repeat=8)
             gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
-            media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
-            shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+            try:
+                media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
+                shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+            except Exception as e:
+                print(f"  ! could not write GIF (ffmpeg missing?): {e}")
+                np.save(run_dir / "rollouts" / f"rollout_{step:07d}.npy", frames_rgb.numpy())
 
             # ── Rollout PNG snapshot ──────────────────────────────────────
             if rollout is not None:
