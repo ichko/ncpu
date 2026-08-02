@@ -835,7 +835,11 @@ class MultiGateDataset(IterableDataset):
     def _return_dataset(self):
         if self.gate is not None:
             return self.datasets[self.gate_idx]
+<<<<<<< HEAD
         return self.datasets[self.counter % len(self.GATE_NAMES)]
+=======
+        return self.datasets[self.counter % 4]
+>>>>>>> 12c5021 (updating noise scripts)
 
     def _code_dataset(self, inp, gate_idx):
         """Write a one-hot gate code into the last len(GATE_NAMES) channels of inp.
@@ -861,7 +865,11 @@ class MultiGateDataset(IterableDataset):
         return self._return_dataset().get_io_mask()
 
     def get_sample(self):
+<<<<<<< HEAD
         gate_idx = self.gate_idx if self.gate is not None else self.counter % len(self.GATE_NAMES)
+=======
+        gate_idx = self.gate_idx if self.gate is not None else self.counter % 4
+>>>>>>> 12c5021 (updating noise scripts)
         dataset = self.datasets[gate_idx]
         left, right = dataset.get_sample()
 
