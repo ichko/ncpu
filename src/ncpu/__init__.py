@@ -21,10 +21,6 @@ if _ipython is not None:
         # integration; fall back to a non-interactive backend.
         if "matplotlib.pyplot" not in sys.modules:
             matplotlib.use("Agg")
-elif "matplotlib.pyplot" not in sys.modules:
-    # Plain scripts only ever render figures to files, never to a window.
-    # Force a headless backend even when DISPLAY is set but unusable (e.g.
-    # broken SSH -X forwarding), which would otherwise abort with
-    # "XIO: fatal IO error ... on X server". Respect an explicit MPLBACKEND.
-    if not os.environ.get("MPLBACKEND"):
-        matplotlib.use("Agg")
+elif not os.environ.get("DISPLAY") and "matplotlib.pyplot" not in sys.modules:
+    # Plain script on a headless server: avoid GUI-backend crashes.
+    matplotlib.use("Agg")
