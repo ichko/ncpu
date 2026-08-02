@@ -73,7 +73,7 @@
 
   <header class="masthead">
     <h1 class="title">Latent dimensions <em>visualization</em></h1>
-    <p class="subtitle">We ran several additions on the 8-bit adder NCA and baked each rollout frame-by-frame. Pick one from the menu at the top: a long carry chain, an all-ones sum, a no-carry case, and more. Scrub the movie, and every view moves with it. Under the movie, a row of the most active <em>hidden</em> channels appears as spatial maps. Watch the carry "spine" move up the column. On the right, a t-SNE map follows a fixed grid of cells through the whole rollout: the same dots move along their own paths as you scrub, red where a cell reads 1 and purple where it reads 0. Switch that figure to <em>trajectories</em> to see every path at once coloured by time, or turn on the I/O highlight to follow only the cells sitting on an input or output bit. The last view puts all 16 channels in one shared t-SNE space. <a href="index.html">← back to the live demo</a></p>
+    <p class="subtitle">We ran several additions on the 8-bit adder NCA and baked each rollout frame-by-frame. Pick one from the buttons at the top: a long carry chain, an all-ones sum, a no-carry case, and more. Scrub the movie, and every view moves with it. Under the movie, a row of the most active <em>hidden</em> channels appears as spatial maps. Watch the carry "spine" move up the column. On the right, a t-SNE map follows a fixed grid of cells through the whole rollout, so each cell traces a path. Colour that map by what a cell is, by how it moves, or by where it sits on the grid. Filter it down to the input and output bits, or to the band between them where the computation has to happen. Turn on <b>recent only</b> to drop the whole run and watch just the current step. <a href="index.html">← back to the live demo</a></p>
   </header>
 
   <section>
@@ -120,7 +120,7 @@
             <div class="cw-legend" id="cwScatterLegend">
               <div>a fixed grid of cells, every one of them at every frame · each state is one cell's 14 hidden channels (ch2–15) at one frame · perplexity <span id="cwPerp"></span></div>
               <div>colour <b>by role</b>: <span class="cw-swatch" style="background:#1864ab"></span>input bit &nbsp; <span class="cw-swatch" style="background:#e8590c"></span>output bit &nbsp; <span class="cw-bandramp"></span>compute band (shaded top to bottom) &nbsp; <span class="cw-swatch" style="background:#9a8f7d"></span>field</div>
-              <div>colour <b>by movement</b>: one colour per cluster of cells whose paths travel together · <b>by position</b>: an 8×5 patchwork of the grid — hue sweeps left to right <span class="cw-hueramp"></span> and gets darker toward the bottom</div>
+              <div>colour <b>by movement</b>: one colour per cluster of cells whose paths travel together · <b>by position</b>: where the cell sits on the grid — hue sweeps left to right <span class="cw-hueramp"></span> and gets darker toward the bottom</div>
               <div>the bright trail is where a cell has just been · dot size says whether the cell reads 1 or 0</div>
               <div class="cw-hidden"></div>
               <div>with a highlight on, the movie marks where those cells sit in the grid</div>
@@ -145,7 +145,7 @@
     <h3>Building the map</h3>
     <p>We follow a fixed grid of cells through every frame of the run. Each cell at each frame is one point in 14 dimensions. t-SNE flattens those points to 2 so we can draw them.</p>
     <p>We embed every frame together, in one run. That is what makes paths work. A cell at one frame lands near the same cell at the next frame, so its run reads as a route. One embedding per frame would turn the axes each time, and no route would survive.</p>
-    <p>All paths start in one small spot near the top, because the hidden channels hold zero at the first frame. The cells leave it within about ten frames. It marks the start, not a group the rule learned.</p>
+    <p>All paths start in one small spot in the upper half, because the hidden channels hold zero at the first frame. The cells leave it within a few frames. It marks the start, not a group the rule learned.</p>
 
     <h3>What the colours mean</h3>
     <p>The filters remove cells. The colour choice changes what colour means. The two work together.</p>
