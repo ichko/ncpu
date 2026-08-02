@@ -13,3 +13,16 @@ results
 
 # preview/debug images generated at repo root
 /*.png
+
+# ---- demo: the site is tracked, its heavy generated assets are not ------------
+# Everything here is rebuilt by scripts/build_demo.py from runs/ checkpoints.
+# HTML/CSS/JS, demo/assets, and the small hand-exported weight JSONs in demo/data
+# (adder8.json, gates, manifest.json, ...) STAY under source control.
+demo/data/rollouts/
+demo/data/carry_*.png
+demo/data/carry_*.webp
+demo/data/carry_*.bin
+demo/data/carry_tsne.json
+demo/data/subleq_fib.json
+demo/dist/
+/*.gif

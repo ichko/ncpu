@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Carry-wave analysis — hidden channels</title>
+<title>Latent dimensions visualization — 8-bit adder NCA</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="description" content="A baked long-carry (255+1) rollout of the 8-bit adder NCA: the movie with a row of key hidden-channel maps, a t-SNE map of the hidden state, and every channel drawn as a path in one shared t-SNE space — all scrubbable in sync." />
 <link rel="stylesheet" href="css/style.css" />
@@ -12,17 +12,34 @@
   .cw-col { display: flex; flex-direction: column; gap: 0.55rem; flex: 0 0 auto; }
   .cw-plate { position: relative; line-height: 0; border: 1px solid var(--ink); background: #3b0f4f; width: max-content; }
   canvas.cw-movie { display: block; background: #3b0f4f; image-rendering: pixelated; image-rendering: crisp-edges; }
-  svg.cw-scatter { display: block; background: var(--panel); background-image: radial-gradient(circle at 50% 42%, #fbf7ec 0%, #efe6cf 100%); }
+  /* this page carries a movie and a 620px figure side by side, so it runs wider
+     than the 52rem the rest of the site uses */
+  .wrap { max-width: 66rem; }
+  .cw-plot { background: var(--panel); background-image: radial-gradient(circle at 50% 42%, #fbf7ec 0%, #efe6cf 100%); }
+  canvas.cw-cloud { display: block; }
+  canvas.cw-live, svg.cw-scatter { display: block; position: absolute; inset: 0; }
+  .cw-busy { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(250,246,234,0.6); z-index: 3; }
+  .cw-busy.on { display: flex; }
+  .cw-busy i { width: 26px; height: 26px; border: 2px solid var(--rule); border-top-color: var(--accent); border-radius: 50%; animation: cwspin 0.75s linear infinite; }
+  @keyframes cwspin { to { transform: rotate(360deg); } }
   .cw-ctrl { display: flex; align-items: center; gap: 0.55rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); height: 1.6rem; }
   .cw-ctrl input[type=range] { accent-color: var(--accent); }
   .cw-scrub { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent); }
   .cw-status { font-family: var(--mono); font-size: 0.7rem; line-height: 1.5; color: var(--ink-3); width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .cw-controls { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--paper-2); padding: 0.55rem 0.9rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); }
+  .cw-controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; row-gap: 0.35rem; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--paper-2); padding: 0.45rem 0.9rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); }
   .cw-controls input[type=range] { accent-color: var(--accent); }
   .cw-lbl { color: var(--ink-3); }
   .cw-vsep { width: 1px; height: 1.3em; background: var(--rule); }
   .cw-status b { color: var(--accent); font-weight: 600; }
-  .cw-legend { font-family: var(--mono); font-size: 0.66rem; color: var(--ink-3); line-height: 1.6; width: 400px; }
+  .cw-sel { font-family: var(--mono); font-size: 0.68rem; color: var(--ink-2); background: var(--paper-2); border: 1px solid var(--rule); padding: 0.3rem 0.45rem; }
+  .cw-legend { font-family: var(--mono); font-size: 0.66rem; color: var(--ink-3); line-height: 1.6; max-width: 100%; }
+  .cw-ring { display: inline-block; width: 0.72em; height: 0.72em; border-radius: 50%; border: 2px solid var(--ink-3); vertical-align: -1px; margin-right: 0.25em; }
+  .cw-bandramp { display: inline-block; width: 1.6em; height: 0.7em; vertical-align: -1px; margin-right: 0.25em; border: 1px solid var(--ink-3);
+                 background: linear-gradient(180deg, rgb(150,214,90), rgb(8,84,52)); }
+  .cw-hueramp { display: inline-block; width: 6.5em; height: 0.62em; vertical-align: -1px; margin: 0 0.3em; border: 1px solid var(--ink-3);
+                background: linear-gradient(90deg, hsl(217,80%,45%), hsl(263,80%,45%), hsl(310,80%,45%), hsl(356,80%,45%), hsl(42,80%,45%), hsl(88,80%,45%)); }
+  .cw-tramp { display: inline-block; width: 5.4em; height: 0.62em; vertical-align: -1px; margin: 0 0.3em;
+              background: linear-gradient(90deg, #e0a33c 0%, #ab3520 50%, #3b0f4f 100%); border: 1px solid var(--ink-3); }
   .cw-swatch { display: inline-block; width: 0.7em; height: 0.7em; border: 1px solid var(--ink-3); vertical-align: -1px; margin-right: 0.25em; }
   .cw-sechd { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); border-top: 1px solid var(--rule); padding: 0.7rem 0.9rem 0.2rem; }
   .cw-grp { display: inline-flex; align-items: center; gap: 0.35rem; }
@@ -30,6 +47,9 @@
   .cw-play { width: 56px; text-align: center; }
   .cw-range { width: 150px; }
   .cw-range-sm { width: 72px; }
+  .cw-extabs { flex: 1 1 auto; }
+  .cw-controls .tab { white-space: nowrap; font-size: 0.66rem; padding: 0.28rem 0.44rem; }
+  .cw-dot { display: inline-block; width: 0.58em; height: 0.58em; border-radius: 50%; margin-right: 0.3em; vertical-align: -1px; box-shadow: 0 0 0 1px rgba(34,31,25,0.28) inset; }
   .cw-viewtabs { display: inline-flex; gap: 0.7rem; font-family: var(--mono); font-size: 0.68rem; color: var(--ink-2); }
   .cw-viewtabs label { display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
   .cw-viewtabs input { accent-color: var(--accent); }
@@ -52,25 +72,27 @@
 <div class="wrap">
 
   <header class="masthead">
-    <h1 class="title">Carry-wave <em>analysis</em></h1>
-    <p class="subtitle">We ran several additions on the 8-bit adder NCA and baked each rollout frame-by-frame. Pick one from the menu at the top: a long carry chain, an all-ones sum, a no-carry case, and more. Scrub the movie, and every view moves with it. Under the movie, a row of the most active <em>hidden</em> channels appears as spatial maps. Watch the carry "spine" move up the column. On the right, a t-SNE map shows the hidden-channel state of every active cell, and the current frame's cells light up. Below, each channel appears as a path in one shared t-SNE space. <a href="index.html">← back to the live demo</a></p>
+    <h1 class="title">Latent dimensions <em>visualization</em></h1>
+    <p class="subtitle">We ran several additions on the 8-bit adder NCA and baked each rollout frame-by-frame. Pick one from the menu at the top: a long carry chain, an all-ones sum, a no-carry case, and more. Scrub the movie, and every view moves with it. Under the movie, a row of the most active <em>hidden</em> channels appears as spatial maps. Watch the carry "spine" move up the column. On the right, a t-SNE map follows a fixed grid of cells through the whole rollout: the same dots move along their own paths as you scrub, red where a cell reads 1 and purple where it reads 0. Switch that figure to <em>trajectories</em> to see every path at once coloured by time, or turn on the I/O highlight to follow only the cells sitting on an input or output bit. The last view puts all 16 channels in one shared t-SNE space. <a href="index.html">← back to the live demo</a></p>
   </header>
 
   <section>
     <div class="panelbox">
       <div class="hd">
-        <span>Fig. 2 · Carry wave — hidden-channel visualization</span>
+        <span>Fig. 2 · Latent dimensions — hidden-channel visualization</span>
         <span class="rt" id="cwHead"></span>
       </div>
       <div class="bd">
         <div class="cw-controls">
-          <span class="cw-grp"><span class="cw-lbl">example</span>
-            <select id="cwExample" class="cw-sel"></select></span>
+          <span class="tabs cw-extabs" id="cwExample"></span>
           <span class="cw-vsep"></span>
-          <span class="cw-viewtabs">
-            <label title="t-SNE of every active cell's hidden-channel state (ch2–15): each dot is one cell at one frame, coloured by its output-bit value. The current frame's cells light up as you scrub."><input type="radio" name="cwView" value="cells" checked /> cells</label>
-            <label title="Each of the 16 channels as a path in one shared t-SNE space — one point per frame. A coloured dot per channel marks the current frame, so you watch all channels move together."><input type="radio" name="cwView" value="paths" /> channel paths</label>
-          </span>
+          <span class="tabs" id="cwViewTabs"></span>
+          <span class="cw-vsep"></span>
+          <span class="tabs" id="cwFocusTabs"></span>
+          <span class="cw-vsep"></span>
+          <span class="tabs" id="cwColorTabs"></span>
+          <span class="cw-vsep"></span>
+          <span class="tabs" id="cwModeTabs"></span>
         </div>
 
         <div class="cw-stage">
@@ -89,16 +111,21 @@
           </div>
 
           <div class="cw-col">
-            <div class="cw-plate">
-              <svg id="cwScatter" class="cw-scatter"></svg>
-              <svg id="cwOverlay" class="cw-scatter" style="display:none"></svg>
+            <div class="cw-plate cw-plot">
+              <canvas id="cwCloud" class="cw-cloud"></canvas>
+              <canvas id="cwLive" class="cw-live"></canvas>
+              <div class="cw-busy" id="cwBusy"><i></i></div>
             </div>
+            <div class="cw-sel" id="cwSelInfo"></div>
             <div class="cw-legend" id="cwScatterLegend">
-              <div>each dot = one active cell's hidden-channel state (ch2–15) at one frame · perplexity <span id="cwPerp"></span></div>
-              <div>colour = channel-0 value: <span class="cw-swatch" style="background:#ab3520"></span>&gt; 0 (bit 1) &nbsp; <span class="cw-swatch" style="background:#3b0f4f"></span>&lt; 0 (bit 0)</div>
-              <div><span class="cw-swatch" style="background:#f5d90a;border-color:#221f19"></span>outlined = cells in the current frame (light up as you scrub)</div>
+              <div>a fixed grid of cells, every one of them at every frame · each state is one cell's 14 hidden channels (ch2–15) at one frame · perplexity <span id="cwPerp"></span></div>
+              <div>colour <b>by role</b>: <span class="cw-swatch" style="background:#1864ab"></span>input bit &nbsp; <span class="cw-swatch" style="background:#e8590c"></span>output bit &nbsp; <span class="cw-bandramp"></span>compute band (shaded top to bottom) &nbsp; <span class="cw-swatch" style="background:#9a8f7d"></span>field</div>
+              <div>colour <b>by movement</b>: one colour per cluster of cells whose paths travel together · <b>by position</b>: an 8×5 patchwork of the grid — hue sweeps left to right <span class="cw-hueramp"></span> and gets darker toward the bottom</div>
+              <div>the bright trail is where a cell has just been · dot size says whether the cell reads 1 or 0</div>
+              <div class="cw-hidden"></div>
+              <div>with a highlight on, the movie marks where those cells sit in the grid</div>
+              <div>in the dots view colour is the channel-0 value: <span class="cw-swatch" style="background:#ab3520"></span>reads&nbsp;1 &nbsp; <span class="cw-swatch" style="background:#3b0f4f"></span>reads&nbsp;0</div>
             </div>
-            <div class="cw-collegend" id="cwColorLegend" style="display:none"></div>
           </div>
 
         </div>
@@ -108,6 +135,32 @@
       </div>
       <div class="caption" id="cwCaption">Loading baked rollout…</div>
     </div>
+  </section>
+
+  <section id="howto">
+
+    <h2>How to read this figure</h2>
+    <p class="lead">Every cell holds 16 numbers. Channel 0 is the picture in the movie. Channel 1 holds the frozen input. The rule fills the other 14 as it likes. This figure draws those 14.</p>
+
+    <h3>Building the map</h3>
+    <p>We follow a fixed grid of cells through every frame of the run. Each cell at each frame is one point in 14 dimensions. t-SNE flattens those points to 2 so we can draw them.</p>
+    <p>We embed every frame together, in one run. That is what makes paths work. A cell at one frame lands near the same cell at the next frame, so its run reads as a route. One embedding per frame would turn the axes each time, and no route would survive.</p>
+    <p>All paths start in one small spot near the top, because the hidden channels hold zero at the first frame. The cells leave it within about ten frames. It marks the start, not a group the rule learned.</p>
+
+    <h3>What the colours mean</h3>
+    <p>The filters remove cells. The colour choice changes what colour means. The two work together.</p>
+    <p><b>By role</b>: blue is an input bit, orange an output bit, green the band between the columns, grey the field. The band holds no input and no output, so whatever crosses it is the computation. The field is most of the grid, so we draw it faint and behind the rest.</p>
+    <p><b>By movement</b>: we cluster the cells on their whole path, so cells that travel together share a colour. We redo this for each example.</p>
+    <p><b>By position</b>: hue runs left to right across the grid and darkens toward the bottom.</p>
+    <p>Colour never shows time. The trail does that. Each cell lights its recent steps and fades behind itself. A large dot reads <code>1</code>, and a small dot reads <code>0</code>.</p>
+
+    <h3>What the figure shows</h3>
+    <p>Output cells settle. Late in the run their steps shrink to 3&nbsp;% of their early steps. Input cells still drift at 13&nbsp;%.</p>
+    <p>Output cells also split by the bit they hold. At the end the <code>1</code> cells and the <code>0</code> cells sit apart, with a gap 5.9 times their own spread. For input cells that gap is 0.85 of their spread, so the two groups overlap.</p>
+    <p>The loss reads only the output disks. Only those cells must settle on a correct value. Nothing holds the input cells, so they never sort by their bit and never stop moving. Turn on <b>I/O cells</b> to watch both at once.</p>
+    <p>The output paths are not straighter, though. Net travel over path length is 0.25 for output cells and 0.21 for input cells. Every role wanders by about the same amount. What differs is where a cell ends up, not the route it takes.</p>
+    <p>Long lines that cross the map are seams in the embedding, not real jumps. We keep them faint so that paths stay joined.</p>
+
   </section>
 
 </div>
