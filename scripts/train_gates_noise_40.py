@@ -14,7 +14,7 @@ from ncpu.loss import output_masked_rollout_loss, combined_loss
 from ncpu.config import TINY_AND_FARAWAY_TRAINING_CONFIG
 from ncpu.dataset import MultiGateDataset
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, save_grid_image, save_rollout_png
+from ncpu.utils import freeze_frame, save_grid_image, save_rollout_svg, save_rollout_png
 
 print(torch.__version__)
 print(torch.version.cuda)
@@ -33,6 +33,10 @@ KERNEL_SIZE=7
 
 GAUSSIAN_NOISE = 0.4
 FIRE_RATES = [0.2, 0.4, 0.6, 0.8, 1.0]
+
+EVAL_EVERY = 1_000
+N_EVAL_ROLLOUTS = 5
+EVAL_STEPS = 80
 
 def run_experiment(gaussian_noise, fire_rate):
     run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -63,6 +67,10 @@ def run_experiment(gaussian_noise, fire_rate):
         json.dump(config, f, indent=2)
 
     dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=NCA_CHANNELS)
+
+    # Fixed batch reused for every periodic evaluation, so curves are comparable.
+    eval_batch = next(iter(dataset.get_dataloader(batch_size=BATCH_SIZE)))
+    eval_metrics = []
 
     nca = NeuralCA(
         channels=NCA_CHANNELS,
@@ -99,6 +107,7 @@ def run_experiment(gaussian_noise, fire_rate):
         grad_norm = trainer.metrics[-1].get("grad_norm") if trainer.metrics else None
         pbar.set_description(
             f"[n={gaussian_noise} fr={fire_rate}] loss={loss:.4f}  bits={num_valid_bits:.2f}/{N_OUTPUT_BITS}"
+            + (f"  eval={eval_bits:.3f}" if step > 0 and eval_bits is not None else "")
             + (f"  gnorm={grad_norm:.3f}" if grad_norm else "")
         )
 
@@ -110,6 +119,24 @@ def run_experiment(gaussian_noise, fire_rate):
                 "gaussian_noise": gaussian_noise,
                 "fire_rate": fire_rate,
             }) + "\n")
+
+        eval_bits = eval_loss = None
+        if step % EVAL_EVERY == 0:
+            eval_result = trainer.evaluate(
+                eval_batch,
+                [(gaussian_noise, fire_rate)],
+                n_rollouts=N_EVAL_ROLLOUTS,
+                steps=EVAL_STEPS,
+            )
+            eval_bits, eval_loss = eval_result["eval_bits"], eval_result["eval_loss"]
+            eval_metrics.append({"step": step, "eval_bits": eval_bits, "eval_loss": eval_loss})
+            with open(log_path, "a") as f:
+                f.write(json.dumps({
+                    "step": step, "eval_bits": eval_bits,
+                    "eval_loss": eval_loss,
+                    "gaussian_noise": gaussian_noise,
+                    "fire_rate": fire_rate,
+                }) + "\n")
 
         if step % PLOT_EVERY == 0:
             rollout = info["rollout"]
@@ -156,9 +183,32 @@ def run_experiment(gaussian_noise, fire_rate):
             bits_vals = [m["num_valid_bits"] for m in trainer.metrics if "num_valid_bits" in m]
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.scatter(range(len(bits_vals)), bits_vals, s=0.5, alpha=0.4, color="darkorange")
+            if eval_metrics:
+                ax.plot([m["step"] for m in eval_metrics],
+                        [m["eval_bits"] for m in eval_metrics],
+                        color="seagreen", marker="o", lw=1, label="eval bits")
+                ax.legend()
             ax.set_ylim(0, N_OUTPUT_BITS + 0.5); ax.set_xlabel("step"); ax.set_ylabel("mean valid bits")
             ax.set_title(f"Multi-Gate NCA (noise={gaussian_noise}, fr={fire_rate}) — bits — step {step}")
             fig.tight_layout(); fig.savefig(run_dir / "bits_curve.png", dpi=120); plt.close(fig)
+
+            if eval_metrics:
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot([m["step"] for m in eval_metrics],
+                        [m["eval_bits"] for m in eval_metrics],
+                        color="seagreen", marker="o", lw=1)
+                ax.set_ylim(0, N_OUTPUT_BITS + 0.5); ax.set_xlabel("step")
+                ax.set_ylabel("mean eval bit accuracy")
+                ax.set_title(f"Multi-Gate NCA (noise={gaussian_noise}, fr={fire_rate}) — eval bits — step {step}")
+                fig.tight_layout(); fig.savefig(run_dir / "eval_bits_curve.png", dpi=120); plt.close(fig)
+
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot([m["step"] for m in eval_metrics],
+                        [m["eval_loss"] for m in eval_metrics],
+                        color="seagreen", marker="o", lw=1)
+                ax.set_yscale("log"); ax.set_xlabel("step"); ax.set_ylabel("eval loss")
+                ax.set_title(f"Multi-Gate NCA (noise={gaussian_noise}, fr={fire_rate}) — eval loss — step {step}")
+                fig.tight_layout(); fig.savefig(run_dir / "eval_loss_curve.png", dpi=120); plt.close(fig)
 
             if rollout is not None:
                 gif_b = BATCH_SIZE
@@ -194,6 +244,7 @@ def run_experiment(gaussian_noise, fire_rate):
                 gif_path = run_dir / "rollouts" / f"rollout_{step:07d}.gif"
                 media.write_video(str(gif_path), frames_rgb.numpy(), fps=10, codec="gif")
                 shutil.copy(gif_path, run_dir / "rollout_latest.gif")
+
 
         # ── Rollout PNG snapshot ──────────────────────────────────────────
         if rollout is not None:

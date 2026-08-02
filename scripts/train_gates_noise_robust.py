@@ -1,6 +1,7 @@
 import torch
 import json
 import shutil
+import argparse
 import numpy as np
 import mediapy as media
 from datetime import datetime
@@ -19,6 +20,69 @@ from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, save_
 
 model_path = None
 
+parser = argparse.ArgumentParser(description="Train an NCA on gate tasks under stochastic noise.")
+parser.add_argument(
+    "--gate",
+    type=str,
+    default=None,
+    help="train a single gate: AND/OR/XOR/NAND (default: all four via one-hot code)",
+)
+parser.add_argument(
+    "--kernel-size",
+    type=int,
+    default=7,
+    help="sobel perception kernel size (default: 7)",
+)
+parser.add_argument(
+    "--gaussian-noise",
+    type=float,
+    default=0.0,
+    help="gaussian noise std injected each rollout step. If 0 and "
+         "--gaussian-noise-fire-rate is also 0, per-step noise is sampled "
+         "randomly over [0,1] (robust mode). (default: 0)",
+)
+parser.add_argument(
+    "--gaussian-noise-fire-rate",
+    type=float,
+    default=0.0,
+    help="probability of injecting noise each rollout step (default: 0)",
+)
+parser.add_argument(
+    "--alive-threshold",
+    type=float,
+    default=0.0,
+    help="alive masking threshold (default: 0)",
+)
+parser.add_argument(
+    "--steps",
+    type=int,
+    default=80_000,
+    help="number of training steps (default: 80000)",
+)
+parser.add_argument(
+    "--eval-every",
+    type=int,
+    default=1_000,
+    help="evaluate every N steps (default: 1000)",
+)
+args = parser.parse_args()
+
+LEARNING_RATE = 0.001
+BATCH_SIZE = 8
+GAUSSIAN_NOISE = args.gaussian_noise
+GAUSSIAN_NOISE_FIRE_RATE = args.gaussian_noise_fire_rate
+STEPS = args.steps
+PLOT_EVERY = 1_000
+NCA_CHANNELS = 16
+KERNEL_SIZE = args.kernel_size
+ALIVE_THRESHOLD = args.alive_threshold
+
+EVAL_EVERY = args.eval_every
+N_EVAL_ROLLOUTS = 5
+EVAL_STEPS = 80
+EVAL_NOISE_LEVELS = [0.2, 0.4, 0.6, 0.8, 1.0]
+FIXED_NOISE = GAUSSIAN_NOISE > 0 or GAUSSIAN_NOISE_FIRE_RATE > 0
+
 print(torch.__version__)
 print(torch.version.cuda)
 print(torch.cuda.is_available())   # Should be True
@@ -28,32 +92,73 @@ torch.set_default_device('cuda')
 
 # ── Run directory ─────────────────────────────────────────────────────────────
 run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_dir = Path("runs") / f"{run_name}_coded_gates_noise_robust"
+gate_tag = args.gate.upper() if args.gate else "all"
+noise_tag = f"n{int(GAUSSIAN_NOISE*100)}fr{int(GAUSSIAN_NOISE_FIRE_RATE*100)}" if FIXED_NOISE else "robust"
+run_dir = Path("runs") / f"{run_name}_gates_noise_{gate_tag}_{noise_tag}_ks{KERNEL_SIZE}"
 run_dir.mkdir(parents=True, exist_ok=True)
 (run_dir / "rollouts").mkdir()
 (run_dir / "snapshots").mkdir()
 log_path = run_dir / "log.jsonl"
+
+with open(run_dir / "config.json", "w") as f:
+    json.dump({
+        "gate": gate_tag,
+        "kernel_size": KERNEL_SIZE,
+        "alive_threshold": ALIVE_THRESHOLD,
+        "gaussian_noise": GAUSSIAN_NOISE,
+        "gaussian_noise_fire_rate": GAUSSIAN_NOISE_FIRE_RATE,
+        "fixed_noise": FIXED_NOISE,
+        "steps": STEPS,
+        "eval_every": EVAL_EVERY,
+        "nca_channels": NCA_CHANNELS,
+        "learning_rate": LEARNING_RATE,
+        "batch_size": BATCH_SIZE,
+    }, f, indent=2)
+
 print(f"\nLogging to: {log_path}")
+print(f"{'─'*60}")
+print(f"  gate: {gate_tag}   noise: {noise_tag}   kernel_size: {KERNEL_SIZE}")
 print(f"{'─'*60}\n")
 
-LEARNING_RATE = 0.001
-BATCH_SIZE = 8
-GAUSSIAN_NOISE = 0.0
-STEPS = 80_000
-PLOT_EVERY = 1_000
-NCA_CHANNELS = 16
-KERNEL_SIZE = 7
 
-dataset = MultiGateDataset(TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=NCA_CHANNELS)
+def run_eval(trainer, eval_batch, noise_configs, n_rollouts=N_EVAL_ROLLOUTS, steps=EVAL_STEPS):
+    """Evaluate the persisted model, not the in-memory one.
+
+    Saves the current weights to a checkpoint, reloads them from disk (save ->
+    load round-trip), then runs the rollout-based evaluation. Returns the
+    evaluate() result dict plus the checkpoint path that was actually evaluated.
+    """
+    trainer.save_checkpoint()
+    trainer.load_checkpoint(trainer.learning_step)
+    ckpt = Path(trainer.checkpoint_pattern.format(step=trainer.learning_step))
+    result = trainer.evaluate(eval_batch, noise_configs, n_rollouts=n_rollouts, steps=steps)
+    return {**result, "checkpoint": str(ckpt)}
+
+dataset = MultiGateDataset(
+    TINY_AND_FARAWAY_TRAINING_CONFIG, nca_channels=NCA_CHANNELS, gate=args.gate
+)
+
+# Fixed batch reused for every periodic evaluation, so curves are comparable.
+eval_batch = next(iter(dataset.get_dataloader(batch_size=BATCH_SIZE)))
+if FIXED_NOISE:
+    eval_noise_configs = [(GAUSSIAN_NOISE, GAUSSIAN_NOISE_FIRE_RATE)]
+else:
+    # Average over the whole trained noise range, RL-style.
+    eval_noise_configs = [
+        (std, fire_rate) for std in EVAL_NOISE_LEVELS for fire_rate in EVAL_NOISE_LEVELS
+    ]
+eval_metrics = []
 
 nca = NeuralCA(
     channels = NCA_CHANNELS,
     hidden_channels = [128],
     fire_rate = 0.99,
-    alive_threshold = 0.0,
+    alive_threshold = ALIVE_THRESHOLD,
     zero_initialization = False,
     kernel_size=KERNEL_SIZE,
     read_only_dims = [-4,-3,-2,-1],
+    gaussian_noise = GAUSSIAN_NOISE,
+    gaussian_noise_fire_rate = GAUSSIAN_NOISE_FIRE_RATE,
     padding_type = "constant",
 )
 
@@ -73,14 +178,17 @@ best_loss = float("inf")
 
 pbar = tqdm(range(STEPS))
 for step in pbar:
-    std = np.random.choice([0.0,0.2,0.4,0.6,0.8,1.0])
-    fire_rate = np.random.choice([0.0,0.2,0.4,0.6,0.8,1.0])
+    if FIXED_NOISE:
+        std = GAUSSIAN_NOISE
+        fire_rate = GAUSSIAN_NOISE_FIRE_RATE
+    else:
+        std = np.random.choice([0.0,0.2,0.4,0.6,0.8,1.0])
+        fire_rate = np.random.choice([0.0,0.2,0.4,0.6,0.8,1.0])
     info = trainer.optim_step(
         steps=(30, 80), 
         return_rollout=(step % PLOT_EVERY == 0),
-        init_noise = (std == 0.0 or fire_rate == 0.0),  # start with clean data for better initial convergence
-        noise_std = std,
-        noise_fire_rate = fire_rate
+        noise_std = 0.0 if (std == 0.0 or fire_rate == 0.0) else std,
+        noise_fire_rate = 0.0 if (std == 0.0 or fire_rate == 0.0) else fire_rate,
     )
     loss = info["loss"]
     num_valid_bits = info["num_valid_bits"]
@@ -88,6 +196,7 @@ for step in pbar:
     grad_norm = trainer.metrics[-1].get("grad_norm") if trainer.metrics else None
     pbar.set_description(
         f"loss={loss:.4f}  bits={num_valid_bits:.2f}/{N_OUTPUT_BITS}" +
+        (f"  eval={eval_bits:.3f}" if step > 0 and eval_bits is not None else "") +
         (f"  gnorm={grad_norm:.3f}" if grad_norm else "")
     )
 
@@ -95,8 +204,26 @@ for step in pbar:
         f.write(json.dumps({
             "step": step, "loss": loss,
             "num_valid_bits": num_valid_bits,
+            "gate": gate_tag,
             "grad_norm": grad_norm,
         }) + "\n")
+
+    eval_bits = eval_loss = None
+    if step % EVAL_EVERY == 0:
+        eval_result = run_eval(
+            trainer,
+            eval_batch,
+            eval_noise_configs,
+        )
+        eval_bits, eval_loss = eval_result["eval_bits"], eval_result["eval_loss"]
+        eval_metrics.append({"step": step, "eval_bits": eval_bits, "eval_loss": eval_loss})
+        with open(log_path, "a") as f:
+            f.write(json.dumps({
+                "step": step, "eval_bits": eval_bits,
+                "eval_loss": eval_loss, "gate": gate_tag,
+                "per_cfg": eval_result["per_cfg"],
+            }) + "\n")
+        print(f"\n  EVAL step {step}: bits={eval_bits:.3f}  loss={eval_loss:.4f}  ({len(eval_noise_configs)*N_EVAL_ROLLOUTS} rollouts)")
 
     if step % PLOT_EVERY == 0:
         # ── Periodic reporting ────────────────────────────────────────────────
@@ -153,6 +280,11 @@ for step in pbar:
         bits_vals = [m["num_valid_bits"] for m in trainer.metrics if "num_valid_bits" in m]
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.scatter(range(len(bits_vals)), bits_vals, s=0.5, alpha=0.4, color="darkorange")
+        if eval_metrics:
+            ax.plot([m["step"] for m in eval_metrics],
+                    [m["eval_bits"] for m in eval_metrics],
+                    color="seagreen", marker="o", lw=1, label="eval bits")
+            ax.legend()
         ax.set_ylim(0, N_OUTPUT_BITS + 0.5)
         ax.set_xlabel("step")
         ax.set_ylabel("mean valid bits")
@@ -160,6 +292,32 @@ for step in pbar:
         fig.tight_layout()
         fig.savefig(run_dir / "bits_curve.png", dpi=120)
         plt.close(fig)
+
+        # ── Eval curves ───────────────────────────────────────────────────────
+        if eval_metrics:
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot([m["step"] for m in eval_metrics],
+                    [m["eval_bits"] for m in eval_metrics],
+                    color="seagreen", marker="o", lw=1)
+            ax.set_ylim(0, N_OUTPUT_BITS + 0.5)
+            ax.set_xlabel("step")
+            ax.set_ylabel("mean eval bit accuracy")
+            ax.set_title(f"Multi-Gate NCA — eval bits / {N_OUTPUT_BITS} — step {step}")
+            fig.tight_layout()
+            fig.savefig(run_dir / "eval_bits_curve.png", dpi=120)
+            plt.close(fig)
+
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot([m["step"] for m in eval_metrics],
+                    [m["eval_loss"] for m in eval_metrics],
+                    color="seagreen", marker="o", lw=1)
+            ax.set_yscale("log")
+            ax.set_xlabel("step")
+            ax.set_ylabel("eval loss")
+            ax.set_title(f"Multi-Gate NCA — eval loss — step {step}")
+            fig.tight_layout()
+            fig.savefig(run_dir / "eval_loss_curve.png", dpi=120)
+            plt.close(fig)
 
         # ── Rollout GIF ───────────────────────────────────────────────────────
         if rollout is not None:

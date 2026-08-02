@@ -753,13 +753,19 @@ class MultiGateDataset(IterableDataset):
 
     GATE_NAMES = ["AND", "OR", "XOR", "NAND"]
 
-    def __init__(self, config, nca_channels):
+    def __init__(self, config, nca_channels, gate=None):
 
         self.W = config.W
         self.H = config.H
         self.r = config.r
         self.spacing = config.spacing
         self.nca_channels = nca_channels
+        self.gate = gate.upper() if gate is not None else None
+        if self.gate is not None:
+            assert self.gate in self.GATE_NAMES, (
+                f"gate must be one of {self.GATE_NAMES}, got {gate!r}"
+            )
+            self.gate_idx = self.GATE_NAMES.index(self.gate)
 
         self.AND_Dataset = NCPUDataset(
             Namespace(
@@ -806,6 +812,8 @@ class MultiGateDataset(IterableDataset):
         self.counter = 0
 
     def _return_dataset(self):
+        if self.gate is not None:
+            return self.datasets[self.gate_idx]
         return self.datasets[self.counter % 4]
 
     def _code_dataset(self, inp, gate_idx):
@@ -831,7 +839,7 @@ class MultiGateDataset(IterableDataset):
         return self._return_dataset().get_io_mask()
 
     def get_sample(self):
-        gate_idx = self.counter % 4
+        gate_idx = self.gate_idx if self.gate is not None else self.counter % 4
         dataset = self.datasets[gate_idx]
         left, right = dataset.get_sample()
 
