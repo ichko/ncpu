@@ -18,8 +18,7 @@ right answer. Nothing in the design knows about logic, wires, or bit order.
   addition (16 input bits, 9-bit sum).
 - **Carry propagation emerges.** On the longest carry chain, the output bits
   settle in order, least-significant first. The carry climbs the output column
-  step by step, like a ripple-carry wave. See the rollout figures in
-  `docs/alife2026_lba/figs/`.
+  step by step, like a ripple-carry wave.
 - **Length generalisation.** We train the rule only on sums of up to 3 bits. It
   then adds 8-bit operands it never saw, at 98% accuracy or better. A
   bottom-aligned encoding gives the rule a position-invariant carry.
@@ -30,12 +29,6 @@ right answer. Nothing in the design knows about logic, wires, or bit order.
   byte well (about 99.7% per bit). It does not yet hold the one-bit status flags
   reliably (carry-out and branch-taken). This is an open problem, not a solved
   result.
-
-## Paper
-
-A two-page Late Breaking Abstract for ALIFE 2026 is in
-[`docs/alife2026_lba/`](docs/alife2026_lba/). It has `main.pdf` and the LaTeX
-source.
 
 ## Setup
 
@@ -81,7 +74,6 @@ and `BIG_4BIT_ADDER_TRAINING_CONFIG`. The analysis and figure scripts
 | `scripts/`  | training, analysis, and visualisation scripts |
 | `results/`  | per-experiment metrics, figures, and analysis notes (E1–E5, ablations, ALU) |
 | `runs/`     | training run directories with checkpoints and configs |
-| `docs/`     | write-ups, paper assets, and the ALIFE 2026 abstract |
 | `notebooks/`| interactive exploration |
 
 See `CLAUDE.md` for a fuller description of the architecture and conventions.

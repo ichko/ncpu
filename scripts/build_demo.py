@@ -28,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "demo" / "data"
-PROJECT = "ncpu-demo"                     # Cloudflare Pages project name
+PROJECT = "ncpu"                          # Cloudflare Pages project -> ncpu.pages.dev
 
 # name -> (checkpoint it needs, command, a path that exists once it is built)
 TARGETS = {
