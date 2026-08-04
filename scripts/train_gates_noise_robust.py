@@ -25,11 +25,7 @@ parser.add_argument(
     "--gate",
     type=str,
     default=None,
-<<<<<<< HEAD
-    help="train a single gate: AND/OR/NOR/XOR/NAND (default: all via one-hot code)",
-=======
     help="train a single gate: AND/OR/XOR/NAND (default: all four via one-hot code)",
->>>>>>> 12c5021 (updating noise scripts)
 )
 parser.add_argument(
     "--kernel-size",
@@ -161,10 +157,14 @@ nca = NeuralCA(
     zero_initialization = False,
     kernel_size=KERNEL_SIZE,
 <<<<<<< HEAD
+<<<<<<< HEAD
     # read_only_dims = [-5,-4,-3,-2,-1],
 =======
     read_only_dims = [-4,-3,-2,-1],
 >>>>>>> 12c5021 (updating noise scripts)
+=======
+    # read_only_dims = [-4,-3,-2,-1],
+>>>>>>> 804d06c (disabling read only dicts)
     gaussian_noise = GAUSSIAN_NOISE,
     gaussian_noise_fire_rate = GAUSSIAN_NOISE_FIRE_RATE,
     padding_type = "constant",
