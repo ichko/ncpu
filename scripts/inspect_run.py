@@ -37,7 +37,7 @@ def build_nca(cfg):
         "zero_initialization: " , cfg.get("zero_initialization", False),
         "kernel_size: " , cfg.get("KERNEL_SIZE", 7),
         "padding_type: " , cfg.get("padding_type", "constant"),
-        "read_only_dims: " , cfg.get("read_only_dims", [-4, -3, -2, -1]),
+        "read_only_dims: " , cfg.get("read_only_dims", [-5, -4, -3, -2, -1]),
         "gaussian_noise: " , cfg.get("GAUSSIAN_NOISE", 0.2),
         "gaussian_noise_fire_rate: " , cfg.get("gaussian_noise_fire_rate", cfg.get("fire_rate", 0.2)),
 
@@ -51,7 +51,7 @@ def build_nca(cfg):
         zero_initialization=cfg.get("zero_initialization", False),
         kernel_size=cfg.get("KERNEL_SIZE", 7),
         padding_type=cfg.get("padding_type", "constant"),
-        read_only_dims=cfg.get("read_only_dims", [-4, -3, -2, -1]),
+        read_only_dims=cfg.get("read_only_dims", [-5, -4, -3, -2, -1]),
         gaussian_noise=cfg.get("GAUSSIAN_NOISE", 0.2),
         gaussian_noise_fire_rate=cfg.get("gaussian_noise_fire_rate", cfg.get("fire_rate", 0.2)),
     )

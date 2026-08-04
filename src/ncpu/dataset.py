@@ -751,7 +751,7 @@ class DynamicDataset(IterableDataset):
 
 class MultiGateDataset(IterableDataset):
 
-    GATE_NAMES = ["AND", "OR", "XOR", "NAND"]
+    GATE_NAMES = ["AND", "OR", "NOR", "XOR", "NAND"]
 
     def __init__(self, config, nca_channels, gate=None):
 
@@ -797,6 +797,16 @@ class MultiGateDataset(IterableDataset):
                 sampler=sample_XOR_gate,
             )
         )
+        self.NOR_Dataset = NCPUDataset(
+            Namespace(
+                W=config.W,
+                H=config.H,
+                r=config.r,
+                spacing=config.spacing,
+                balanced=config.balanced,
+                sampler=sample_NOR_gate,
+            )
+        )
         self.NAND_Dataset = NCPUDataset(
             Namespace(
                 W=config.W,
@@ -808,27 +818,34 @@ class MultiGateDataset(IterableDataset):
             )
         )
 
-        self.datasets = [self.AND_Dataset, self.OR_Dataset, self.XOR_Dataset, self.NAND_Dataset]
+        self.datasets = [
+            self.AND_Dataset,
+            self.OR_Dataset,
+            self.NOR_Dataset,
+            self.XOR_Dataset,
+            self.NAND_Dataset,
+        ]
         self.counter = 0
 
     def _return_dataset(self):
         if self.gate is not None:
             return self.datasets[self.gate_idx]
-        return self.datasets[self.counter % 4]
+        return self.datasets[self.counter % len(self.GATE_NAMES)]
 
     def _code_dataset(self, inp, gate_idx):
-        """Write a one-hot gate code into the last 4 channels of inp.
+        """Write a one-hot gate code into the last len(GATE_NAMES) channels of inp.
 
         inp shape: (nca_channels, H, W)
-        Channels [-4], [-3], [-2], [-1] encode AND, OR, XOR, NAND respectively.
+        The last len(GATE_NAMES) channels encode the active gate (one-hot).
         Only the left half (columns 0..W//2) is set to 1 for the active gate;
         the right half and all inactive gate channels remain 0.
         """
+        n = len(self.GATE_NAMES)
         mid = self.W // 2
         # Zero out all code channels
-        inp[-4:] = 256 // 2 
+        inp[-n:] = 256 // 2
         # Set the left half of the active gate's channel to 1
-        inp[-(4 - gate_idx), :, :mid] = 256
+        inp[-(n - gate_idx), :, :mid] = 256
         return inp
 
     def get_output_bit_masks(self):
@@ -839,7 +856,7 @@ class MultiGateDataset(IterableDataset):
         return self._return_dataset().get_io_mask()
 
     def get_sample(self):
-        gate_idx = self.gate_idx if self.gate is not None else self.counter % 4
+        gate_idx = self.gate_idx if self.gate is not None else self.counter % len(self.GATE_NAMES)
         dataset = self.datasets[gate_idx]
         left, right = dataset.get_sample()
 
