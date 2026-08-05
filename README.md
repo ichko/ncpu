@@ -94,7 +94,12 @@ The goal is robust, reconfigurable logic on an NCA canvas. The steps:
 
 ## References
 
-1. Béna & Faldor (2025), *A Path to Universal Neural Cellular Automata* — <https://arxiv.org/abs/2505.13058>
-2. Miotti et al. (2025), *Differentiable Logic Cellular Automata* — <https://google-research.github.io/self-organising-systems/difflogic-ca/>
-3. Mordvintsev et al. (2020), *Growing Neural Cellular Automata* — <https://distill.pub/2020/growing-ca/>
-4. *MaCE: General Mass-Conserving Dynamics for Cellular Automata* (2025) — <https://arxiv.org/abs/2507.12306>
+1. Béna, Faldor, Goodman & Cully (2025), *A Path to Universal Neural Cellular
+   Automata*, GECCO Companion — <https://arxiv.org/abs/2505.13058>
+2. Miotti, Niklasson, Randazzo & Mordvintsev (2025), *Differentiable Logic
+   Cellular Automata: From Game of Life to Pattern Generation*, ALIFE —
+   <https://google-research.github.io/self-organising-systems/difflogic-ca/>
+3. Mordvintsev, Randazzo, Niklasson & Levin (2020), *Growing Neural Cellular
+   Automata*, Distill — <https://distill.pub/2020/growing-ca/>
+4. Papadopoulos & Guichard (2025), *MaCE: General Mass Conserving Dynamics for
+   Cellular Automata* — <https://arxiv.org/abs/2507.12306>
