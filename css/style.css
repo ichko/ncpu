@@ -1,0 +1,234 @@
+/* --------------------------------------------------------------------------
+   Warm paper, single column, technical/lab-notebook chrome. Monospace labels,
+   grotesque headings, one signal-red accent. No frameworks, nothing off-network.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --paper:   #f1e9d6;
+  --paper-2: #ece2c9;
+  --panel:   #f6f0df;
+  --ink:     #221f19;
+  --ink-2:   #48443b;
+  --ink-3:   #857c68;
+  --rule:    #d3c9ac;
+  --rule-2:  #c3b791;
+  --accent:  #ab3520;
+  --ok:      #4a6a34;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(1200px 480px at 50% -6%, rgba(255,252,244,0.6), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(120,96,50,0.022) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(120,96,50,0.022) 0 1px, transparent 1px 3px);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.wrap { max-width: 52rem; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+
+/* ---- masthead ----------------------------------------------------------- */
+header.masthead { margin-bottom: 2.4rem; }
+/* work-in-progress pin: flat, square, tiny */
+.wip { display: inline-block; font-family: var(--mono); font-size: 0.56rem; font-weight: 700;
+       letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2);
+       background: var(--paper-2); border: 1px solid var(--rule); padding: 0.2em 0.4em; }
+h1.title {
+  font-family: var(--sans); font-weight: 700;
+  font-size: clamp(1.7rem, 4.4vw, 2.4rem); line-height: 1.08;
+  letter-spacing: -0.025em; margin: 0 0 1rem;
+}
+h1.title em { font-style: normal; color: var(--accent); }
+.byline { font-family: var(--sans); font-size: 0.82rem; color: var(--ink-3); margin: 0.1rem 0 1.1rem; font-weight: 400; }
+.byline .name { color: var(--ink-2); font-weight: 500; }
+a.name { text-decoration: none; border-bottom: 1px solid var(--rule-2); }
+a.name:hover { color: var(--accent); border-color: var(--accent); }
+.byline .aff { font-style: italic; color: var(--ink-3); }
+.byline .aff::before { content: "· "; color: var(--rule-2); font-style: normal; margin: 0 0.15rem 0 0.4rem; }
+.byline .sep { color: var(--rule-2); margin: 0 0.7rem; }
+.subtitle { font-size: 1.12rem; color: var(--ink-2); margin: 0; line-height: 1.5; }
+
+/* ---- sections ----------------------------------------------------------- */
+section { margin: 3rem 0; }
+.seclabel {
+  font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 0.5rem;
+}
+h2 { font-family: var(--sans); font-weight: 700; font-size: 1.6rem; letter-spacing: -0.02em; line-height: 1.12; margin: 0 0 1rem; }
+h3 { font-family: var(--mono); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; margin: 2rem 0 0.6rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--rule); }
+p { margin: 0 0 1.05rem; }
+p.lead { font-size: 1.08rem; }
+a { color: var(--accent); text-underline-offset: 2px; }
+strong { font-weight: 650; }
+code { font-family: var(--mono); font-size: 0.86em; background: rgba(120,96,50,0.12); padding: 0.05em 0.34em; border-radius: 2px; }
+.note { font-family: var(--mono); font-size: 0.76rem; line-height: 1.55; color: var(--ink-3); border-left: 2px solid var(--rule-2); padding-left: 0.9rem; margin: 1.2rem 0; }
+
+/* ---- spec strip (after the demo) --------------------------------------- */
+.spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0 1.6rem; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 0.9rem 0; margin: 1.4rem 0; }
+.spec div { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-2); padding: 0.2rem 0; }
+.spec .lab { color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.64rem; }
+
+/* ---- instrument panel --------------------------------------------------- */
+.panelbox { background: #faf6ea; border: 1px solid var(--ink); margin: 1.6rem 0; box-shadow: 3px 3px 0 rgba(34,31,25,0.09); }
+.panelbox > .hd { display: flex; justify-content: space-between; align-items: center; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); background: var(--paper-2); border-bottom: 1px solid var(--ink); padding: 0.5rem 0.8rem; }
+.panelbox > .hd .rt { color: var(--accent); }
+.panelbox > .bd { padding: 1rem; }
+.caption { font-family: var(--mono); font-size: 0.72rem; line-height: 1.55; color: var(--ink-3); border-top: 1px solid var(--rule); padding: 0.7rem 0.8rem; background: var(--paper-2); }
+.caption b { color: var(--ink-2); font-weight: 600; }
+
+/* demo: three columns — inputs · plate · outputs — so each control sits on the
+   same side as its circles and wires never cross the grid. Wraps on narrow. */
+/* three columns spread across the width with the plate in the middle */
+.demo { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; position: relative; }
+/* connector layer sits above the plate (so the white stubs show over the field)
+   but below the control columns (so wires tuck behind the buttons and dots) */
+.connectors { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 2; }
+.connectors path { fill: none; stroke-linejoin: round; stroke-linecap: round; transition: opacity .18s; }
+.stage { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 8px 0; position: relative; z-index: 1; }
+.screen { display: flex; align-items: flex-start; justify-content: center; }
+/* plate + progress bar move together and stay the same width as the grid */
+.plate-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+/* the grid sits on its own dark surface with a hairline border */
+.plate { position: relative; line-height: 0; box-sizing: content-box; border: 1px solid var(--ink); background: #3b0f4f; align-self: center; }
+canvas#field { display: block; background: #3b0f4f; image-rendering: pixelated; image-rendering: crisp-edges; }
+svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+svg.overlay circle { transition: stroke 0.2s, stroke-opacity 0.2s; }
+
+.progress { }
+.pbar { height: 3px; background: var(--rule); position: relative; overflow: hidden; }
+.pbar > i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--accent); }
+.pmeta { font-family: var(--mono); font-size: 0.64rem; color: var(--ink-3); margin-top: 0.3rem; letter-spacing: 0.04em; }
+.verdict { font-family: var(--mono); font-size: 0.78rem; padding: 0.4rem 0.55rem; border: 1px solid var(--rule); color: var(--ink-2); background: var(--paper); display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.verdict.pass { border-color: var(--ok); color: var(--ok); background: rgba(74,106,52,0.08); }
+.verdict.fail { border-color: var(--accent); color: var(--accent); background: rgba(171,53,32,0.07); }
+.verdict.run { color: var(--ink-3); }
+.verdict .mk { font-weight: 700; }
+
+.stage { flex: 0 0 auto; order: 2; }
+/* control columns sit above the connector layer, so wires run behind them */
+.col { display: flex; flex-direction: column; gap: 0.9rem; position: relative; z-index: 3; }
+.col-in  { order: 1; flex: 0 1 17.5rem; min-width: 15rem; }
+.col-out { order: 3; flex: 0 1 7rem; min-width: 6rem; }
+.col h4 { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 0.45rem; padding-bottom: 0.26rem; border-bottom: 1px solid var(--rule); }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 0.28rem; }
+.tab { font-family: var(--mono); font-size: 0.68rem; background: var(--paper); color: var(--ink-2); border: 1px solid var(--rule); padding: 0.3rem 0.5rem; cursor: pointer; }
+.tab:hover { border-color: var(--ink-3); color: var(--ink); }
+.tab.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* inputs: grouped horizontal rows (one row per operand). A fixed min-height keeps
+   the block the same size across functions so the layout never jitters. */
+#inputBits { display: flex; flex-direction: column; justify-content: center; gap: 0.5rem; margin: 1.4rem 0; min-height: 4.6rem; }
+.bit-row { display: flex; align-items: center; gap: 0.26rem; flex-wrap: wrap; }
+.operand-tag { font-family: var(--mono); font-weight: 700; font-size: 0.74rem; width: 1rem; color: var(--accent); }
+.operand-val { font-family: var(--mono); font-size: 0.74rem; color: var(--ink-3); margin-left: 0.35rem; min-width: 2ch; text-align: right; }
+.bit { font-family: var(--mono); font-size: 0.64rem; font-weight: 600; width: 1.2rem; height: 1.45rem; cursor: pointer; border-radius: 2px; background: var(--paper); color: var(--ink-3); border: 1px solid var(--ink-3); padding: 0; }
+.bit:hover { border-color: var(--ink); }
+.bit.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.num-in { font-family: var(--mono); font-size: 0.8rem; width: 3.6rem; padding: 0.2rem 0.4rem; background: var(--paper); color: var(--ink); border: 1px solid var(--ink-3); border-radius: 2px; }
+.num-in:focus { outline: none; border-color: var(--accent); }
+.bit-cluster { display: inline-flex; gap: 0.18rem; }
+.expr { font-family: var(--mono); font-size: 0.84rem; color: var(--ink); background: var(--paper); border: 1px dashed var(--rule-2); padding: 0.38rem 0.55rem; }
+.live-num { font-family: var(--mono); font-size: 1.15rem; font-weight: 700; color: var(--ink-3); min-height: 1.4rem; letter-spacing: 0.02em; }
+.live-num.ok { color: var(--ok); }
+.live-num.bad { color: var(--accent); }
+
+/* outputs: a vertical stack, one dot per line, mirroring the grid's output column */
+.readout { display: flex; flex-direction: column; gap: 0.28rem; align-items: flex-start; }
+.out-line { display: flex; align-items: center; gap: 0.4rem; }
+.out-dot { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 1px solid var(--ink-3); background: var(--paper-2); transition: background .25s, box-shadow .25s, border-color .25s; }
+.out-dot.hi { background: var(--ink); }
+.out-dot.ok { border-color: var(--ok); box-shadow: 0 0 0 2px rgba(74,106,52,0.28); }
+.out-dot.bad { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(171,53,32,0.3); }
+.out-lbl { font-family: var(--mono); font-size: 0.55rem; color: var(--ink-3); }
+
+/* compact controls: buttons + short sliders on tidy rows */
+.btn-row { display: flex; gap: 0.32rem; }
+button.ctl { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; background: var(--paper); color: var(--ink); border: 1px solid var(--ink); padding: 0.38rem 0.5rem; flex: 1; }
+button.ctl:hover { background: var(--ink); color: var(--paper); }
+.knobs { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; font-family: var(--mono); font-size: 0.64rem; color: var(--ink-2); }
+.knob { display: flex; align-items: center; gap: 0.4rem; }
+.knob .lab { color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.6rem; }
+.knob input[type=range] { width: 70px; accent-color: var(--accent); }
+.knob .val { min-width: 3.4ch; }
+.toggle { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.toggle input { accent-color: var(--accent); }
+.metaline { font-family: var(--mono); font-size: 0.6rem; color: var(--ink-3); }
+.metaline span { color: var(--ink-2); }
+#simStatus { color: var(--accent); font-family: var(--mono); font-size: 0.68rem; text-transform: none; letter-spacing: 0; }
+
+/* ---- figure image ------------------------------------------------------- */
+figure.fig { margin: 0.7rem 0 1.3rem; }
+figure.fig img { width: 100%; height: auto; display: block; image-rendering: auto; }
+figure.fig figcaption { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); line-height: 1.5; margin-top: 0.6rem; }
+figure.fig figcaption b { color: var(--ink-2); font-weight: 600; }
+
+/* ---- tables ------------------------------------------------------------- */
+table.data { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin: 1.2rem 0; }
+table.data caption { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); text-align: left; margin-bottom: 0.55rem; }
+table.data th, table.data td { text-align: left; padding: 0.38rem 0.6rem; border-bottom: 1px solid var(--rule); }
+table.data th { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; border-bottom: 1px solid var(--ink-3); }
+table.data td.num, table.data th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 0.8rem; }
+.tag-pass { color: var(--ok); font-family: var(--mono); font-size: 0.72rem; }
+.tag-fail { color: var(--accent); font-family: var(--mono); font-size: 0.72rem; }
+
+/* ---- stat cards --------------------------------------------------------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); border: 1px solid var(--ink); margin: 1.4rem 0; }
+.card { padding: 0.9rem; border-right: 1px solid var(--rule); }
+.card:last-child { border-right: 0; }
+.card .k { font-family: var(--mono); font-size: 1.8rem; color: var(--accent); line-height: 1; display: block; margin-bottom: 0.3rem; }
+.card .kt { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.card p { font-size: 0.86rem; margin: 0.45rem 0 0; color: var(--ink-2); }
+@media (max-width: 560px) { .card { border-right: 0; border-bottom: 1px solid var(--rule); } }
+
+/* ---- steps -------------------------------------------------------------- */
+.steps { counter-reset: step; margin: 1.2rem 0; border-top: 1px solid var(--rule); }
+.step-item { display: flex; gap: 0.9rem; padding: 0.8rem 0; border-bottom: 1px solid var(--rule); }
+.step-item::before { counter-increment: step; content: "0" counter(step); font-family: var(--mono); font-size: 0.76rem; color: var(--accent); flex: 0 0 1.8rem; }
+.step-item h4 { font-family: var(--mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 0.25rem; border: 0; padding: 0; }
+.step-item p { margin: 0; font-size: 0.9rem; color: var(--ink-2); }
+
+/* ---- schematic ---------------------------------------------------------- */
+.schematic { width: 100%; height: auto; }
+.schematic .wire { fill: none; stroke: var(--ink-2); stroke-width: 1; }
+.schematic .box { fill: var(--panel); stroke: var(--ink); stroke-width: 1; }
+.schematic .cell { fill: none; stroke: var(--rule-2); stroke-width: 0.8; }
+.schematic .cellc { fill: var(--accent); opacity: 0.85; }
+.schematic text { font-family: var(--mono); fill: var(--ink); }
+.schematic .lbl { font-size: 9px; }
+.schematic .sub { font-size: 7px; fill: var(--ink-3); }
+
+/* ---- citations & references -------------------------------------------- */
+.cite { font-size: 0.7em; vertical-align: super; line-height: 0; color: var(--accent); text-decoration: none; padding: 0 0.1em; font-family: var(--mono); }
+.cite::before { content: "["; }
+.cite::after { content: "]"; }
+ol.refs { padding-left: 1.4rem; margin: 1rem 0 0; }
+ol.refs li { font-size: 0.9rem; color: var(--ink-2); margin-bottom: 0.7rem; line-height: 1.5; }
+ol.refs li::marker { color: var(--accent); font-family: var(--mono); font-size: 0.85rem; }
+ol.refs em { color: var(--ink-3); }
+
+footer { border-top: 1px solid var(--rule); margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.84rem; color: var(--ink-2); }
+footer .mono { color: var(--ink-3); font-size: 0.7rem; }
+
+/* always-visible link to the source */
+.gh-btn {
+  position: fixed; top: 1rem; right: 1rem; z-index: 100;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--paper); background: var(--accent); border: 1px solid var(--ink);
+  padding: 0.45rem 0.7rem; text-decoration: none;
+  box-shadow: 2px 2px 0 rgba(34,31,25,0.25);
+}
+.gh-btn:hover { background: var(--ink); }
+.gh-btn svg { width: 15px; height: 15px; display: block; }
+@media (max-width: 560px) { .gh-btn span { display: none; } .gh-btn { padding: 0.45rem; } }

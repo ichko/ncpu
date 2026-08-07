@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Self-organized boolean computation</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="description" content="A neural cellular automaton — one small rule per cell — trained to perform Boolean logic and binary addition, running live in the browser." />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<a class="gh-btn" href="https://github.com/ichko/ncpu" target="_blank" rel="noopener" aria-label="View source on GitHub">
+  <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+  <span>GitHub</span>
+</a>
+<div class="wrap">
+
+  <header class="masthead">
+    <div style="margin-bottom:0.7rem;">
+      <span class="wip">Work in progress</span>
+    </div>
+    <h1 class="title">Self-organized <em>boolean</em> computation</h1>
+    <p class="byline"><a class="name" href="https://ichko.github.io" target="_blank" rel="noopener">Iliya Zhechev</a> <span class="aff">Sofia University</span> <span class="sep">·</span> <a class="name" href="https://peterwaiiace.github.io/me.github.io/" target="_blank" rel="noopener">Piotr Walas</a> <span class="aff">Warsaw University of Technology</span></p>
+    <p class="subtitle">Most neural cellular automata are trained to grow and repair shapes<a href="#ref-1" class="cite">1</a><a href="#ref-3" class="cite">3</a>. This one computes instead. One learned rule runs in every cell for many steps. From inputs drawn on the grid, the cells build the answer. Set the bits below and watch the model compute Boolean logic and binary addition, or <a href="carry_tsne.html">explore the latent dimensions the network computes in</a>.</p>
+  </header>
+
+  <!-- DEMO -->
+  <section id="fig1">
+    <div class="panelbox">
+      <div class="hd"><span>Fig. 1 · Live Demo</span><span class="rt" id="simStatus"></span></div>
+      <div class="bd">
+        <div class="demo" id="demo">
+          <svg class="connectors" id="connSvg" aria-hidden="true"></svg>
+
+          <!-- INPUT side — aligned with the input circles on the grid's left edge -->
+          <div class="col col-in">
+            <div><h4>Task</h4><div class="tabs" id="taskTabs"></div></div>
+            <div><h4>Input bits</h4><div id="inputBits"></div><div class="expr" id="exprLine"></div></div>
+            <div class="btn-row">
+              <button class="ctl" id="playBtn">Pause</button>
+              <button class="ctl" id="againBtn">Restart</button>
+              <button class="ctl" id="randBtn">Random</button>
+              <button class="ctl" id="carryBtn">Long carry</button>
+            </div>
+            <div class="knobs">
+              <span class="knob"><span class="lab">speed</span><input type="range" id="fpsSlider" min="2" max="60" value="30" /><span class="val" id="fpsVal">30</span></span>
+              <label class="toggle"><input type="checkbox" id="debugToggle" /> visual guide</label>
+            </div>
+          </div>
+
+          <!-- the automaton -->
+          <div class="stage">
+            <div class="screen" id="screen">
+              <div class="plate-wrap">
+                <div class="plate" id="plate">
+                  <canvas id="field"></canvas>
+                  <svg class="overlay" id="ioOverlay" preserveAspectRatio="none"></svg>
+                </div>
+                <div class="progress">
+                  <div class="pbar"><i id="pbar"></i></div>
+                  <div class="pmeta">step <span id="pstep">000</span> / <span id="phorizon">000</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- OUTPUT side — aligned with the output circles on the grid's right edge -->
+          <div class="col col-out">
+            <div><h4>Grid output</h4><div class="readout" id="outputReadout"></div></div>
+            <div class="live-num" id="liveNum"></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption"><b>Reading it.</b> The input bits are the circles on the left. The answer forms in the circles on the right, which start out blank. Each cell's colour shows its value: dark for 0, bright yellow for 1.</div>
+    </div>
+
+    <div class="spec">
+      <div><div class="lab">Substrate</div>16-channel cellular automaton, one shared rule</div>
+      <div><div class="lab">Rule</div>fixed Sobel perception → 48·128·16 network (~8k weights)</div>
+      <div><div class="lab">Supervision</div>final-grid pixels only, no target for internal state</div>
+    </div>
+  </section>
+
+  <!-- 01 -->
+  <section id="setup">
+    <div class="seclabel">01 — Setup</div>
+    <h2>The task</h2>
+    <p class="lead">A cellular automaton is a grid of cells that all update by the same local rule, one step at a time. Conway's Game of Life<a href="#ref-10" class="cite">10</a> is a familiar example. Every cell holds a few numbers. The rule looks only at a cell and its nearest neighbours. In a neural cellular automaton, the rule is a small neural network. Gradient descent trains the rule<a href="#ref-1" class="cite">1</a>. No one writes it by hand. Such rules have grown shapes<a href="#ref-1" class="cite">1</a>, made textures<a href="#ref-3" class="cite">3</a>, built working 3D machines<a href="#ref-4" class="cite">4</a>, classified digits<a href="#ref-2" class="cite">2</a>, and solved graph problems<a href="#ref-5" class="cite">5</a>.</p>
+    <p>We give the model a task by drawing it on the grid. We place the input bits as circles along the left edge. A bright circle means <code>1</code>, and a dark circle means <code>0</code>. The answer must appear as circles on the right edge. We train the model only on whether the last grid matches the target. We never tell it where the input or output is, or which function to compute. To make the answer appear on the right, the cells must move information across the grid over many steps. Living tissue works in a similar way. It routes positional information<a href="#ref-8" class="cite">8</a> and turns local chemistry into global pattern<a href="#ref-9" class="cite">9</a>. Setting a task as a picture differs from other routes to computation. Some methods wire logic gates into the cells directly<a href="#ref-6" class="cite">6</a>. Others build toward universal automata<a href="#ref-7" class="cite">7</a>.</p>
+    <p>The rule is small. Each cell reads its 5×5 or 7×7 neighbourhood through three fixed filters: its own value, the horizontal Sobel gradient, and the vertical Sobel gradient. A small two-layer network (about 8,000 weights) then updates the cell's numbers. The same rule runs on every cell for a few dozen steps. Then we read the grid.</p>
+  </section>
+
+  <!-- 02 -->
+  <section id="step">
+    <div class="seclabel">02 — Mechanism</div>
+    <h2>The update rule</h2>
+    <p>The design follows the Growing Neural Cellular Automata of Mordvintsev et al.<a href="#ref-1" class="cite">1</a> It has three parts: a fixed perception step, a small learned update network, and stochastic per-cell updates. One step does the same thing in every cell:</p>
+    <div class="steps">
+      <div class="step-item"><div class="st-body"><h4>Perceive</h4><p>The cell reads its neighbourhood through three fixed filters: the cell itself, the horizontal Sobel gradient, and the vertical Sobel gradient. Across the 16 channels, this gives 48 numbers.</p></div></div>
+      <div class="step-item"><div class="st-body"><h4>Apply the network</h4><p>The 48 numbers pass through the trained network (48 → 128 → 16, with a ReLU between). This is the only learned part. It is the same in every cell.</p></div></div>
+      <div class="step-item"><div class="st-body"><h4>Update</h4><p>We add the 16 outputs to the cell's numbers. One channel stays read-only and always holds the original input. So the model can still see the question after many steps.</p></div></div>
+      <div class="step-item"><div class="st-body"><h4>Fire and clamp</h4><p>Only a random fraction of cells update on each step. So the rule cannot depend on a global clock. We clamp the numbers to a fixed range. We repeat the step, then read the grid.</p></div></div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section id="carry">
+    <div class="seclabel">03 — Addition</div>
+    <h2>Addition</h2>
+    <p>Addition is not a local operation. The highest bit of <code>127 + 1</code> depends on a carry. The carry starts at the lowest bit and passes through every bit above it. A rule that sees only a small neighbourhood cannot compute this in one step. The carry must move across the grid over time. The images below show the visible channel of the 8-bit adder as it computes <code>127 + 1</code>.</p>
+    <figure class="fig">
+      <img src="assets/carry_8bit.png" alt="Eight snapshots of the 8-bit adder computing 127 + 1: activity spreads from the two input columns to the output column, and the carry settles last." />
+      <figcaption><b>127 + 1 = 128.</b> At <span class="mono">t = 0</span>, only the two input columns are set (A = 127 on the left, B = 1 next to it). Over the next steps, the activity spreads toward the output column on the right. The lower bits settle first. The carry settles last, because it must travel the whole way up the column.</figcaption>
+    </figure>
+    <p>You can run this in Fig. 1. Choose <b>ADD 4-BIT</b> or <b>ADD 8-BIT</b>. Both adders gave the correct sum on every random test we tried. To watch the carry move, <a href="carry_tsne.html">scrub the rollout frame-by-frame</a> and follow the hidden channels that carry the wave.</p>
+  </section>
+
+  <!-- 04 -->
+  <section id="findings">
+    <div class="seclabel">04 — Results</div>
+    <h2>Results</h2>
+    <div class="cards">
+      <div class="card"><span class="k">8</span><span class="kt">Boolean functions</span><p>AND, OR, XOR, NAND, NOR, XNOR, majority-of-3, and a two-output half-adder. Each one reached full bit-accuracy on a 48×48 grid.</p></div>
+      <div class="card"><span class="k">8-bit</span><span class="kt">Addition</span><p>16 input bits, 9 output bits, and a carry chain of length eight, both operands.</p></div>
+      <div class="card"><span class="k">~8k</span><span class="kt">Weights in the rule</span><p>One two-layer network. Every cell uses it on every step.</p></div>
+    </div>
+
+    <h3>Some gates are harder than others</h3>
+    <p>The model learns some gates quickly: AND, OR, NAND, and NOR. A single threshold can separate each of these. XOR and XNOR are harder, because the output depends on whether the two inputs disagree. In our benchmark, OR reached full accuracy after tens to hundreds of training steps. XOR sometimes took several thousand.</p>
+
+    <h3>Three settings that have to be right</h3>
+    <p>Three choices had to be right for the model to learn at all. The table shows XOR (best seed of each setting).</p>
+    <table class="data">
+      <caption>Ablations · XOR (valid bits, max = 1.0)</caption>
+      <thead><tr><th>Setting</th><th>Value</th><th class="num">Valid bits</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Window size</td><td>3×3</td><td class="num">0.50–0.63</td><td><span class="tag-fail">does not learn</span></td></tr>
+        <tr><td>Window size</td><td>5×5</td><td class="num">1.00</td><td><span class="tag-pass">learns</span></td></tr>
+        <tr><td>Window size</td><td>7×7</td><td class="num">1.00</td><td><span class="tag-pass">learns (best)</span></td></tr>
+        <tr><td>Alive masking</td><td>on</td><td class="num">0.50–0.63</td><td><span class="tag-fail">does not learn</span></td></tr>
+        <tr><td>Alive masking</td><td>off</td><td class="num">1.00</td><td><span class="tag-pass">learns</span></td></tr>
+        <tr><td>Weight init</td><td>zeros</td><td class="num">0.50–0.63</td><td><span class="tag-fail">does not learn</span></td></tr>
+        <tr><td>Weight init</td><td>non-zero</td><td class="num">1.00</td><td><span class="tag-pass">learns</span></td></tr>
+      </tbody>
+    </table>
+    <p>A 3×3 window is too small. A signal cannot cross the grid in the number of steps we run. Alive masking comes from image-growing automata. It stops updates in empty regions. Here the empty background does the computation, so masking it prevents learning. A rule whose weights start at zero produces no gradient. So training never starts.</p>
+
+    <h3>It works on longer inputs than it was trained on</h3>
+    <p>The rule is local, and the bits sit against a fixed edge. So an adder trained on short sums also works on longer ones. Trained on sums of up to 4 bits, it adds 8-bit numbers with more than 99% of bits correct.</p>
+    <table class="data">
+      <caption>Adder trained on ≤ k-bit sums, tested on wider ones (% bits correct, 2 seeds)</caption>
+      <thead><tr><th>Trained up to</th><th class="num">4-bit</th><th class="num">6-bit</th><th class="num">8-bit</th></tr></thead>
+      <tbody>
+        <tr><td>2-bit sums</td><td class="num">95.3</td><td class="num">93.7</td><td class="num">90.5</td></tr>
+        <tr><td>3-bit sums</td><td class="num">99.8</td><td class="num">98.4</td><td class="num">98.1</td></tr>
+        <tr><td>4-bit sums</td><td class="num">99.9</td><td class="num">99.9</td><td class="num">99.7</td></tr>
+        <tr><td>6-bit sums</td><td class="num">100.0</td><td class="num">100.0</td><td class="num">99.8</td></tr>
+      </tbody>
+    </table>
+
+    <h3>An eight-operation ALU</h3>
+    <p>One rule can also drive a small arithmetic-logic unit. On a 96×112 grid we encode two 8-bit operands and a control column. The control column holds a 3-bit opcode, a carry-in, and a 3-bit condition code. One NCA must produce the 8-bit result, a carry-out, and a branch flag. Trained across all eight operations, the model gets the result byte right about 99.7% of the time. The two flag outputs are weaker. So we treat this as one early run, not a solved task (see below). The panels show its settled grid for one example of each operation. Operands and control are on the left. The answer is read from the column on the right.</p>
+    <figure class="fig">
+      <img src="assets/alu_batch.png" alt="Eight panels, one per ALU operation (add, subtract, AND, OR, XOR, NOT, rotate-left, rotate-right), each showing the automaton's settled grid with the result read from the right-hand column." />
+      <figcaption><b>One 8-bit ALU, eight operations.</b> Each panel is the same trained automaton with a different opcode. The noisy left region is its working state. The clean bars on the right are the output it settles on.</figcaption>
+    </figure>
+  </section>
+
+  <!-- 05 -->
+  <section id="limits">
+    <div class="seclabel">05 — Limitations</div>
+    <h2>Limitations</h2>
+    <p>This is a research prototype. It has clear limits.</p>
+    <p><strong>A full ALU is hard.</strong> We tried to train one model to do eight operations (add, subtract, the bitwise gates, shifts, and rotates), chosen by an opcode. It also had to output a carry and a conditional branch. One run reached a loss near 0.10 after about 900,000 steps. The result was correct about 99.7% of the time. The carry-out (78%) and branch (86%) outputs were still improving slowly. This is one working run, not a solved task.</p>
+    <p><strong>The outputs are soft.</strong> The target is a grey-scale grid, and we read it by thresholding brightness. So a model that gets every bit right still has a mean-squared error of about 0.2–0.4. We report bit accuracy, not loss.</p>
+    <p><strong>The model is stochastic.</strong> Only some cells update each step. So the grid keeps changing a little, and a bit near the threshold can flip before it settles. Fig. 1 averages the output over the last steps, which helps. You are most likely to see a wrong bit on XOR and XNOR.</p>
+  </section>
+
+  <!-- 06 -->
+  <section id="refs">
+    <div class="seclabel">06 — References</div>
+    <h2>References</h2>
+    <ol class="refs">
+      <li id="ref-1">Mordvintsev, A., Randazzo, E., Niklasson, E., &amp; Levin, M. (2020). <a href="https://distill.pub/2020/growing-ca/">Growing Neural Cellular Automata</a>. <em>Distill</em>. The perception + learned-update-rule + stochastic-update architecture this work builds on.</li>
+      <li id="ref-2">Randazzo, E., Mordvintsev, A., Niklasson, E., Levin, M., &amp; Greydanus, S. (2020). <a href="https://distill.pub/2020/selforg/mnist/">Self-classifying MNIST Digits</a>. <em>Distill</em>.</li>
+      <li id="ref-3">Niklasson, E., Mordvintsev, A., Randazzo, E., &amp; Levin, M. (2021). <a href="https://distill.pub/selforg/2021/textures/">Self-Organising Textures</a>. <em>Distill</em>.</li>
+      <li id="ref-4">Sudhakaran, S., Grbic, D., Li, S., Katona, A., Najarro, E., Glanois, C., &amp; Risi, S. (2021). <a href="https://arxiv.org/abs/2103.08737">Growing 3D Artefacts and Functional Machines with Neural Cellular Automata</a>. <em>Proc. ALIFE</em>.</li>
+      <li id="ref-5">Grattarola, D., Livi, L., &amp; Alippi, C. (2021). <a href="https://arxiv.org/abs/2110.14237">Learning Graph Cellular Automata</a>. <em>NeurIPS</em>, 34, 20983–20994.</li>
+      <li id="ref-6">Miotti, P., Niklasson, E., Randazzo, E., &amp; Mordvintsev, A. (2025). <a href="https://google-research.github.io/self-organising-systems/difflogic-ca/">Differentiable Logic Cellular Automata: From Game of Life to Pattern Generation</a>. <em>Proc. ALIFE</em>.</li>
+      <li id="ref-7">Béna, G., Faldor, M., Goodman, D. F. M., &amp; Cully, A. (2025). <a href="https://doi.org/10.1145/3712255.3734310">A Path to Universal Neural Cellular Automata</a>. <em>GECCO Companion</em>, 2099–2107.</li>
+      <li id="ref-8">Wolpert, L. (1969). <a href="https://doi.org/10.1016/S0022-5193(69)80016-0">Positional Information and the Spatial Pattern of Cellular Differentiation</a>. <em>J. Theoretical Biology</em>, 25(1), 1–47.</li>
+      <li id="ref-9">Turing, A. M. (1952). <a href="https://doi.org/10.1098/rstb.1952.0012">The Chemical Basis of Morphogenesis</a>. <em>Phil. Trans. R. Soc. B</em>, 237(641), 37–72.</li>
+      <li id="ref-10">Gardner, M. (1970). <a href="https://doi.org/10.1038/scientificamerican1070-120">Mathematical Games: The Fantastic Combinations of John Conway's New Solitaire Game "Life"</a>. <em>Scientific American</em>, 223(4), 120–123.</li>
+    </ol>
+  </section>
+
+  <footer>
+    <p class="mono">Neural cellular automata for spatial computation · <a href="https://github.com/ichko/ncpu">code on GitHub</a></p>
+  </footer>
+
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

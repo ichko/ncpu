@@ -1,0 +1,112 @@
+{
+ "and": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 1,
+  "run": "E_KS_AND_k7_s1_20260316_172839",
+  "kernel": 7,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "or": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 1,
+  "run": "E1_OR_s2_20260316_132440",
+  "kernel": 5,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "xor": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 1,
+  "run": "E_KS_XOR_k7_s0_20260316_161225",
+  "kernel": 7,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "nand": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 1,
+  "run": "E1_NAND_s0_20260315_151721",
+  "kernel": 5,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "nor": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 1,
+  "run": "E1_NOR_s0_20260315_152747",
+  "kernel": 5,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "xnor": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 1,
+  "run": "E1_XNOR_s0_20260315_153815",
+  "kernel": 5,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "majority3": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 3,
+  "n_right": 1,
+  "run": "E1_majority3_s0_20260315_155911",
+  "kernel": 5,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "half_adder": {
+  "kind": "gate",
+  "H": 48,
+  "W": 48,
+  "n_left": 2,
+  "n_right": 2,
+  "run": "E_KS_half_adder_k7_s0_20260316_181915",
+  "kernel": 7,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "adder4": {
+  "kind": "adder4",
+  "H": 112,
+  "W": 80,
+  "n_left": 8,
+  "n_right": 5,
+  "run": "E2_adder4_s0_20260315_163256",
+  "kernel": 7,
+  "fire_rate": 0.5,
+  "final_loss": null
+ },
+ "adder8": {
+  "kind": "adder8",
+  "H": 112,
+  "W": 80,
+  "n_left": 16,
+  "n_right": 9,
+  "run": "E3_adder8_cols2_s0_20260316_033201",
+  "kernel": 7,
+  "fire_rate": 0.5,
+  "final_loss": null
+ }
+}
