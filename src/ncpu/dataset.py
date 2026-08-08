@@ -807,6 +807,7 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
+                screen_fn=make_io_screen_cols1,
                 sampler=sample_NOR_gate,
             )
         )
