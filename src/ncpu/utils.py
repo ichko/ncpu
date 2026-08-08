@@ -358,7 +358,6 @@ def make_io_screen_cols1(H, W, r, spacing, left_input, right_input):
         for i, bit in enumerate(bits):
             y = top_margin + r + i * (2 * r + among_spacing)
             cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
-
     return screen
 
 

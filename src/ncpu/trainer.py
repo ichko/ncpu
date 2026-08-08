@@ -141,10 +141,10 @@ class NCPUTrainer(BaseTrainer):
         else:
             batch = next(self.dataset_iter)
             inp, out = batch
-            inp = self.normalize_fn(inp)
-            out = self.normalize_fn(out)
             if self.gaussian_noise > 0:
                 inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+            inp = self.normalize_fn(inp)
+            out = self.normalize_fn(out)
             inp = inp.to(self.device)
             out = out.to(self.device)
             first_state = self._implant_input(inp)

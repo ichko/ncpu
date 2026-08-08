@@ -774,6 +774,7 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
+                screen_fn=make_io_screen_cols1,
                 sampler=sample_AND_gate,
             )
         )
@@ -784,6 +785,7 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
+                screen_fn=make_io_screen_cols1,
                 sampler=sample_OR_gate,
             )
         )
@@ -794,6 +796,7 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
+                screen_fn=make_io_screen_cols1,
                 sampler=sample_XOR_gate,
             )
         )
@@ -804,6 +807,7 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
+                screen_fn=make_io_screen_cols1,
                 sampler=sample_NOR_gate,
             )
         )
@@ -814,6 +818,7 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
+                screen_fn=make_io_screen_cols1,
                 sampler=sample_NAND_gate,
             )
         )
@@ -864,8 +869,7 @@ class MultiGateDataset(IterableDataset):
         inp = left.unsqueeze(0).expand(self.nca_channels, self.H, self.W).clone()
 
         # Encode which gate is active into the last 4 channels
-        inp = self._code_dataset(inp, gate_idx)
-
+        # inp = self._code_dataset(inp, gate_idx)
         return inp, right
 
     def __iter__(self):
