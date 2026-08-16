@@ -229,7 +229,7 @@ ol.refs em { color: var(--ink-3); }
 }
 .citeband-inner { max-width: 52rem; margin: 0 auto; padding: 0 1.5rem; }
 .citeband .seclabel { margin-bottom: 0.7rem; }
-.cite-line { font-size: 0.8rem; line-height: 1.55; color: var(--ink-2); margin: 0; }
+.cite-line { font-size: 0.82rem; line-height: 1.45; color: var(--ink-2); margin: 0; }
 .cite-line em { color: var(--ink); font-style: italic; }
 .bibbox { border: 1px solid var(--rule); background: var(--panel); margin-top: 0.9rem; }
 .bibbox > .hd { display: flex; justify-content: space-between; align-items: center;
@@ -240,8 +240,11 @@ ol.refs em { color: var(--ink-3); }
   cursor: pointer; background: var(--paper); color: var(--ink-2); border: 1px solid var(--rule-2);
   padding: 0.18rem 0.5rem; }
 .copybtn:hover { background: var(--accent); color: var(--paper); border-color: var(--accent); }
-.bibbox pre { margin: 0; padding: 0.7rem 0.8rem; overflow-x: auto; }
-.bibbox code { font-family: var(--mono); font-size: 0.68rem; line-height: 1.55; color: var(--ink-2);
+/* the size and leading must sit on the <pre> itself — its own strut sets the line
+   boxes, so putting them only on the inner <code> leaves body leading behind */
+.bibbox pre { margin: 0; padding: 0.7rem 0.8rem; overflow-x: auto;
+  font-family: var(--mono); font-size: 0.7rem; line-height: 1.4; color: var(--ink-2); }
+.bibbox code { font: inherit; line-height: inherit; color: inherit;
   background: none; padding: 0; white-space: pre; }
 
 footer { border-top: 1px solid var(--rule); margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.84rem; color: var(--ink-2); }
