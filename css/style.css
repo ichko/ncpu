@@ -247,7 +247,8 @@ ol.refs em { color: var(--ink-3); }
 .bibbox code { font: inherit; line-height: inherit; color: inherit;
   background: none; padding: 0; white-space: pre; }
 
-footer { border-top: 1px solid var(--rule); margin-top: 3.5rem; padding-top: 1.4rem; font-size: 0.84rem; color: var(--ink-2); }
+/* no rule here — the citation band above already closes with one */
+footer { margin-top: 1.4rem; font-size: 0.84rem; color: var(--ink-2); }
 footer .mono { color: var(--ink-3); font-size: 0.7rem; }
 
 /* always-visible link to the source */
