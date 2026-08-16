@@ -194,11 +194,47 @@
     </ol>
   </section>
 
+  <!-- 07 -->
+  <section id="citation">
+    <div class="seclabel">07 — Citation</div>
+    <h2>Cite this work</h2>
+    <p class="cite-line">Zhechev, I., &amp; Walas, P. (2026). <em>Self-organized boolean computation: spatial computation in neural cellular automata</em>. <a href="https://ncpu.pages.dev/">ncpu.pages.dev</a></p>
+    <div class="bibbox">
+      <div class="hd"><span>BibTeX</span><button type="button" class="copybtn" id="copyBib">Copy</button></div>
+      <pre id="bibtex"><code>@misc{zhechev2026ncpu,
+  title        = {Self-organized Boolean Computation: Spatial Computation
+                  in Neural Cellular Automata},
+  author       = {Zhechev, Iliya and Walas, Piotr},
+  year         = {2026},
+  howpublished = {\url{https://ncpu.pages.dev/}},
+  note         = {Code: \url{https://github.com/ichko/ncpu}}
+}</code></pre>
+    </div>
+  </section>
+
   <footer>
     <p class="mono">Neural cellular automata for spatial computation · <a href="https://github.com/ichko/ncpu">code on GitHub</a></p>
   </footer>
 
 </div>
 <script type="module" src="js/app.js"></script>
+<script>
+  // copy the BibTeX entry; falls back to a manual selection when the clipboard is blocked
+  document.getElementById('copyBib').addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    const text = document.getElementById('bibtex').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    }).catch(() => {
+      const r = document.createRange();
+      r.selectNodeContents(document.getElementById('bibtex'));
+      const s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      btn.textContent = 'Select all';
+    });
+  });
+</script>
 </body>
 </html>
