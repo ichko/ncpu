@@ -1,5 +1,5 @@
 // carry_tsne.js — latent-dimensions viewer. Baked 8-bit adder rollouts
-// (scripts/bake_carry_tsne.py); switch examples from the menu. Everything moves with
+// (scripts/other/bake_carry_tsne.py); switch examples from the menu. Everything moves with
 // the movie scrubber:
 //   * a row of KEY hidden-channel spatial maps under the movie (RdBu filmstrips)
 //   * the tracked cells in t-SNE space, as trajectories (default) or as a dot cloud
@@ -27,7 +27,7 @@ const ROLES = [0, 3, 1, 2];              // draw order: field, band, then the bi
 const NBUCKET = 24;                      // colour quantisation for the dot cloud
 const LONGSEG = 0.08;                    // steps past this share of the plot are "chords"
 const TRAIL = 26;                        // frames of decaying trail behind each cell
-// movement clusters (KMeans over each cell's whole path — scripts/cluster_carry_cells.py)
+// movement clusters (KMeans over each cell's whole path — scripts/other/cluster_carry_cells.py)
 const CLUSTER_COLOR = ['#c1121f', '#0353a4', '#2a9d3f', '#e07a00', '#7b2cbf', '#0b8f8f', '#b5179e', '#5c5c5c'];
 const POS_NX = 8, POS_NY = 5;            // position colouring: 8 x 5 = 40 grid patches
 // The compute band spans the full height of the grid, so one flat green throws away

@@ -51,27 +51,37 @@ uv run flake8 src/
 
 ## Usage
 
-Standalone scripts in `scripts/` drive the training runs. Each script builds a
-dataset (`ncpu.dataset`), an NCA (`ncpu.nca.NeuralCA`, or a variant such as
-`ncpu.temporal_nca` or `ncpu.gated_nca`), and a training loop. It writes
-checkpoints and configs under `runs/<name>/`. For example:
+Standalone scripts drive the training runs, split into three folders under
+`scripts/`:
+
+- `scripts/train/`   — training scripts (`train_*.py`)
+- `scripts/analyze/`— analysis / figure scripts (`analyze_*.py`)
+- `scripts/other/`  — run launchers (`run_*.sh`), inspection, visualisation,
+  demo tooling, and miscellaneous utilities
+
+Each training/analysis script builds a dataset (`ncpu.dataset`), an NCA
+(`ncpu.nca.NeuralCA`, or a variant such as `ncpu.temporal_nca` or
+`ncpu.gated_nca`), and a training loop. It writes checkpoints and configs under
+`runs/<name>/`. For example:
 
 ```bash
-uv run python scripts/train_alu2_temporal.py --help
+uv run python scripts/train/train_alu2_temporal.py --help
 ```
 
 `ncpu.config` exports predefined task configurations (grid size, channels,
 learning rate, and more) as constants. Examples are `TINY_AND_TRAINING_CONFIG`
 and `BIG_4BIT_ADDER_TRAINING_CONFIG`. The analysis and figure scripts
-(`analyze_*.py`, `inspect_*.py`) reproduce the contents of `results/`. The
-`notebooks/` folder holds interactive exploration.
+(`scripts/analyze/analyze_*.py`, `scripts/other/inspect_*.py`) reproduce the
+contents of `results/`. The `notebooks/` folder holds interactive exploration.
 
 ## Repository layout
 
 | Path | What |
 |------|------|
 | `src/ncpu/` | package: `config`, `dataset`, `nca`, `trainer`, `runner`, … |
-| `scripts/`  | training, analysis, and visualisation scripts |
+| `scripts/train/`   | training scripts (`train_*.py`) |
+| `scripts/analyze/` | analysis / figure scripts (`analyze_*.py`) |
+| `scripts/other/`   | run launchers, inspection, visualisation, demo tooling |
 | `results/`  | per-experiment metrics, figures, and analysis notes (E1–E5, ablations, ALU) |
 | `runs/`     | training run directories with checkpoints and configs |
 | `notebooks/`| interactive exploration |
