@@ -12,6 +12,9 @@
 #   - kernel size 7, alive_threshold 0.1, eval every 1000 steps
 #
 # Usage:
+#   scripts/train_noise_sweep.sh                # all gates, one at a time
+#   GATES="AND XOR" scripts/train_noise_sweep.sh # a subset of gates
+#   GATE=XOR scripts/train_noise_sweep.sh       # just one gate
 #   PARALLEL=2 scripts/train_noise_sweep.sh     # run up to 2 configs at once
 set -euo pipefail
 
@@ -54,7 +57,6 @@ run_config() {
         --eval-every "$EVAL_EVERY"
 }
 export -f run_config
-export KERNEL_SIZE ALIVE_THRESHOLD EVAL_EVERY GATE
 export KERNEL_SIZE ALIVE_THRESHOLD EVAL_EVERY
 
 printf 'Noise-gate sweep: kernel=%s alive=%s eval_every=%s gates=[%s] (%d gates x %d noise configs)\n' \
@@ -82,16 +84,3 @@ for gate in "${GATES[@]}"; do
         done
     fi
 done
-
-printf 'Replicating old noise-gate sweep: kernel=%s alive=%s eval_every=%s gate=%s (%d configs)\n' \
-    "$KERNEL_SIZE" "$ALIVE_THRESHOLD" "$EVAL_EVERY" "${GATE:-all}" "${#lines[@]}"
-
-if [ "$PARALLEL" -gt 1 ]; then
-    printf '%s\n' "${lines[@]}" | xargs -P "$PARALLEL" -n 3 bash -c 'run_config "$1" "$2" "$3"' _
-else
-    for line in "${lines[@]}"; do
-        read -r n fr steps <<<"$line"
-        printf '\n===== noise=%s fire_rate=%s =====\n' "$n" "$fr"
-        run_config "$n" "$fr" "$steps"
-    done
-fi
