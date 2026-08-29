@@ -37,6 +37,7 @@ class NCPUTrainer(BaseTrainer):
         checkpoint_pattern: Optional[str] = None,
         loss_fn=output_masked_rollout_loss,
         input_dims=(1,),
+        input_implant_type: Optional[str] = None,
         normalize_fn=normalize_neg1_to_1,
     ):
         super().__init__(
@@ -68,6 +69,7 @@ class NCPUTrainer(BaseTrainer):
         self.bit_masks = self.ds.get_output_bit_masks().to(self.nca.device)
         self.loss_fn = loss_fn
         self.input_dims = list(input_dims)
+        self.input_implant_type = input_implant_type
         self.normalize_fn = normalize_fn
         self.pool = None  # set externally to enable state-pool training
 
@@ -98,32 +100,62 @@ class NCPUTrainer(BaseTrainer):
 
     def _implant_input(self, inp):
         bs = inp.shape[0]
+
+        if self.input_implant_type == "disabled":
+            # The dataset already produces the full multi-channel state
+            # (e.g. MultiGateDataset): use it directly as the first state.
+            if inp.dim() == 3:
+                inp = inp.unsqueeze(1)
+            return inp.expand(bs, self.nca.channels, self.ds.H, self.ds.W).clone().to(
+                self.nca.device
+            )
+
+        if inp.dim() == 3:
+            inp = inp.unsqueeze(1)  # (B, 1, H, W)
+
+        if self.input_implant_type == "all":
+            # Replicate the single-channel input across all NCA channels.
+            return inp.expand(bs, self.nca.channels, self.ds.H, self.ds.W).clone().to(
+                self.nca.device
+            )
+
+        # default / "first": zero state with the input implanted into input_dims
         first_state = torch.zeros(bs, self.nca.channels, self.ds.H, self.ds.W)
         for dim in self.input_dims:
-            first_state[:, dim] = inp
+            first_state[:, dim] = inp.squeeze(1)
         first_state = first_state.to(self.nca.device)
         return first_state
 
-    def optim_step(self, steps, return_rollout=False):
+    def optim_step(self, steps, return_rollout=False, noise_std=None, noise_fire_rate=None):
         forward_steps = steps
         if isinstance(steps, (tuple, list)):
             forward_steps = np.random.randint(steps[0], steps[1])
+
+        if noise_std is None:
+            noise_std = self.nca.gaussian_noise.std
+        if noise_fire_rate is None:
+            noise_fire_rate = self.nca.gaussian_noise.prob
 
         if self.pool is not None:
             inp, out, first_state, pool_indices = self.pool.sample(self.device)
         else:
             batch = next(self.dataset_iter)
             inp, out = batch
-            inp = self.normalize_fn(inp)
-            out = self.normalize_fn(out)
             if self.gaussian_noise > 0:
                 inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+            inp = self.normalize_fn(inp)
+            out = self.normalize_fn(out)
             inp = inp.to(self.device)
             out = out.to(self.device)
             first_state = self._implant_input(inp)
             pool_indices = None
 
-        rollout = self.nca.forward(first_state, steps=forward_steps)
+        rollout = self.nca.forward(
+            first_state,
+            steps=forward_steps,
+            noise_std=noise_std,
+            noise_fire_rate=noise_fire_rate,
+        )
 
         if self.pool is not None:
             self.pool.update(pool_indices, rollout[:, -1].detach())
@@ -139,16 +171,7 @@ class NCPUTrainer(BaseTrainer):
 
         # num_valid_bits: mean correct bits per sample (out of n_bits)
         with torch.no_grad():
-            bm = self.bit_masks  # (n_bits, H, W)
-            bm_sum = bm.sum(dim=(-1, -2))  # (n_bits,)
-            # mean activation per bit circle: (B, n_bits)
-            nca_bit = (nca_out.unsqueeze(1) * bm.unsqueeze(0)).sum(
-                dim=(-1, -2)
-            ) / bm_sum
-            tgt_bit = (out.unsqueeze(1) * bm.unsqueeze(0)).sum(dim=(-1, -2)) / bm_sum
-            num_valid_bits = (
-                ((nca_bit > 0) == (tgt_bit > 0)).float().sum(dim=1).mean().item()
-            )
+            num_valid_bits = self._compute_num_valid_bits(nca_out, out)
 
         if torch.is_grad_enabled():
             self.learning_step += 1
@@ -177,6 +200,84 @@ class NCPUTrainer(BaseTrainer):
         }
 
         return info
+
+    def _compute_num_valid_bits(self, nca_out, out):
+        """Mean fraction of output-bit circles whose sign matches the target."""
+        bm = self.bit_masks  # (n_bits, H, W)
+        bm_sum = bm.sum(dim=(-1, -2))  # (n_bits,)
+        # mean activation per bit circle: (B, n_bits)
+        nca_bit = (nca_out.unsqueeze(1) * bm.unsqueeze(0)).sum(dim=(-1, -2)) / bm_sum
+        tgt_bit = (out.unsqueeze(1) * bm.unsqueeze(0)).sum(dim=(-1, -2)) / bm_sum
+        return ((nca_bit > 0) == (tgt_bit > 0)).float().sum(dim=1).mean().item()
+
+    def evaluate(self, eval_batch, noise_configs, n_rollouts=5, steps=80):
+        """Evaluate the NCA on a fixed batch with stochastic noise.
+
+        RL-style evaluation: the NCA is rolled out `n_rollouts` times per
+        (noise_std, noise_fire_rate) config under torch.no_grad(), and the
+        bit accuracy (num_valid_bits) is averaged over all rollouts to reduce
+        the variance of stochastic runs. The model weights are untouched.
+
+        Args:
+            eval_batch:    (inp, out) batch exactly as produced by the dataset
+                           (normalized inside, matching optim_step).
+            noise_configs: iterable of (std, fire_rate) pairs. Passing an empty
+                           list uses the model's current gaussian_noise settings.
+            n_rollouts:    stochastic rollouts per config.
+            steps:         fixed rollout length for evaluation.
+
+        Returns dict with eval_bits (mean accuracy), eval_loss (mean loss), and
+        per_cfg (list of per-config means).
+        """
+        inp, out = eval_batch
+        inp = self.normalize_fn(inp)
+        out = self.normalize_fn(out)
+        if self.gaussian_noise > 0:
+            inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+        inp = inp.to(self.device)
+        out = out.to(self.device)
+        first_state = self._implant_input(inp)
+
+        if not noise_configs:
+            noise_configs = [(self.nca.gaussian_noise.std, self.nca.gaussian_noise.prob)]
+
+        bits_all, loss_all, per_cfg = [], [], []
+        with torch.no_grad():
+            for std, fire_rate in noise_configs:
+                cfg_bits, cfg_losses = [], []
+                for _ in range(n_rollouts):
+                    rollout = self.nca.forward(
+                        first_state,
+                        steps=steps,
+                        noise_std=std,
+                        noise_fire_rate=fire_rate,
+                    )
+                    nca_out = rollout[:, -1, 0]
+                    loss = self.loss_fn(
+                        rollout,
+                        out,
+                        inp=inp,
+                        mask=self.out_mask_binary,
+                        inp_mask=self.inp_mask_binary,
+                    )
+                    cfg_bits.append(self._compute_num_valid_bits(nca_out, out))
+                    cfg_losses.append(loss.item())
+                per_cfg.append(
+                    {
+                        "noise_std": std,
+                        "noise_fire_rate": fire_rate,
+                        "bits": sum(cfg_bits) / len(cfg_bits),
+                        "loss": sum(cfg_losses) / len(cfg_losses),
+                    }
+                )
+                bits_all.extend(cfg_bits)
+                loss_all.extend(cfg_losses)
+
+        return {
+            "eval_bits": sum(bits_all) / len(bits_all),
+            "eval_loss": sum(loss_all) / len(loss_all),
+            "per_cfg": per_cfg,
+        }
 
     def display_optim_step(self, info, display_size=64, to_show=8):
         fig, ax = plt.subplots(figsize=(8, 3))

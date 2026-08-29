@@ -53,7 +53,7 @@ nca = NeuralCA(
     alive_threshold = 0.0,
     zero_initialization = False,
     kernel_size=KERNEL_SIZE,
-    read_only_dims = [-4,-3,-2,-1],
+    read_only_dims = [-5,-4,-3,-2,-1],
     padding_type = "constant",
 )
 

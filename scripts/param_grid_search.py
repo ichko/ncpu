@@ -161,7 +161,7 @@ def run(run_dir, fire_rate, alive_threshold, zero_initialization, kernel_size):
         alive_threshold = alive_threshold,
         zero_initialization = zero_initialization,
         kernel_size=kernel_size,
-        read_only_dims = [-4,-3,-2,-1],
+        read_only_dims = [-5,-4,-3,-2,-1],
         padding_type = "constant",
     )
 

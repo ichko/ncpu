@@ -29,6 +29,7 @@ STEPS = 2
 PLOT_EVERY = 1
 NCA_CHANNELS = 8
 N_OUTPUT_BITS = 1
+KERNEL_SIZE = 7
 
 GAUSSIAN_NOISE = 0.2
 FIRE_RATE = 0.5
@@ -53,7 +54,7 @@ nca = NeuralCA(
     alive_threshold=0.1,
     zero_initialization=False,
     kernel_size=KERNEL_SIZE,
-    read_only_dims=[-4,-3,-2,-1],
+    read_only_dims=[-5,-4,-3,-2,-1],
     gaussian_noise=GAUSSIAN_NOISE,
     gaussian_noise_fire_rate=FIRE_RATE,
     padding_type="constant",
