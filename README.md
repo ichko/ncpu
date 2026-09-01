@@ -30,6 +30,24 @@ right answer. Nothing in the design knows about logic, wires, or bit order.
   reliably (carry-out and branch-taken). This is an open problem, not a solved
   result.
 
+## Experiments E1–E5
+
+The project ties its results to numbered experiments. Each `E<n>` maps to a
+training script (`scripts/train/`) and, where available, a launcher
+(`scripts/other/run_e<n>.sh`) and an analysis script (`scripts/analyze/`):
+
+| Exp | Question | Task | Training script | Launcher / analysis |
+|-----|----------|------|-----------------|---------------------|
+| **E1** | Can a single NCA rule learn an arbitrary Boolean function exactly? | 8 functions × seeds: AND, OR, XOR, NAND, NOR, XNOR, half_adder, majority3 | `train_gate.py` | `run_e1.sh` |
+| **E2** | Can the same recipe do multi-bit addition? | 4-bit binary adder (8 in → 5-bit sum) | `train_adder.py --bits 4` | `run_e2.sh` |
+| **E3** | Does it scale to wider operands? | 8-bit binary adder (16 in → 9-bit sum), cols1/cols2 layouts | `train_adder.py --bits 8` | `run_e3.sh` |
+| **E4** | Can one rule run an 8-op ALU and hold carry/flags? | 8-bit ALU v1 (ADD/SUB/AND/OR/XOR/NOT/SHL/SHR) | `train_alu.py` | `analyze_alu.py`, `analyze_e4.py` |
+| **E5** | Does the learned rule generalise to unseen lengths? | Adder trained on ≤3 bits, evaluated on up to 8 bits | `train_extrapolation.py` | `analyze_extrapolation.py` |
+
+Each training script writes seeds into its run directory name (e.g.
+`E2_adder4_s1_<ts>/`) so seed-sweep results can be compared. `results/`
+and `runs/` hold the per-experiment figures, metrics, and checkpoints.
+
 ## Setup
 
 We use [uv](https://docs.astral.sh/uv/) to manage the project. uv installs the

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-Extrapolation experiment: train adder NCA on 1–max_train_bits, test on larger.
+Extrapolation experiment (E5): train adder NCA on 1–max_train_bits, test on
+larger.
+
+Question: does the learned rule generalise to operand lengths it never saw?
+A bottom-aligned encoding gives the carry a position-invariant anchor, and the
+rule is trained on small sums (<= max_train_bits) then evaluated on larger ones.
 
 Usage:
     uv run python scripts/train/train_extrapolation.py --seed 0

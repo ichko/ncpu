@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from argparse import Namespace
+
 from ncpu.dataset import (
     sample_4bit_adder,
     sample_AND_gate,
@@ -142,3 +144,23 @@ TINY_OR_TRAINING_CONFIG = _TinyORTrainingConfig()
 TINY_NOR_TRAINING_CONFIG = _TinyNORTrainingConfig()
 TINY_XOR_TRAINING_CONFIG = _TinyXORTrainingConfig()
 BIG_4BIT_ADDER_TRAINING_CONFIG = _Big4bitAdderTrainingConfig()
+
+
+def make_gate_config(n_inputs=2, W=None, H=32, r=4, among_sp=2, side_sp=6):
+    """Config for an n-input single-output gate on a square-ish grid.
+
+    Columns: n_inputs input columns + 1 output column, spaced `step` apart.
+    The grid width is chosen so the leftmost input and rightmost output leave
+    `side_sp` margin, unless `W` is given explicitly.
+    """
+    step = 2 * r + among_sp
+    if W is None:
+        W = 2 * side_sp + (n_inputs - 1) * step + 2 * r
+    config = Namespace(
+        W=W,
+        H=H,
+        r=r,
+        spacing=(among_sp, side_sp),
+        balanced=False,
+    )
+    return config

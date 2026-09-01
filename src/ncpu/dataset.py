@@ -97,6 +97,63 @@ def sample_XNOR_gate(*args):
     return two_arg_sampler(lambda a, b: not (a != b))
 
 
+def n_input_gate_sampler(n, op):
+    """Build an n-input gate sampler.
+
+    Returns a sampler(a, op=lambda bits: bool) that draws `n` random bits
+    and returns (inp[:n], out) where out is the single gate result.
+    """
+
+    def sample(*args):
+        inp = torch.randint(0, 2, size=(n,))
+        bits = [int(b) for b in inp.tolist()]
+        out = op(bits)
+        return inp, torch.tensor([1 if out else 0])
+
+    return sample
+
+
+def _and_op(bits):
+    return all(b == 1 for b in bits)
+
+
+def _or_op(bits):
+    return any(b == 1 for b in bits)
+
+
+def _nand_op(bits):
+    return not all(b == 1 for b in bits)
+
+
+def _nor_op(bits):
+    return not any(b == 1 for b in bits)
+
+
+def _xor_op(bits):
+    return sum(bits) % 2 == 1
+
+
+def _xnor_op(bits):
+    return sum(bits) % 2 == 0
+
+
+def sample_n_input_gate(n, opname):
+    """Return a sampler for an n-input logic gate by name.
+
+    opname in {'AND', 'OR', 'NAND', 'NOR', 'XOR', 'XNOR'}.
+    """
+    ops = {
+        "AND": _and_op,
+        "OR": _or_op,
+        "NAND": _nand_op,
+        "NOR": _nor_op,
+        "XOR": _xor_op,
+        "XNOR": _xnor_op,
+    }
+    assert opname in ops, f"unknown gate {opname!r}"
+    return n_input_gate_sampler(n, ops[opname])
+
+
 def sample_half_adder(*args):
     inp = torch.randint(0, 2, size=(2,))
     a, b = int(inp[0]), int(inp[1])
@@ -753,19 +810,27 @@ class MultiGateDataset(IterableDataset):
 
     GATE_NAMES = ["AND", "OR", "NOR", "XOR", "NAND"]
 
-    def __init__(self, config, nca_channels, gate=None):
+    def __init__(self, config, nca_channels, gate=None, n_inputs=2):
 
         self.W = config.W
         self.H = config.H
         self.r = config.r
         self.spacing = config.spacing
         self.nca_channels = nca_channels
+        self.n_inputs = n_inputs
         self.gate = gate.upper() if gate is not None else None
         if self.gate is not None:
             assert self.gate in self.GATE_NAMES, (
                 f"gate must be one of {self.GATE_NAMES}, got {gate!r}"
             )
             self.gate_idx = self.GATE_NAMES.index(self.gate)
+
+        def _screen_fn(W, H, r, spacing, left_input=[], right_input=[], n_input_cols=None):
+            return make_io_screen_cols1(
+                H, W, r, spacing,
+                left_input=left_input, right_input=right_input,
+                n_input_cols=self.n_inputs,
+            )
 
         self.AND_Dataset = NCPUDataset(
             Namespace(
@@ -774,8 +839,8 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
-                screen_fn=make_io_screen_cols1,
-                sampler=sample_AND_gate,
+                screen_fn=_screen_fn,
+                sampler=sample_n_input_gate(n_inputs, "AND"),
             )
         )
         self.OR_Dataset = NCPUDataset(
@@ -785,8 +850,8 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
-                screen_fn=make_io_screen_cols1,
-                sampler=sample_OR_gate,
+                screen_fn=_screen_fn,
+                sampler=sample_n_input_gate(n_inputs, "OR"),
             )
         )
         self.XOR_Dataset = NCPUDataset(
@@ -796,8 +861,8 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
-                screen_fn=make_io_screen_cols1,
-                sampler=sample_XOR_gate,
+                screen_fn=_screen_fn,
+                sampler=sample_n_input_gate(n_inputs, "XOR"),
             )
         )
         self.NOR_Dataset = NCPUDataset(
@@ -807,8 +872,8 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
-                screen_fn=make_io_screen_cols1,
-                sampler=sample_NOR_gate,
+                screen_fn=_screen_fn,
+                sampler=sample_n_input_gate(n_inputs, "NOR"),
             )
         )
         self.NAND_Dataset = NCPUDataset(
@@ -818,8 +883,8 @@ class MultiGateDataset(IterableDataset):
                 r=config.r,
                 spacing=config.spacing,
                 balanced=config.balanced,
-                screen_fn=make_io_screen_cols1,
-                sampler=sample_NAND_gate,
+                screen_fn=_screen_fn,
+                sampler=sample_n_input_gate(n_inputs, "NAND"),
             )
         )
 

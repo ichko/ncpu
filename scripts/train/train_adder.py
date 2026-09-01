@@ -2,6 +2,12 @@
 """
 Adder NCA training script (E2 / E3).
 
+Experiments:
+    E2 — 4-bit binary addition (8 input bits -> 5-bit sum). Can a single NCA
+         rule learn multi-bit addition exactly?
+    E3 — 8-bit binary addition (16 input bits -> 9-bit sum). Does the recipe
+         scale to wider operands, and which layout (cols1/cols2) fits?
+
 Usage:
     uv run python scripts/train/train_adder.py --bits 4 --seed 0
     uv run python scripts/train/train_adder.py --bits 8 --seed 0 --layout cols1

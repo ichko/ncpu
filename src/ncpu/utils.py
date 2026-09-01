@@ -340,24 +340,51 @@ def make_io_screen_bottom_aligned(H, W, r, spacing, a_bits, b_bits, output_bits)
     return screen
 
 
-def make_io_screen_cols1(H, W, r, spacing, left_input, right_input):
-    """Like make_io_screen but inputs and outputs are each a single column."""
+def make_io_screen_cols1(H, W, r, spacing, left_input, right_input, n_input_cols=1):
+    """Single-row-of-columns screen: inputs in N left columns, output at right.
+
+    `left_input` is split across `n_input_cols` columns (one bit per column).
+    The output (`right_input`) is placed in a single column on the far right.
+    Columns are evenly spaced from `side_spacing` to `W - side_spacing`, so a
+    wider grid is needed as `n_input_cols` grows.
+    """
     screen = np.full((H, W), fill_value=128, dtype=np.uint8)
     among_spacing, side_spacing = spacing
     among_spacing = int(among_spacing)
     side_spacing = int(side_spacing)
     r = int(r)
+    step = 2 * r + among_spacing
 
-    for bits, x in [
-        (left_input,  side_spacing),
-        (right_input, W - side_spacing),
-    ]:
+    n_left = len(left_input)
+    assert n_input_cols >= 1
+    assert n_left % n_input_cols == 0 or n_input_cols == n_left, \
+        f"{n_left} inputs can't be split into {n_input_cols} columns"
+    per_col = max(1, n_left // n_input_cols) if n_input_cols < n_left else 1
+
+    # Total left width spans n_input_cols columns (using column 0-based index)
+    left_xs = [side_spacing + c * step for c in range(n_input_cols)]
+    # Right output column takes the remaining width.
+    out_x = W - side_spacing
+
+    def _draw_col(bits, x):
         n = len(bits)
         v_size = n * r * 2 + among_spacing * (n - 1)
         top_margin = (H - v_size) // 2
         for i, bit in enumerate(bits):
             y = top_margin + r + i * (2 * r + among_spacing)
             cv2.circle(screen, (x, y), r, 255 if bit else 0, -1)
+
+    # Distribute left inputs across columns (one bit per column when possible).
+    if n_input_cols == n_left:
+        for x, bit in zip(left_xs, left_input):
+            _draw_col([bit], x)
+    else:
+        for c in range(n_input_cols):
+            chunk = left_input[c * per_col:(c + 1) * per_col]
+            if chunk:
+                _draw_col(chunk, left_xs[c])
+
+    _draw_col(right_input, out_x)
     return screen
 
 
