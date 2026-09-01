@@ -11,7 +11,7 @@
 # Customize via env at submit time:
 #   BITS="8"  SEEDS="1 2 3"  STEPS=30000 \
 #     sbatch --array=0-9%3 scripts/other/slurm_adder_seed_sweep.sh
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu-l
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2

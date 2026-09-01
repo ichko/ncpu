@@ -111,7 +111,7 @@ PLOT_EVERY = 500
 DEVICE = args.device
 FIXED_NOISE = args.gaussian_noise > 0 or args.gaussian_noise_fire_rate > 0
 
-# Grid: spread `n_inputs` input columns across the board automatically.
+# Grid: spread `n_inputs` input bits across a single input column automatically.
 cfg = make_gate_config(n_inputs=args.n_inputs, H=48, side_sp=10, among_sp=2)
 ds_config = Namespace(
     W=cfg.W,
@@ -123,7 +123,7 @@ ds_config = Namespace(
     screen_fn=lambda left_input=[], right_input=[], **kw: make_io_screen_cols1(
         cfg.H, cfg.W, cfg.r, cfg.spacing,
         left_input=left_input, right_input=right_input,
-        n_input_cols=args.n_inputs,
+        n_input_cols=1,
     ),
 )
 

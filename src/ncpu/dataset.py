@@ -829,7 +829,7 @@ class MultiGateDataset(IterableDataset):
             return make_io_screen_cols1(
                 H, W, r, spacing,
                 left_input=left_input, right_input=right_input,
-                n_input_cols=self.n_inputs,
+                n_input_cols=1,
             )
 
         self.AND_Dataset = NCPUDataset(

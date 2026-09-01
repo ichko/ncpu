@@ -146,16 +146,17 @@ TINY_XOR_TRAINING_CONFIG = _TinyXORTrainingConfig()
 BIG_4BIT_ADDER_TRAINING_CONFIG = _Big4bitAdderTrainingConfig()
 
 
-def make_gate_config(n_inputs=2, W=None, H=32, r=4, among_sp=2, side_sp=6):
+def make_gate_config(n_inputs=2, W=None, H=32, r=4, among_sp=2, side_sp=6, n_input_cols=1):
     """Config for an n-input single-output gate on a square-ish grid.
 
-    Columns: n_inputs input columns + 1 output column, spaced `step` apart.
-    The grid width is chosen so the leftmost input and rightmost output leave
-    `side_sp` margin, unless `W` is given explicitly.
+    All inputs are stacked into `n_input_cols` columns (default 1) plus one
+    output column on the right, spaced `step` apart. The grid width is chosen
+    so the leftmost input and rightmost output leave `side_sp` margin, unless
+    `W` is given explicitly.
     """
     step = 2 * r + among_sp
     if W is None:
-        W = 2 * side_sp + (n_inputs - 1) * step + 2 * r
+        W = 2 * side_sp + (n_input_cols - 1) * step + 2 * r
     config = Namespace(
         W=W,
         H=H,
