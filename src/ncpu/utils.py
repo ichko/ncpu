@@ -381,7 +381,7 @@ def make_io_screen_cols1(H, W, r, spacing, left_input, right_input, n_input_cols
     else:
         for c in range(n_input_cols):
             chunk = left_input[c * per_col:(c + 1) * per_col]
-            if chunk:
+            if len(chunk) > 0:
                 _draw_col(chunk, left_xs[c])
 
     _draw_col(right_input, out_x)
