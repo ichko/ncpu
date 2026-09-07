@@ -63,7 +63,8 @@ uv run python scripts/train/train_gate.py \
     --gate "$gate" \
     --seed "$seed" \
     --steps "$STEPS" \
-    --eval-every 1000
+    --eval-every 1000 \
+    --save-rollout-npz
 
 deactivate
 rm -rf "$VENV_DIR"

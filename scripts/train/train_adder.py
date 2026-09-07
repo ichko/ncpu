@@ -48,6 +48,8 @@ parser.add_argument("--steps",  type=int, default=50_000)
 parser.add_argument("--layout", default="cols1", choices=["cols1", "cols2"],
                     help="cols1: single input column; cols2: two input columns (needed for 8-bit)")
 parser.add_argument("--device", default="cuda")
+parser.add_argument("--save-rollout-npz", action="store_true",
+                    help="save rollout arrays as compressed NPZ files instead of GIFs")
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -213,18 +215,25 @@ for step in pbar:
         row_vmax=[None, None, None, 2],
     )
 
-    # rollout gif — all channels, first 4 batch items
+    # Rollout output: all channels, first 4 batch items.
     gif_b = min(B, 4)
     gif_t = rollout[:gif_b, ::2]
-    frames = gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
-    frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
-    grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
-    grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
-    media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
+    if args.save_rollout_npz:
+        np.savez_compressed(run_dir / "rollout_latest.npz", rollout=gif_t.numpy())
+    else:
+        frames = gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
+        frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
+        grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
+        grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
+        media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
 
     if step % MEDIA_EVERY == 0 and step > 0:
-        shutil.copy(run_dir / "rollout_latest.gif",
-                    run_dir / "rollouts" / f"rollout_{step:07d}.gif")
+        if args.save_rollout_npz:
+            shutil.copy(run_dir / "rollout_latest.npz",
+                        run_dir / "rollouts" / f"rollout_{step:07d}.npz")
+        else:
+            shutil.copy(run_dir / "rollout_latest.gif",
+                        run_dir / "rollouts" / f"rollout_{step:07d}.gif")
         shutil.copy(run_dir / "snapshot_latest.png",
                     run_dir / "snapshots" / f"snapshot_{step:07d}.png")
 

@@ -62,6 +62,7 @@ uv run python scripts/train/train_adder.py \
     --seed "$seed" \
     --steps "$STEPS" \
     --layout "$LAYOUT" \
+    --save-rollout-npz \
     --device cuda
 
 deactivate

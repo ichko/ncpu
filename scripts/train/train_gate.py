@@ -91,6 +91,8 @@ parser.add_argument("--zero_init", action="store_true", default=False)
 parser.add_argument("--eval-every", type=int, default=1_000, dest="eval_every",
                     help="evaluate the persisted model every N steps (default 1000)")
 parser.add_argument("--device", default="cuda")
+parser.add_argument("--save-rollout-npz", action="store_true",
+                    help="save rollout arrays as compressed NPZ files instead of GIFs")
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -357,13 +359,16 @@ for step in pbar:
         row_vmax=[None, None, None, 2],
     )
 
-    # rollout gif (channel 0 only, first 4 batch items)
+    # Rollout output: channel 0 only, first 4 batch items.
     gif_b = min(B, 4)
     ch0 = rollout[:gif_b, ::2, 0:1]  # (B, T//2, 1, H, W)
-    frames = ch0.permute(2, 0, 1, 3, 4).reshape(gif_b, ch0.shape[1], H, W).numpy()
-    frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
-    grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
-    grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
-    media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
+    if args.save_rollout_npz:
+        np.savez_compressed(run_dir / "rollout_latest.npz", rollout=ch0.numpy())
+    else:
+        frames = ch0.permute(2, 0, 1, 3, 4).reshape(gif_b, ch0.shape[1], H, W).numpy()
+        frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
+        grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
+        grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
+        media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
 
 print(f"\nDone. Run: {run_dir}")
