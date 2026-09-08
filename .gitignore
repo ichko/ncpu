@@ -10,6 +10,7 @@ CLAUDE.md
 docs/
 *.ignore.*
 results
+external
 
 # preview/debug images generated at repo root
 /*.png

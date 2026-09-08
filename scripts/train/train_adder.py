@@ -48,6 +48,8 @@ parser.add_argument("--steps",  type=int, default=50_000)
 parser.add_argument("--layout", default="cols1", choices=["cols1", "cols2"],
                     help="cols1: single input column; cols2: two input columns (needed for 8-bit)")
 parser.add_argument("--device", default="cuda")
+parser.add_argument("--eval-every", type=int, default=1000, dest="eval_every",
+                    help="evaluate the model every N steps (default 1000)")
 parser.add_argument("--save-rollout-npz", action="store_true",
                     help="save rollout arrays as compressed NPZ files instead of GIFs")
 args = parser.parse_args()
@@ -59,6 +61,7 @@ torch.manual_seed(args.seed)
 TOTAL_STEPS = args.steps
 PLOT_EVERY  = 500
 MEDIA_EVERY = 5000
+EVAL_EVERY  = args.eval_every
 DEVICE      = args.device
 
 if args.bits == 4:
@@ -118,9 +121,9 @@ checkpoints_dir.mkdir()
 
 with open(run_dir / "config.json", "w") as f:
     json.dump({
-        "run":   {"name": run_name, "experiment": experiment, "bits": args.bits,
-                  "layout": args.layout, "seed": args.seed, "total_steps": TOTAL_STEPS,
-                  "plot_every": PLOT_EVERY, "device": DEVICE},
+"run":   {"name": run_name, "experiment": experiment, "bits": args.bits,
+                   "layout": args.layout, "seed": args.seed, "total_steps": TOTAL_STEPS,
+                   "plot_every": PLOT_EVERY, "eval_every": EVAL_EVERY, "device": DEVICE},
         "ds":    {**{k: v for k, v in vars(ds_config).items() if k not in ("sampler", "screen_fn")},
                   "sampler": ds_config.sampler.__name__, "screen_fn": ds_config.screen_fn.__name__},
         "nca":   vars(nca_config),
