@@ -21,6 +21,7 @@ Usage:
     uv run python scripts/train/train_alu.py
     uv run python scripts/train/train_alu.py --seed 1
     uv run python scripts/train/train_alu.py --steps 200000
+    uv run python scripts/train/train_alu.py --eval-every 1000 --save-rollout-npz
 """
 
 import json
@@ -35,6 +36,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mediapy as media
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -54,6 +56,10 @@ parser.add_argument("--steps",  type=int, default=200_000)
 parser.add_argument("--device", default="cuda")
 parser.add_argument("--resume", type=str, default=None,
                     help="Run name to resume, or 'last'")
+parser.add_argument("--eval-every", type=int, default=1000, dest="eval_every",
+                    help="evaluate the model every N steps (default 1000)")
+parser.add_argument("--save-rollout-npz", action="store_true",
+                    help="save rollout arrays as compressed NPZ files instead of GIFs")
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -63,7 +69,9 @@ torch.manual_seed(args.seed)
 TOTAL_STEPS = args.steps
 PLOT_EVERY = 500
 MEDIA_EVERY = 5000
+EVAL_EVERY = args.eval_every
 DEVICE = args.device
+SAVE_ROLLOUT_NPZ = args.save_rollout_npz
 
 # Grid: wide enough for 3 regions (left inputs / middle opcode / right output).
 # A/B at x=20,30  |  opcode+carry at x=64  |  result+carry at x=108
@@ -123,7 +131,8 @@ else:
     with open(run_dir / "config.json", "w") as f:
         json.dump({
             "run":   {"name": run_name, "experiment": "E4", "seed": args.seed,
-                      "total_steps": TOTAL_STEPS, "plot_every": PLOT_EVERY, "device": DEVICE},
+                      "total_steps": TOTAL_STEPS, "plot_every": PLOT_EVERY,
+                      "eval_every": EVAL_EVERY, "save_rollout_npz": SAVE_ROLLOUT_NPZ, "device": DEVICE},
             "ds":    vars(ds_config),
             "nca":   vars(nca_config),
             "optim": vars(optim_config),
@@ -167,6 +176,10 @@ else:
     trainer.ds = dataset
     trainer.sanity_check()
 
+eval_batch = next(iter(dataset.get_dataloader(batch_size=optim_config.batch_size)))
+eval_noise_configs = [(0.0, 0.0)]
+eval_metrics = []
+
 log_path = run_dir / "log.jsonl"
 
 # ── Training loop ──────────────────────────────────────────────────────────────
@@ -200,6 +213,20 @@ for step in pbar:
             )
             + "\n"
         )
+
+    eval_bits = eval_loss = None
+    if step % EVAL_EVERY == 0 and step > 0:
+        trainer.save_checkpoint()
+        trainer.load_checkpoint(trainer.learning_step)
+        result = trainer.evaluate(eval_batch, eval_noise_configs, n_rollouts=5, steps=64)
+        eval_bits, eval_loss = result["eval_bits"], result["eval_loss"]
+        eval_metrics.append({"step": step, "eval_bits": eval_bits, "eval_loss": eval_loss})
+        with open(log_path, "a") as f:
+            f.write(json.dumps({
+                "step": step, "eval_bits": eval_bits, "eval_loss": eval_loss,
+                "ts": datetime.now().isoformat(),
+            }) + "\n")
+        print(f"\n  EVAL step {step}: bits={eval_bits:.3f}  loss={eval_loss:.4f}")
 
     if step % PLOT_EVERY != 0:
         continue
@@ -236,6 +263,30 @@ for step in pbar:
     fig.savefig(run_dir / "bits_curve.png", dpi=120)
     plt.close(fig)
 
+    # eval curves
+    if eval_metrics:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot([m["step"] for m in eval_metrics],
+                [m["eval_bits"] for m in eval_metrics],
+                color="seagreen", marker="o", lw=1)
+        ax.set_ylim(0, 8.5)
+        ax.set_xlabel("step"); ax.set_ylabel("mean eval bit accuracy")
+        ax.set_title(f"8-bit ALU seed={args.seed} — eval bits — step {step}")
+        fig.tight_layout()
+        fig.savefig(run_dir / "eval_bits_curve.png", dpi=120)
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot([m["step"] for m in eval_metrics],
+                [m["eval_loss"] for m in eval_metrics],
+                color="seagreen", marker="o", lw=1)
+        ax.set_yscale("log")
+        ax.set_xlabel("step"); ax.set_ylabel("eval loss")
+        ax.set_title(f"8-bit ALU seed={args.seed} — eval loss — step {step}")
+        fig.tight_layout()
+        fig.savefig(run_dir / "eval_loss_curve.png", dpi=120)
+        plt.close(fig)
+
     # snapshot
     snap_b = min(B, 4)
     diff = (nca_out - out).abs()
@@ -251,24 +302,31 @@ for step in pbar:
         row_vmax=[None, None, None, 2],
     )
 
-    # rollout gif
+    # rollout output
     gif_b = min(B, 4)
     gif_t = rollout[:gif_b, ::2]
-    frames = (
-        gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
-    )
-    frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
-    grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
-    grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
-    media.write_video(
-        str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif"
-    )
+    if SAVE_ROLLOUT_NPZ:
+        np.savez_compressed(run_dir / "rollout_latest.npz", rollout=gif_t.numpy())
+    else:
+        frames = (
+            gif_t.permute(2, 0, 1, 3, 4).reshape(C * gif_b, gif_t.shape[1], H, W).numpy()
+        )
+        frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
+        grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
+        grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
+        media.write_video(
+            str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif"
+        )
 
     if step % MEDIA_EVERY == 0 and step > 0:
-        shutil.copy(
-            run_dir / "rollout_latest.gif",
-            run_dir / "rollouts" / f"rollout_{step:07d}.gif",
-        )
+        if SAVE_ROLLOUT_NPZ:
+            shutil.copy(run_dir / "rollout_latest.npz",
+                        run_dir / "rollouts" / f"rollout_{step:07d}.npz")
+        else:
+            shutil.copy(
+                run_dir / "rollout_latest.gif",
+                run_dir / "rollouts" / f"rollout_{step:07d}.gif",
+            )
         shutil.copy(
             run_dir / "snapshot_latest.png",
             run_dir / "snapshots" / f"snapshot_{step:07d}.png",
