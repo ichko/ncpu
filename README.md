@@ -1,7 +1,5 @@
 # NCPU — spatial computation in neural cellular automata
 
-**Project page: [ncpu.pages.dev](https://ncpu.pages.dev/)**
-
 **NCPU** asks one question. Can a Neural Cellular Automaton (NCA) learn exact
 digital computation? An NCA is a single small update rule. Every cell on a grid
 runs the same rule, and each cell sees only its neighbours. We draw the inputs
