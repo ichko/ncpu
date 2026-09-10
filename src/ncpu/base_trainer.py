@@ -28,10 +28,7 @@ class BaseTrainer(nn.Module):
 
     def _checkpoint_path(self, step):
         return Path(self.checkpoint_pattern.format(step=step))
-    # Piotr: I think having external separate file/checkpoint manager
-    #        is bit cleaner as we can implement checkpoint-only related
-    #        functionalities and cleanly garbage collect checkpoints.
-    #        However I am not replacing it yet.
+
     # def save_checkpoint(self, name : str = "", timestamp = True) -> str:
     #     name = f"{name}"
     #     path = self.checkpointer.make(custom_string = name, timestamp = timestamp)
