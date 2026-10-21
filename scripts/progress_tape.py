@@ -197,8 +197,7 @@ curves()
 # ── the report page: open it once, it reloads itself ────────────────────────
 
 def page():
-    """Self-contained (images inlined) so it can be opened anywhere, and it reloads
-    itself every minute."""
+    """Self-contained (images inlined): published as an artifact, or opened locally."""
     import html
     import json
     import time
@@ -207,7 +206,7 @@ def page():
     cyc = [k for k in (ev[-1] if ev else {}) if k.startswith("cyc")]
     f = lambda v, d=4: f"{v:.{d}f}"
     trs = "".join(
-        f"<tr><td>{k}</td><td>{m['n']}</td><td>{f(m['instr'], 5)}</td><td>{f(m['mem'], 5)}</td>"
+        f"<tr class='{k.lower()}'><td>{k}</td><td>{m['n']}</td><td>{f(m['instr'], 5)}</td><td>{f(m['mem'], 5)}</td>"
         f"<td><b>{f(m['instr'] + m['mem'], 5)}</b></td><td>{f(m['bit'])}</td><td>{f(m['reg'])}</td>"
         f"<td>{f(m['memory'])}</td><td>{f(m['alive'])}</td></tr>" for k, m in TABLE.items())
     evr = "".join(f"<tr><td>{e['step']:,}</td><td>{f(e['loss'], 5)}</td>"
@@ -216,30 +215,40 @@ def page():
     inline = lambda name, mime: f"data:{mime};base64," + base64.b64encode((ROOT / name).read_bytes()).decode()
     curves_src = inline("v15_progress_curves.png", "image/png") if (ROOT / "v15_progress_curves.png").exists() else ""
     gif_src = inline(opt.gif, "image/gif")
-    out = f"""<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="refresh" content="60"><title>v15 training</title>
+    out = f"""<title>v15 Tape Machine</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <style>
-body{{font:13px/1.45 -apple-system,system-ui,sans-serif;background:#f6f5f1;color:#1d1c1a;margin:0}}
-main{{max-width:760px;margin:0 auto;padding:16px}}
-h1{{font-size:16px;margin:0}} .dim{{color:#8a877f}}
-.card{{background:#fff;border:1px solid #e4e2db;border-radius:6px;padding:12px;margin-top:12px}}
-h2{{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#8a877f;margin:0 0 8px}}
-table{{border-collapse:collapse;width:100%;font:12px ui-monospace,monospace}}
-td,th{{padding:3px 6px;text-align:right;border-bottom:1px solid #eeede8}}
-td:first-child,th:first-child{{text-align:left}} th{{color:#8a877f;font-weight:normal}}
-img{{width:100%;display:block}}
-</style></head><body><main>
-<h1>v15 tape machine <span class="dim">· {html.escape(run.name)}</span></h1>
-<div class="dim">checkpoint step {ck['step']:,} · updated {time.strftime('%H:%M:%S')} · reloads every minute</div>
-<div class="card"><h2>loss report · closed loop, {opt.batches}×{opt.batch} runs, {opt.cycles} cycles</h2>
-<table><tr><th></th><th>n</th><th>loss instr</th><th>loss mem</th><th>loss total</th>
-<th>dst bits</th><th>dst reg</th><th>memory</th><th>run exact</th></tr>{trs}</table>
+/* one narrow column of cards: summary table first, then curves, film, history */
+:root{{--bg:#f6f5f1;--card:#ffffff;--line:#e4e2db;--fg:#1d1c1a;--dim:#7d7a72;--accent:#2f6fe4;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:-apple-system,system-ui,"Segoe UI",sans-serif}}
+@media (prefers-color-scheme:dark){{:root:not([data-theme="light"]){{--bg:#17171a;--card:#202024;--line:#33333a;
+  --fg:#e9e7e1;--dim:#9a978f;--accent:#7aa2ff;color-scheme:dark}}}}
+:root[data-theme="dark"]{{--bg:#17171a;--card:#202024;--line:#33333a;--fg:#e9e7e1;--dim:#9a978f;--accent:#7aa2ff;color-scheme:dark}}
+body{{background:var(--bg);color:var(--fg);font:13px/1.45 var(--sans)}}
+main{{max-width:760px;margin:0 auto;padding-block:16px 28px;display:grid;gap:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}}
+h1{{font-size:16px;margin:0;text-wrap:balance}} .dim{{color:var(--dim)}}
+.card{{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;min-width:0}}
+h2{{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;font-weight:600}}
+.scroll{{overflow-x:auto}}
+table{{border-collapse:collapse;width:100%;font:12px var(--mono);font-variant-numeric:tabular-nums}}
+td,th{{padding:3px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}}
+td:first-child,th:first-child{{text-align:left}} th{{color:var(--dim);font-weight:normal}}
+tr.all td{{font-weight:600}}
+img{{width:100%;display:block;border-radius:3px;background:#fff}}
+</style>
+<main>
+<div><h1>v15 tape machine <span class="dim">· {html.escape(run.name)}</span></h1>
+<div class="dim">checkpoint step {ck['step']:,} · built {time.strftime('%Y-%m-%d %H:%M')}</div></div>
+<div class="card"><h2>loss report · closed loop, {opt.batches}×{opt.batch} runs × {opt.cycles} cycles</h2>
+<div class="scroll"><table><tr><th></th><th>n</th><th>loss instr</th><th>loss mem</th><th>loss total</th>
+<th>dst bits</th><th>dst reg</th><th>memory</th><th>run exact</th></tr>{trs}</table></div>
 <div class="dim" style="margin-top:6px">run exact by cycle: {" · ".join(f"{c}: {v:.3f}" for c, v in enumerate(BY_CYCLE, 1))}</div></div>
-<div class="card"><h2>training curves</h2><img src="{curves_src}"></div>
-<div class="card"><h2>a batch executing</h2><img src="{gif_src}"></div>
-<div class="card"><h2>eval history (trainer, {html.escape(str(len(ev)))} evals)</h2>
-<table><tr><th>step</th><th>loss</th>{"".join(f"<th>{k}</th>" for k in cyc)}</tr>{evr}</table></div>
-</main></body></html>"""
+<div class="card"><h2>training curves</h2><img alt="loss and accuracy curves" src="{curves_src}"></div>
+<div class="card"><h2>a batch executing</h2><img alt="NCA executing a batch" src="{gif_src}"></div>
+<div class="card"><h2>eval history · trainer, {len(ev)} evals</h2>
+<div class="scroll"><table><tr><th>step</th><th>loss</th>{"".join(f"<th>{k}</th>" for k in cyc)}</tr>{evr}</table></div></div>
+</main>"""
     (ROOT / "v15_report.html").write_text(out)
     print("wrote v15_report.html")
 
