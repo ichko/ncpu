@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>v12 Stamped Machine</title>
+<style>
+  :root{ --bg:#f6f5f1; --panel:#ffffff; --line:#e4e1d8; --line2:#d6d2c6;
+         --ink:#1d1c1a; --dim:#64625c; --faint:#a19e95;
+         --a:#2f5bea; --b:#0e9aa7; --rp:#dd7a06; --rm:#cc2391; --ok:#2e8540; --bad:#c43d2b;
+         --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+         --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 var(--sans)}
+  .page{max-width:720px;margin:0 auto;padding:22px 16px 40px}
+
+  header h1{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em}
+  header h1 span{color:var(--faint);font-weight:500}
+  .lede{margin:3px 0 14px;color:var(--dim);font-size:12.5px}
+
+  #progs{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+  #progs button{font:500 11.5px var(--sans);color:var(--dim);background:var(--panel);
+                border:1px solid var(--line);border-radius:999px;padding:3px 10px;cursor:pointer}
+  #progs button:hover{border-color:var(--line2);color:var(--ink)}
+  #progs button.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  #desc{margin:0 0 12px;color:var(--dim);font-size:12px;min-height:36px}
+
+  section{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+          padding:10px 12px;margin-bottom:10px}
+  h2{margin:0 0 6px;font:600 9.5px var(--sans);letter-spacing:.09em;text-transform:uppercase;
+     color:var(--faint);display:flex;justify-content:space-between;gap:8px}
+  h2 .r{text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim)}
+
+  /* machine */
+  .stage{position:relative;margin:0 auto;padding-top:54px}
+  #grid{display:block;image-rendering:pixelated;border-radius:3px;border:1px solid var(--line2)}
+  .pin{position:absolute;top:0;transform:translateX(-50%);text-align:center;
+       font-family:var(--mono);line-height:1.12;white-space:nowrap}
+  .pin .bdg{display:block;height:9px;font-size:7.5px;letter-spacing:.08em;text-transform:uppercase}
+  .pin .nm{display:block;min-height:11px;font-size:9px;color:var(--faint)}
+  .pin .vl{font-size:14px;font-weight:700}
+  .pin .bt{font-size:7.5px;color:var(--faint);letter-spacing:.4px}
+  .pin.unk .vl{color:var(--bad)}
+  .pin.opa .nm{color:var(--a);font-weight:700} .pin.opb .nm{color:var(--b);font-weight:700}
+  .pin.wr .nm{color:var(--rp);font-weight:700} .pin.wr.leq .nm{color:var(--rm)}
+  .pin.ina .bdg,.pin.ina .vl{color:var(--ok)}
+  .pin.outp .bdg,.pin.outp .vl{color:var(--rp)}
+  #now{margin-top:8px;font-family:var(--mono);font-size:11.5px;display:flex;gap:10px;
+       justify-content:center;align-items:baseline;min-height:18px}
+  #now .k{color:var(--faint);font-size:10px}
+  #now .nt{color:var(--dim)}
+  #scrwrap{margin:12px auto 2px;text-align:center}
+  #screen{image-rendering:pixelated;border:1px solid var(--line2);background:#f7f6f2}
+  #screen.grid{border:0;background:none}
+  #scrcap{margin-top:3px;font:10px var(--mono);color:var(--faint)}
+  .stage.tight .pin .bt{display:none}
+  .stage.none .pin{display:none} .stage.none{padding-top:4px}
+  .stage.tight .pin .vl{font-size:12px}
+  #legend{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:6px;
+          font-size:10px;color:var(--faint);font-family:var(--mono)}
+  #legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:-1px}
+
+  /* timeline */
+  #tl{display:block;width:100%;height:20px;cursor:crosshair;border-radius:3px}
+  .seg{flex:1;position:relative;border-radius:2px;overflow:hidden;background:#f1efe9;
+       font:9px var(--mono);color:var(--faint);display:flex;align-items:center;justify-content:center}
+  .seg .fill{position:absolute;inset:0;width:0;opacity:.28}
+  .seg.sub .fill{background:var(--rp)} .seg.subleq .fill{background:var(--rm)}
+  .seg.sub{box-shadow:inset 0 -2px 0 #dd7a0655} .seg.subleq{box-shadow:inset 0 -2px 0 #cc239155}
+  .seg .tag{position:relative}
+  .seg.on{outline:1px solid var(--ink);outline-offset:-1px}
+  #scrub{width:100%;margin:6px 0 0;accent-color:var(--ink)}
+  #ctl{display:flex;align-items:center;gap:10px;margin-top:4px;font:11px var(--mono);color:var(--dim);flex-wrap:wrap}
+  button.b{font:500 11px var(--sans);background:var(--panel);color:var(--ink);border:1px solid var(--line2);
+           border-radius:5px;padding:3px 10px;cursor:pointer}
+  button.b:hover{border-color:var(--dim)}
+  #fps{width:110px;accent-color:var(--ink)}
+  .sp{color:var(--faint)}
+
+  /* code */
+  .code{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .code section{margin:0}
+  pre#src{margin:0;font:11px/1.75 var(--mono);white-space:pre-wrap}
+  #src .ln{display:block;padding:0 6px;border-left:2px solid transparent;color:var(--dim)}
+  #src .ln.on{color:var(--ink);background:#dd7a0612;border-left-color:var(--rp)}
+  #asm{position:relative;max-height:228px;overflow:auto;font:10.5px/1.6 var(--mono)}
+  .ins{display:flex;gap:6px;padding:0 6px;border-left:2px solid transparent;color:var(--faint);
+       white-space:pre;cursor:pointer}
+  .ins .n{min-width:18px;text-align:right;color:#c9c5ba}
+  .ins .nt{margin-left:auto;padding-left:8px}
+  .ins:hover{color:var(--dim)}
+  .ins.done{color:var(--dim)}
+  .ins.on{color:var(--ink);background:#2f5bea12;border-left-color:var(--a)}
+  .ins.leq .op{color:var(--rm)} .ins.sb .op{color:var(--rp)}
+
+  #status{margin:10px 2px 0;font:10.5px/1.6 var(--mono);color:var(--faint)}
+  #status b{color:var(--dim);font-weight:600}
+  .okc{color:var(--ok)} .badc{color:var(--bad)}
+  #err{margin-top:10px;color:var(--bad);font:12px var(--mono)}
+
+  @media (max-width:560px){ .code{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<script>
+// A module whose import fails never runs its body, so the try/catch inside it
+// can never report that failure. This net is the only thing that can.
+window.addEventListener('error', (e) => {
+  const s = document.getElementById('status');
+  if (s) { s.textContent = 'failed: ' + (e.message || 'script error'); s.style.color = '#c43d2b'; }
+});
+</script>
+
+<div class="page">
+  <header>
+    <h1>NCA computer <span>· v12 stamped machine</span></h1>
+    <p class="lede">A neural cellular automaton executing compiled programs. Every pixel below is the
+      network's own state, computed live on your GPU; we only stamp the next instruction in every
+      <span id="kk">40</span> frames. Programs run live; drag the timeline to rewind.</p>
+  </header>
+
+  <nav id="progs"></nav>
+  <p id="desc"></p>
+
+  <section>
+    <h2>memory <span class="r" id="hint"></span></h2>
+    <div class="stage" id="stage"><canvas id="grid"></canvas></div>
+    <div id="now"></div>
+    <div id="scrwrap" style="display:none">
+      <canvas id="screen"></canvas>
+      <div id="scrcap"></div>
+    </div>
+    <div id="legend">
+      <span><i style="background:var(--a)"></i>A</span>
+      <span><i style="background:var(--b)"></i>B</span>
+      <span><i style="background:var(--rp)"></i>dst · SUB</span>
+      <span><i style="background:var(--rm)"></i>dst · SUBLEQ</span>
+      <span><i style="background:#fff;border:1px solid #ccc"></i>1</span>
+      <span><i style="background:#111"></i>0</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>time <span class="r" id="pos"></span></h2>
+    <canvas id="tl"></canvas>
+    <input id="scrub" type="range" min="0" max="0" value="0">
+    <div id="ctl">
+      <button class="b" id="play">pause</button>
+      <span class="sp">speed</span><input id="fps" type="range" min="0" max="100" value="58">
+      <span id="fpsv"></span>
+      <button class="b" id="rerun" style="margin-left:auto">re-run</button>
+    </div>
+  </section>
+
+  <div class="code">
+    <section><h2>program</h2><pre id="src"></pre></section>
+    <section><h2>compiled <span class="r" id="ncount"></span></h2><div id="asm"></div></section>
+  </div>
+
+  <p id="status">booting…</p>
+</div>
+
+<script type="module">
+import { loadModel, Layout, StampGPU, Machine, UNKNOWN } from './js/stamp.js';
+
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const FPS_MAX = 20000;
+const fpsOf = (v) => Math.max(1, Math.round(Math.pow(FPS_MAX, v / 100)));   // log slider
+
+try {
+  const model = await loadModel('data/');
+  const M = model.meta, K = M.k_cycle, PC = K + 1;
+  const gpu = await StampGPU.create(model);
+  const ai = gpu.adapter.info || {};
+  const gpuName = [ai.vendor, ai.architecture || ai.description].filter(Boolean).join(' ') || 'GPU';
+  const CA = M.colors.A, CB = M.colors.B, CRP = M.colors['R+'], CRM = M.colors['R-'];
+  $('#kk').textContent = K;
+  $('#progs').innerHTML = M.programs.map((p, i) => `<button data-i="${i}">${esc(p.name)}</button>`).join('');
+
+  let P, L, N, NI, mach = null, pins = [], scale = 10, img, simg, spx = 1;
+  let cur = 0, playing = false, fps = fpsOf(+$('#fps').value), acc = 0, prev = performance.now();
+  let hover = null, busy = false, disp = null, shown = -1, token = 0, tRun = 0, stepsRun = 0;
+  let rate = 400;                       // measured NCA steps/s, so a batch is ~60 ms of GPU work
+  const cv = $('#grid'), ctx = cv.getContext('2d');
+  const off = document.createElement('canvas'), octx = off.getContext('2d');
+  const scv = $('#screen'), sctx = scv.getContext('2d');
+  const soff = document.createElement('canvas'), sofx = soff.getContext('2d');
+
+  async function select(i) {
+    const my = ++token;
+    P = M.programs[i]; L = new Layout(M, P); N = P.H * P.W; NI = P.instrs.length;
+    document.querySelectorAll('#progs button').forEach((b) => b.classList.toggle('on', +b.dataset.i === i));
+    $('#desc').textContent = P.desc;
+    $('#ncount').textContent = `${NI} instr · ${P.n_regs} × ${P.word_bits}-bit registers`;
+    $('#src').innerHTML = P.source.map((s, j) => `<span class="ln" data-l="${j}">${esc(s)}</span>`).join('');
+    $('#asm').innerHTML = P.instrs.map((s, j) =>
+      `<div class="ins ${s.op === 'SUBLEQ' ? 'leq' : 'sb'}" data-i="${j}"><span class="n">${j}</span>` +
+      `<span class="op">${esc(s.op.padEnd(6))}</span>${esc(s.text.slice(7))}` +
+      `<span class="nt">${esc(s.note)}</span></div>`).join('');
+    document.querySelectorAll('#asm .ins').forEach((e) => { e.onclick = () => { cur = +e.dataset.i * PC; pause(); }; });
+    buildTimeline();
+
+    const avail = $('#stage').parentElement.clientWidth - 26;
+    off.width = P.W; off.height = P.H;
+    // always ONE row of memory: a wide one (Life) is just drawn smaller
+    scale = avail / P.W >= 1 ? Math.min(10, Math.floor(avail / P.W)) : avail / P.W;
+    cv.width = P.W; cv.height = P.H;
+    cv.style.width = `${cv.width * scale}px`; cv.style.height = `${cv.height * scale}px`;
+    cv.style.imageRendering = scale < 1 ? 'auto' : 'pixelated';   // shrinking: blend, don't drop columns
+    $('#stage').style.width = `${cv.width * scale + 2}px`;
+    img = octx.createImageData(P.W, P.H); ctx.imageSmoothingEnabled = false;
+    document.querySelectorAll('.pin').forEach((e) => e.remove());
+    pins = P.col_x.map((cx, c) => {
+      const el = document.createElement('div');
+      el.className = 'pin'; el.style.left = `${cx * scale + scale / 2 + 1}px`;
+      el.innerHTML = `<span class="bdg"></span><span class="nm">${esc(P.labels[c])}</span>` +
+                     `<div class="vl">·</div><span class="bt"></span>`;
+      $('#stage').appendChild(el);
+      return el;
+    });
+    $('#stage').classList.toggle('tight', scale * M.pitch < 34);
+    $('#stage').classList.toggle('none', scale * M.pitch < 16);
+
+    const S = P.screen;
+    $('#scrwrap').style.display = S ? '' : 'none';
+    if (S) {
+      soff.width = S.w; soff.height = S.h; simg = sofx.createImageData(S.w, S.h);
+      const px = clamp(Math.floor(220 / Math.max(S.w, S.h)), 6, 16);
+      spx = px; scv.classList.toggle('grid', S.kind === 'grid');
+      // a board is drawn at full size, square cells with a small gap between them
+      if (S.kind === 'grid') { scv.width = S.w * px; scv.height = S.h * px; }
+      else { scv.width = S.w; scv.height = S.h; }
+      scv.style.width = `${S.w * px}px`; scv.style.height = `${S.h * px}px`;
+      $('#scrcap').textContent = S.kind === 'spacetime'
+        ? 'memory read as pixels — one row per generation, top to bottom'
+        : 'memory read as pixels — each cell changes the moment the network writes it';
+    }
+
+    while (busy) await new Promise((r) => setTimeout(r, 5));     // never destroy under a pending read
+    if (my !== token) return;
+    if (mach) { mach.destroy(); mach = null; }
+    $('#status').textContent = 'compiling…';
+    const m = await Machine.create(gpu, L, P);
+    if (my !== token) { m.destroy(); return; }
+    mach = m; cur = 0; shown = -1; hover = null; acc = 0; lastCyc = -1; lastSrc = -1;
+    tRun = performance.now(); stepsRun = 0;
+    $('#scrub').max = mach.total - 1;
+    // long programs default fast; the GPU-paced cap keeps it honest
+    const v = Math.round(100 * Math.log(clamp(mach.total / 40, 120, FPS_MAX)) / Math.log(FPS_MAX));
+    $('#fps').value = v; fps = fpsOf(v); $('#fpsv').textContent = `${fps.toLocaleString()} frames/s`;
+    playing = true; $('#play').textContent = 'pause';
+  }
+
+  // the timeline is a canvas: Life has 8,000+ instructions
+  const tlc = $('#tl'), tlx = tlc.getContext('2d'), tlBase = document.createElement('canvas');
+  function buildTimeline() {
+    const w = Math.round(tlc.clientWidth * devicePixelRatio), h = Math.round(20 * devicePixelRatio);
+    tlc.width = tlBase.width = w; tlc.height = tlBase.height = h;
+    const b = tlBase.getContext('2d');
+    b.fillStyle = '#f1efe9'; b.fillRect(0, 0, w, h);
+    const sep = NI <= 60;
+    P.instrs.forEach((s, j) => {
+      const x0 = Math.floor((j / NI) * w), x1 = Math.max(x0 + 1, Math.floor(((j + 1) / NI) * w) - (sep ? 1 : 0));
+      b.fillStyle = s.op === 'SUBLEQ' ? '#cc239140' : '#dd7a0640';
+      b.fillRect(x0, h - 3 * devicePixelRatio, x1 - x0, 3 * devicePixelRatio);
+    });
+  }
+  function drawTimeline(f) {
+    const w = tlc.width, h = tlc.height, x = (f / Math.max(1, mach.total - 1)) * w;
+    tlx.drawImage(tlBase, 0, 0);
+    tlx.fillStyle = '#2f5bea22'; tlx.fillRect(0, 0, x, h);
+    tlx.fillStyle = '#1d1c1a'; tlx.fillRect(Math.min(w - 2, x), 0, 2 * devicePixelRatio, h);
+  }
+
+  // ── bring the machine to the wanted frame and read it back ─────────────
+  async function tick() {
+    if (!mach || busy) return;
+    let want = hover ?? cur;
+    if (want === shown) return;
+    // cap each batch at ~60 ms of measured GPU work: playback runs as fast as the
+    // hardware allows and the page never freezes behind one enormous batch
+    const cap = Math.max(PC, Math.round(rate * 0.06));
+    if (want > mach.cur + cap) want = mach.cur + cap;      // the rest comes next frame
+    busy = true;
+    const m = mach;
+    try {
+      const before = m.cur, t0 = performance.now();
+      m.seek(want);
+      disp = await m.read();
+      if (m !== mach) return;
+      if (want > before) {
+        stepsRun += want - before;
+        const r = (want - before) / Math.max(1e-3, (performance.now() - t0) / 1000);
+        rate = clamp(0.7 * rate + 0.3 * r, 20, 1e6);
+      }
+      shown = want;
+      draw(want);
+      report();
+      if (playing && hover === null && shown >= m.total - 1) pause();
+    } finally { busy = false; }
+  }
+
+  function report() {
+    let good = 0;
+    for (let c = 0; c < mach.decRead; c++)
+      if (mach.decoded[c].every((v, j) => v === P.trace[c + 1][j])) good++;
+    let head;
+    if (mach.decRead === NI) {
+      const ok = P.outputs.every((o) => mach.decoded[NI - 1][o] === P.trace[NI][o]);
+      head = `this run: <b>${good}/${NI}</b> instructions exact, result ` +
+             (ok ? '<span class="okc">correct ✓</span>' : '<span class="badc">wrong ✗</span>');
+    } else {
+      head = `running live: <b>${mach.decRead}/${NI}</b> instructions done, ` +
+             (good === mach.decRead ? '<span class="okc">all exact so far</span>'
+                                    : `<span class="badc">${mach.decRead - good} wrong</span>`);
+    }
+    $('#status').innerHTML = head +
+      ` · ${Math.round(rate).toLocaleString()} NCA steps/s on ${esc(gpuName)}` +
+      `<br>${esc(M.run)} · step ${M.step.toLocaleString()} · ${M.channels}ch ${M.hidden}h k${M.kernel}` +
+      ` · fire ${M.fire_rate} · verified ${P.verified} runs exact in PyTorch`;
+  }
+
+  const fmt = (v) => v === null ? '·' : P.signed && v >= (1 << (P.word_bits - 1)) ? v - (1 << P.word_bits) : v;
+
+  // ── draw ───────────────────────────────────────────────────────────────
+  let lastCyc = -1, lastSrc = -1;
+  function draw(f) {
+    const d = img.data;
+    for (let i = 0; i < N; i++) {
+      const g = clamp((disp[i] + 1) / 2, 0, 1);
+      const a = clamp(disp[N + i], 0, 1), b = clamp(disp[2 * N + i], 0, 1);
+      const rr = disp[3 * N + i], rp = clamp(rr, 0, 1), rm = clamp(-rr, 0, 1);
+      const w = Math.max(a, b, rp, rm) * 0.5, iw = 1 - w;
+      for (let k = 0; k < 3; k++) {
+        const t = clamp(a * CA[k] + b * CB[k] + rp * CRP[k] + rm * CRM[k], 0, 1);
+        d[i * 4 + k] = clamp(g * iw + t * w, 0, 1) * 255;
+      }
+      d[i * 4 + 3] = 255;
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.drawImage(off, 0, 0);
+
+    const total = mach.total;
+    const cyc = Math.min(NI - 1, Math.floor(f / PC)), within = f - cyc * PC, ins = P.instrs[cyc];
+    const done = f >= total - 1, atStart = f === 0, live = !atStart && !done;
+    const regs = L.decode(disp.subarray(0, N));
+    pins.forEach((el, c) => {
+      const v = regs[c];
+      const isIn = atStart && P.inputs.includes(c), isOut = done && P.outputs.includes(c);
+      el.className = 'pin' + (v === null ? ' unk' : '')
+        + (live && c === ins.a ? ' opa' : '') + (live && c === ins.b ? ' opb' : '')
+        + (live && c === ins.dst ? ' wr' + (ins.op === 'SUBLEQ' ? ' leq' : '') : '')
+        + (isIn ? ' ina' : '') + (isOut ? ' outp' : '');
+      el.querySelector('.vl').textContent = fmt(v);
+      el.querySelector('.bt').textContent = v === null ? '?'.repeat(P.word_bits) : v.toString(2).padStart(P.word_bits, '0');
+      el.querySelector('.bdg').textContent = isIn ? 'in' : isOut ? 'out' : '';
+    });
+    $('#hint').textContent = atStart ? 'inputs painted into memory' : done ? 'finished — result in memory'
+      : within === 0 ? `instruction ${cyc} stamped` : `settling ${within}/${K}`;
+    $('#now').innerHTML = atStart ? '' :
+      `<span class="k">#${cyc}</span><span style="color:var(--${ins.op === 'SUBLEQ' ? 'rm' : 'rp'});font-weight:700">` +
+      `${esc(ins.text)}</span><span class="nt">${esc(ins.note)}</span>`;
+    $('#pos').textContent = `instruction ${cyc + 1}/${NI} · frame ${f}/${total - 1}`;
+    $('#scrub').value = f;
+
+    if (cyc !== lastCyc) {                // only the rows that change: Life has 8,000+
+      const box = $('#asm');
+      if (box.children[lastCyc]) box.children[lastCyc].classList.remove('on');
+      if (lastSrc !== ins.src) {
+        const ln = $('#src').children;
+        if (ln[lastSrc]) ln[lastSrc].classList.remove('on');
+        if (ln[ins.src]) ln[ins.src].classList.add('on');
+        lastSrc = ins.src;
+      }
+      lastCyc = cyc;
+      const el = box.children[cyc];
+      if (el) el.classList.add('on');
+      if (el) {
+        const top = el.offsetTop;
+        if (top < box.scrollTop) box.scrollTop = top - 4;
+        else if (top + el.offsetHeight > box.scrollTop + box.clientHeight)
+          box.scrollTop = top + el.offsetHeight - box.clientHeight + 4;
+      }
+    }
+    drawTimeline(f);
+    if (P.screen) drawScreen(f);
+  }
+
+  // the screen knows nothing about the program: it reads registers out of
+  // memory, through the same decoder the status line uses
+  function drawScreen(f) {
+    const S = P.screen, d = simg.data;
+    const put = (x, y, v) => {
+      const o = (y * S.w + x) * 4;
+      const c = v === UNKNOWN ? [196, 61, 43] : v === S.alive ? [29, 28, 26] : [236, 233, 225];
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    };
+    for (let i = 0; i < S.w * S.h; i++) { d[i * 4] = 247; d[i * 4 + 1] = 246; d[i * 4 + 2] = 242; d[i * 4 + 3] = 255; }
+    const done = (at) => at < 0 || (f >= (at + 1) * PC - 1 && mach.decoded[at]);
+    const val = (e) => e.at < 0 ? P.regs0[e.reg] : mach.decoded[e.at][e.reg];
+    if (S.kind === 'spacetime') {
+      S.rows.forEach((row, y) => {
+        if (done(row.at)) row.regs.forEach((r, x) => put(x, y, val({ at: row.at, reg: r })));
+      });
+    } else {                                // a board: each cell shows its newest written generation
+      let gen = S.gens;
+      for (let y = 0; y < S.h; y++) for (let x = 0; x < S.w; x++) {
+        const hist = S.cells[y][x];
+        let k = hist.length - 1;
+        while (k > 0 && !done(hist[k].at)) k--;
+        gen = Math.min(gen, k);
+        put(x, y, val(hist[k]));
+      }
+      $('#scrcap').textContent = `generation ${gen} of ${S.gens} — each cell changes the moment the network writes it`;
+    }
+    if (S.kind === 'grid') {
+      const g = Math.max(1, Math.round(spx / 8));
+      sctx.clearRect(0, 0, scv.width, scv.height);
+      for (let y = 0; y < S.h; y++) for (let x = 0; x < S.w; x++) {
+        const o = (y * S.w + x) * 4;
+        sctx.fillStyle = `rgb(${d[o]},${d[o + 1]},${d[o + 2]})`;
+        sctx.fillRect(x * spx + g / 2, y * spx + g / 2, spx - g, spx - g);
+      }
+      return;
+    }
+    sofx.putImageData(simg, 0, 0);
+    sctx.imageSmoothingEnabled = false; sctx.drawImage(soff, 0, 0);
+  }
+
+  // ── playback ───────────────────────────────────────────────────────────
+  const pause = () => { playing = false; $('#play').textContent = 'play'; };
+  function loop(t) {
+    const dt = Math.min(0.1, (t - prev) / 1000); prev = t;
+    if (playing && hover === null && mach) {
+      acc += dt * fps;
+      const adv = Math.floor(acc); acc -= adv;
+      // never run ahead of what the GPU has actually shown
+      const lead = Math.max(PC, Math.round(rate * 0.06));
+      cur = Math.min(mach.total - 1, cur + adv, Math.max(shown, 0) + lead);
+    }
+    tick();
+    requestAnimationFrame(loop);
+  }
+  $('#play').onclick = () => {
+    if (!mach) return;
+    if (!playing && cur >= mach.total - 1) cur = 0;
+    playing = !playing; $('#play').textContent = playing ? 'pause' : 'play';
+  };
+  $('#fps').oninput = (e) => { fps = fpsOf(+e.target.value); $('#fpsv').textContent = `${fps.toLocaleString()} frames/s`; };
+  $('#fpsv').textContent = `${fps.toLocaleString()} frames/s`;
+  $('#scrub').oninput = (e) => { cur = +e.target.value; pause(); };
+  $('#rerun').onclick = () => {
+    if (!mach) return;
+    mach.reset((Math.random() * 1e9) | 0);
+    cur = 0; shown = -1; tRun = performance.now(); stepsRun = 0;
+    playing = true; $('#play').textContent = 'pause';
+  };
+  document.querySelectorAll('#progs button').forEach((b) => { b.onclick = () => select(+b.dataset.i); });
+
+  // hovering the timeline scrubs; the left edge of a block is that instruction being stamped in
+  const tl = $('#tl');
+  tl.addEventListener('mousemove', (e) => {
+    if (!mach) return;
+    const r = tl.getBoundingClientRect();
+    hover = clamp(Math.floor(((e.clientX - r.left) / r.width) * mach.total), 0, mach.total - 1);
+  });
+  tl.addEventListener('mouseleave', () => { hover = null; });
+  tl.addEventListener('click', () => { if (hover !== null) { cur = hover; pause(); } });
+
+  const first = select(0);
+  requestAnimationFrame(loop);
+  await first;
+} catch (err) {
+  document.querySelector('.page').insertAdjacentHTML('beforeend',
+    `<div id="err">${esc(err.message)}<br><span style="color:var(--dim)">` +
+    `This runs the real network, so it needs WebGPU — Chrome 113+, Edge or Safari 18+. ` +
+    `If you are viewing this in an embedded panel, try opening it in a full browser tab.</span></div>`);
+  $('#status').textContent = 'failed';
+  throw err;
+}
+</script>
+</body>
+</html>

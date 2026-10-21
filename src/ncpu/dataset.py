@@ -49,6 +49,17 @@ def sample_4bit_multiplier(*args):
     return torch.cat([a, b]), out
 
 
+def sample_8bit_multiplier(*args):
+    """Two 8-bit operands -> 16-bit product (MSB-first). 255*255 = 65025 fits 16 bits."""
+    a = torch.randint(0, 2, size=(8,))
+    b = torch.randint(0, 2, size=(8,))
+    a_int = int("".join(map(str, a.tolist())), 2)
+    b_int = int("".join(map(str, b.tolist())), 2)
+    p_int = a_int * b_int
+    out = torch.tensor(list(map(int, f"{p_int:016b}")))
+    return torch.cat([a, b]), out
+
+
 def sample_4bit_adder(*args):
     a = torch.randint(0, 2, size=(4,))
     b = torch.randint(0, 2, size=(4,))

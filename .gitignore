@@ -26,3 +26,17 @@ demo/data/carry_tsne.json
 demo/data/subleq_fib.json
 demo/dist/
 /*.gif
+
+# ALIFE conference poster (local build artefact)
+poster/
+
+# ---- local run output at repo root: logs, sweep dumps, notes, reports ---------
+/*.log
+/*.txt
+/*.json
+/v15_report.html
+.wrangler/
+
+# stamp demo: rebuilt by scripts/export_stamp_web.py + build_stamp_artifact.py
+demo/data/stamp_v12.json
+demo/stamp_standalone.html

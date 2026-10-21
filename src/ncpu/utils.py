@@ -362,6 +362,37 @@ def make_io_screen_cols1(H, W, r, spacing, left_input, right_input):
     return screen
 
 
+def make_io_screen_cols2io(H, W, r, spacing, left_input, right_input):
+    """Like make_io_screen, but BOTH inputs and outputs are laid out in two
+    columns each (needed when the output is 16 bits, e.g. an 8x8 multiplier).
+
+    Left inputs hug the left edge and grow rightward; right outputs hug the
+    right edge and grow leftward. Bit i -> col = i // ceil(n/2), row = i % ...,
+    MSB-first (same convention as make_io_screen's two-column inputs).
+    """
+    screen = np.full((H, W), fill_value=128, dtype=np.uint8)
+    among_spacing, side_spacing = int(spacing[0]), int(spacing[1])
+    r = int(r)
+    step = 2 * r + among_spacing
+
+    def draw(bits, x0, direction):
+        n = len(bits)
+        if n == 0:
+            return
+        n_rows = int(np.ceil(n / 2))
+        v_size = n_rows * r * 2 + among_spacing * (n_rows - 1)
+        top_margin = (H - v_size) // 2
+        for i, bit in enumerate(bits):
+            col, row = i // n_rows, i % n_rows
+            x = x0 + direction * col * step
+            y = top_margin + r + row * step
+            cv2.circle(screen, (int(x), int(y)), r, 255 if bit else 0, -1)
+
+    draw(left_input, side_spacing, +1)        # left edge, columns grow rightward
+    draw(right_input, W - side_spacing, -1)   # right edge, columns grow leftward
+    return screen
+
+
 def make_alu_screen(
     H,
     W,

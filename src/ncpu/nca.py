@@ -35,8 +35,28 @@ class NeuralCA(nn.Module):
         learnable_initial_state=False,
         padding_type="circular",
         read_only_dims=[],
+        state_bound=10.0,
+        soft_bound=False,
     ) -> None:
+        """``state_bound`` / ``soft_bound`` control how cell state is limited.
+
+        Defaults reproduce the historical behaviour exactly (hard clamp at
+        +-10). Set ``soft_bound=True`` for a saturating ``b*tanh(x/b)`` instead.
+
+        Why this exists: a HARD clamp has exactly zero gradient outside its
+        range, so any cell pinned at the bound contributes nothing to backward.
+        On the 3SAT tasks 0.00% of cells ever reached it and it was harmless.
+        A *belief* encoding is different -- Wang tiling's ``softmax(beliefs/tau)``
+        pays for ever-larger beliefs, so the dynamics is driven INTO the bound;
+        at 64.3% saturation the BPTT product underflows and ``grad_norm`` goes
+        to ~5e-18 permanently. That presents as a learning failure, not as a
+        clipping artifact, so **check grad_norm and clip saturation before
+        interpreting a flat relaxation run**. Sudoku and Ising are exposed for
+        the same reason.
+        """
         super().__init__()
+        self.state_bound = float(state_bound)
+        self.soft_bound = bool(soft_bound)
         self.learnable_initial_state = learnable_initial_state
         self.fire_rate = fire_rate
         self.read_only_dims = read_only_dims
@@ -76,7 +96,12 @@ class NeuralCA(nn.Module):
             delta = self.stochastic_update(delta)
 
             x = x + delta
-            torch.clip_(x, -10, 10)
+            # NOT in-place: clip_ mutates a tensor already recorded in the
+            # graph, which can corrupt saved values for backward.
+            if self.soft_bound:
+                x = self.state_bound * torch.tanh(x / self.state_bound)
+            else:
+                x = torch.clamp(x, -self.state_bound, self.state_bound)
             x = self.gaussian_noise(x)
             seq.append(x)
 

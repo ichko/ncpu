@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Self-organized boolean computation — lightning talk</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="description" content="Lightning talk: a neural cellular automaton trained to compute Boolean logic and 8-bit binary addition." />
+<style>
+/* ==========================================================================
+   Lightning talk. Same palette and chrome as the rest of the site.
+
+   The rollouts are not video. demo/data holds every frame of a run tiled
+   horizontally at one pixel per cell, which is already a sprite sheet, so a
+   `steps()` animation walks it: 129 frames cost ~550 KB as a PNG against 6.6 MB
+   as a GIF, and the frames stay exact and pausable. Scaling is done with a
+   transform rather than background-size, so the browser never has to rasterise
+   a 41000px-wide background.
+
+   Keys: arrows / space to move, F fullscreen, P pause, O overview.
+   ========================================================================== */
+
+:root {
+  --paper:   #f1e9d6;
+  --paper-2: #ece2c9;
+  --panel:   #faf6ea;
+  --ink:     #221f19;
+  --ink-2:   #48443b;
+  --ink-3:   #857c68;
+  --rule:    #d3c9ac;
+  --rule-2:  #c3b791;
+  --accent:  #ab3520;
+  --ok:      #4a6a34;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --z: 3;                       /* rollout zoom, overridden per slide */
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--ink); }
+body { font-family: var(--sans); color: var(--ink); overflow: hidden; }
+
+/* ---- the stage: a fixed 16:9 sheet scaled to whatever the window is ------- */
+#stage { position: fixed; inset: 0; display: grid; place-items: center; }
+#deck {
+  width: 1600px; height: 900px; position: relative;
+  background: var(--paper);
+  background-image: radial-gradient(1200px 500px at 50% -10%, rgba(255,252,244,0.8), transparent 70%);
+  overflow: hidden;
+}
+
+section.slide {
+  position: absolute; inset: 0;
+  padding: 54px 72px 68px;
+  display: none; flex-direction: column;
+}
+section.slide.on { display: flex; }
+
+/* ---- shared type --------------------------------------------------------- */
+.kicker { font-family: var(--mono); font-size: 19px; font-weight: 700; letter-spacing: 0.22em;
+          text-transform: uppercase; color: var(--accent); margin-bottom: 18px; flex: 0 0 auto; }
+.kicker .dim { color: var(--ink-3); letter-spacing: 0.16em; }
+h1 { font-size: 92px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.0; margin: 0; }
+h1 em { font-style: normal; color: var(--accent); }
+h2 { font-size: 52px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05;
+     margin: 0 0 10px; flex: 0 0 auto; }
+h2 em { font-style: normal; color: var(--accent); }
+p.sub { font-size: 27px; line-height: 1.4; color: var(--ink-2); margin: 0; max-width: 1150px; }
+p.sub b { color: var(--ink); font-weight: 700; }
+.mid { flex: 1; display: flex; align-items: center; justify-content: center; gap: 54px; min-height: 0; }
+.note { font-family: var(--mono); font-size: 19px; line-height: 1.5; color: var(--ink-3);
+        flex: 0 0 auto; margin-top: 14px; }
+.note b { color: var(--ink-2); font-weight: 700; }
+code { font-family: var(--mono); font-size: 0.92em; background: rgba(120,96,50,0.14);
+       padding: 0.05em 0.3em; border-radius: 3px; }
+
+/* ---- the rollout sprite --------------------------------------------------- */
+.filmbox { position: relative; overflow: hidden; flex: 0 0 auto;
+           width: calc(var(--fw, 80px) * var(--z)); height: calc(112px * var(--z));
+           border: 2px solid var(--ink); box-shadow: 6px 6px 0 rgba(34,31,25,0.12); }
+.film { position: absolute; top: 0; left: 0; --fw: 80px; --sheet: 10320px;
+        width: var(--fw); height: 112px;
+        transform: scale(var(--z)); transform-origin: top left;
+        image-rendering: pixelated;
+        background-repeat: no-repeat; background-size: var(--sheet) 112px;
+        animation: play var(--dur, 7.6s) steps(129) infinite; }
+/* The hold on frame 0 lives inside the keyframes rather than in animation-delay,
+   so it comes back on every loop instead of only before the first pass.
+   0.5s of a 7.6s cycle is 6.6%. */
+@keyframes play {
+  0%, 6.6% { background-position-x: 0; }
+  100%     { background-position-x: calc(-1 * var(--sheet)); }
+}
+body.paused .film { animation-play-state: paused; }
+/* the ALU grid is wider (96 cells) and its rollout shorter (65 frames, the
+   horizon it was evaluated at), so it gets its own sheet size and keyframes */
+.filmbox.alu { --fw: 96px; }
+.film.alu { --fw: 96px; --dur: 4.1s; animation-name: play-alu; }
+@keyframes play-alu {
+  0%, 12.2% { background-position-x: 0; }
+  100%      { background-position-x: calc(-1 * var(--sheet)); }
+}
+
+/* the opening rollout waits a full second: 1s of an 8.1s cycle */
+.film.slow { --dur: 8.1s; animation-name: play-slow; }
+@keyframes play-slow {
+  0%, 12.3% { background-position-x: 0; }
+  100%      { background-position-x: calc(-1 * var(--sheet)); }
+}
+.cap { font-family: var(--mono); font-size: 18px; color: var(--ink-3); text-align: center;
+       margin-top: 12px; letter-spacing: 0.04em; }
+.cap b { color: var(--accent); font-weight: 700; }
+.stack { display: flex; flex-direction: column; align-items: center; }
+
+/* ---- big numbers ---------------------------------------------------------- */
+.stats { display: flex; gap: 0; border: 2px solid var(--ink); background: var(--panel);
+         box-shadow: 6px 6px 0 rgba(34,31,25,0.12); }
+.stat { flex: 1; padding: 30px 32px; }
+.stat + .stat { border-left: 1px solid var(--rule); }
+.stat .k { font-family: var(--mono); font-size: 62px; font-weight: 700; color: var(--accent);
+           line-height: 1; display: block; }
+.stat .t { font-family: var(--mono); font-size: 17px; letter-spacing: 0.12em; text-transform: uppercase;
+           color: var(--ink-3); display: block; margin: 12px 0 8px; }
+.stat .d { font-size: 21px; line-height: 1.35; color: var(--ink-2); }
+
+/* ---- the extrapolation matrix --------------------------------------------- */
+table.mx { border-collapse: separate; border-spacing: 6px; }
+table.mx th { font-family: var(--mono); font-size: 19px; font-weight: 700; color: var(--ink-3);
+              letter-spacing: 0.08em; text-transform: uppercase; text-align: right; padding-right: 10px;
+              white-space: nowrap; }
+table.mx thead th { text-align: center; padding: 0 0 4px; }
+table.mx td { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 29px;
+              font-weight: 700; text-align: center; padding: 15px 22px; color: var(--ink); }
+.s0 { background: #eef1e3; } .s1 { background: #d5dfbd; } .s2 { background: #aec293; }
+.s3 { background: #7d9c60; } .s4 { background: #4a6a34; color: var(--paper); }
+
+.alugrid { display: grid; grid-template-columns: repeat(4, auto); gap: 10px 24px;
+            justify-content: center; }
+
+.mxwrap { display: flex; flex-direction: column; }
+.mxhd { font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--ink);
+        letter-spacing: 0.04em; margin-bottom: 14px; }
+.mxhd span { display: block; font-size: 15px; font-weight: 400; color: var(--ink-3);
+             letter-spacing: 0.1em; text-transform: uppercase; margin-top: 4px; }
+
+/* ---- misc ----------------------------------------------------------------- */
+img.shot { max-width: 100%; max-height: 100%; display: block; }
+/* the capture ships with its background keyed out, so it sits on the slide paper */
+img.shot.cut { background: none; }
+.alu { display: flex; gap: 10px; }
+.alu figure { margin: 0; }
+.alu img { height: 300px; display: block; border: 2px solid var(--ink); image-rendering: pixelated; }
+.alu figcaption { font-family: var(--mono); font-size: 16px; color: var(--ink-2);
+                  text-align: center; margin-top: 8px; }
+.bullets { list-style: none; margin: 0; padding: 0; }
+.bullets li { font-size: 30px; line-height: 1.35; color: var(--ink-2); padding: 20px 0;
+              border-top: 1px solid var(--rule); display: flex; gap: 22px; align-items: baseline; }
+.bullets li:last-child { border-bottom: 1px solid var(--rule); }
+.bullets .n { font-family: var(--mono); font-size: 20px; color: var(--accent); font-weight: 700; }
+.bullets b { color: var(--ink); font-weight: 700; }
+.qr { width: 300px; height: 300px; background: #fff; border: 2px solid var(--ink); padding: 12px; }
+.qr img { width: 100%; height: 100%; display: block; }
+.url { font-family: var(--mono); font-size: 44px; font-weight: 700; color: var(--accent); }
+.byline { font-family: var(--sans); font-size: 26px; color: var(--ink-3); margin: 26px 0 0; }
+.byline .name { color: var(--ink); font-weight: 700; }
+.byline .aff { font-style: italic; }
+
+/* ---- chrome --------------------------------------------------------------- */
+#bar { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: var(--rule); }
+#bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+#num { position: absolute; right: 26px; bottom: 20px; font-family: var(--mono); font-size: 15px;
+       color: var(--ink-3); letter-spacing: 0.1em; }
+#help { position: absolute; left: 26px; bottom: 20px; font-family: var(--mono); font-size: 14px;
+        color: var(--rule-2); letter-spacing: 0.08em; }
+#overview { position: fixed; inset: 0; background: rgba(34,31,25,0.96); display: none;
+            grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 30px; overflow: auto;
+            align-content: start; z-index: 50; }
+#overview.on { display: grid; }
+#overview button { background: var(--paper); border: 1px solid var(--rule-2); color: var(--ink);
+                   font-family: var(--mono); font-size: 14px; text-align: left; padding: 14px;
+                   cursor: pointer; line-height: 1.4; }
+#overview button:hover { border-color: var(--accent); color: var(--accent); }
+#overview button .i { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="deck">
+
+  <!-- 1 --------------------------------------------------------------------- -->
+  <section class="slide on">
+    <div class="kicker">ALIFE 2026 · Waterloo <span class="dim">— lightning talk</span></div>
+    <div class="mid" style="flex-direction:column; align-items:flex-start; justify-content:center; gap:0;">
+      <h1>Self-organized<br /><em>boolean</em> computation</h1>
+      <p class="byline"><span class="name">Iliya Zhechev</span> <span class="aff">Sofia University</span>
+         &nbsp;·&nbsp; <span class="name">Piotr Walas</span> <span class="aff">Warsaw University of Technology</span></p>
+    </div>
+    <div class="note">ncpu.pages.dev</div>
+  </section>
+
+  <!-- 2 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">the idea</div>
+    <h2>Neural cellular automata grow shapes.<br />This one <em>computes</em>.</h2>
+    <div class="mid">
+      <div class="stack">
+        <div class="filmbox" style="--z:4.6"><div class="film slow" data-src="film_longest"></div></div>
+        <div class="cap">8-bit adder · <b>255 + 1</b> · one shared rule, 64 steps</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">the task</div>
+    <h2>We draw the question <em>on the grid</em>.</h2>
+    <div class="mid"><img class="shot cut" src="assets/talk/demo_still.png"
+         alt="The live demo: input bits wired to circles on the left edge of the grid, blank output circles on the right." /></div>
+    <div class="note">Bright circle = <b>1</b>, dark = <b>0</b>. The answer has to appear on the right, which starts blank.
+     </div>
+  </section>
+
+  <!-- 4 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">the rule</div>
+    <h2>Classic <em>NCA</em> setup.</h2>
+    <div class="mid">
+      <svg viewBox="0 0 1360 360" style="width:100%;height:auto" role="img"
+           aria-label="One update step: perceive through three fixed filters, apply a small shared network, add the result, fire and clamp, repeat.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0L10 5L0 10z" fill="#48443b"/></marker>
+          <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0L10 5L0 10z" fill="#ab3520"/></marker>
+        </defs>
+        <g font-family="ui-monospace, monospace">
+          <text x="2" y="24" fill="#ab3520" font-size="20" font-weight="700">A CELL</text>
+          <rect x="2" y="38" width="200" height="230" fill="#faf6ea" stroke="#221f19" stroke-width="2"/>
+          <g fill="#20908c" stroke="rgba(255,255,255,.2)"><rect x="32" y="70" width="28" height="28"/><rect x="60" y="70" width="28" height="28"/><rect x="88" y="70" width="28" height="28"/><rect x="116" y="70" width="28" height="28"/><rect x="144" y="70" width="28" height="28"/><rect x="32" y="98" width="28" height="28"/><rect x="60" y="98" width="28" height="28"/><rect x="88" y="98" width="28" height="28"/><rect x="116" y="98" width="28" height="28"/><rect x="144" y="98" width="28" height="28"/><rect x="32" y="126" width="28" height="28"/><rect x="60" y="126" width="28" height="28"/><rect x="116" y="126" width="28" height="28"/><rect x="144" y="126" width="28" height="28"/><rect x="32" y="154" width="28" height="28"/><rect x="60" y="154" width="28" height="28"/><rect x="88" y="154" width="28" height="28"/><rect x="116" y="154" width="28" height="28"/><rect x="144" y="154" width="28" height="28"/><rect x="32" y="182" width="28" height="28"/><rect x="60" y="182" width="28" height="28"/><rect x="88" y="182" width="28" height="28"/><rect x="116" y="182" width="28" height="28"/><rect x="144" y="182" width="28" height="28"/></g>
+          <rect x="88" y="126" width="28" height="28" fill="#fde725" stroke="#ab3520" stroke-width="3"/>
+          <text x="102" y="242" fill="#857c68" font-size="16" text-anchor="middle">16 numbers · 7×7</text>
+          <path d="M212 153H250" fill="none" stroke="#48443b" stroke-width="2.5" marker-end="url(#ar)"/>
+
+          <text x="262" y="24" fill="#ab3520" font-size="20" font-weight="700">PERCEIVE</text>
+          <rect x="262" y="38" width="250" height="230" fill="#faf6ea" stroke="#221f19" stroke-width="2"/>
+          <g stroke="#c3b791" stroke-width="1.4">
+            <rect x="288" y="90" width="60" height="60" fill="#f1e9d6"/>
+            <rect x="308" y="110" width="20" height="20" fill="#221f19" stroke="none"/>
+            <rect x="358" y="90" width="60" height="60" fill="#f1e9d6"/>
+            <rect x="358" y="90" width="20" height="60" fill="#221f19" opacity=".8" stroke="none"/>
+            <rect x="398" y="90" width="20" height="60" fill="#ab3520" opacity=".85" stroke="none"/>
+            <rect x="428" y="90" width="60" height="60" fill="#f1e9d6"/>
+            <rect x="428" y="90" width="60" height="20" fill="#221f19" opacity=".8" stroke="none"/>
+            <rect x="428" y="130" width="60" height="20" fill="#ab3520" opacity=".85" stroke="none"/>
+          </g>
+          <text x="387" y="184" fill="#221f19" font-size="19" text-anchor="middle">self · ∂x · ∂y</text>
+          <text x="387" y="212" fill="#857c68" font-size="16" text-anchor="middle">fixed — nothing learned</text>
+          <text x="387" y="242" fill="#857c68" font-size="16" text-anchor="middle">→ 48 numbers per cell</text>
+          <path d="M522 153H560" fill="none" stroke="#48443b" stroke-width="2.5" marker-end="url(#ar)"/>
+
+          <text x="572" y="24" fill="#ab3520" font-size="20" font-weight="700">A TINY NETWORK</text>
+          <rect x="572" y="38" width="250" height="230" fill="#faf6ea" stroke="#221f19" stroke-width="2"/>
+          <g fill="none" stroke="#c3b791" stroke-width="1" opacity="0.9">
+            <path d="M622 102L697 84M622 102L697 115M622 102L697 146M622 102L697 177M622 102L697 208M622 146L697 84M622 146L697 115M622 146L697 146M622 146L697 177M622 146L697 208M622 190L697 84M622 190L697 115M622 190L697 146M622 190L697 177M622 190L697 208M697 84L772 124M697 84L772 168M697 115L772 124M697 115L772 168M697 146L772 124M697 146L772 168M697 177L772 124M697 177L772 168M697 208L772 124M697 208L772 168"/>
+          </g>
+          <g fill="#48443b"><circle cx="622" cy="102" r="6"/><circle cx="622" cy="146" r="6"/><circle cx="622" cy="190" r="6"/></g>
+          <g fill="#ab3520"><circle cx="697" cy="84" r="6"/><circle cx="697" cy="115" r="6"/><circle cx="697" cy="146" r="6"/><circle cx="697" cy="177" r="6"/><circle cx="697" cy="208" r="6"/></g>
+          <g fill="#48443b"><circle cx="772" cy="124" r="6"/><circle cx="772" cy="168" r="6"/></g>
+          <text x="697" y="236" fill="#221f19" font-size="19" text-anchor="middle">48 → 128 → 16</text>
+          <text x="697" y="258" fill="#857c68" font-size="16" text-anchor="middle">~8k weights, all learned</text>
+          <path d="M832 153H870" fill="none" stroke="#48443b" stroke-width="2.5" marker-end="url(#ar)"/>
+
+          <text x="882" y="24" fill="#ab3520" font-size="20" font-weight="700">UPDATE</text>
+          <rect x="882" y="38" width="250" height="230" fill="#faf6ea" stroke="#221f19" stroke-width="2"/>
+          <text x="1007" y="94" fill="#221f19" font-size="26" text-anchor="middle">state += Δ</text>
+          <rect x="906" y="114" width="202" height="40" fill="#f1e9d6" stroke="#c3b791" stroke-width="1.4"/>
+          <text x="1007" y="140" fill="#857c68" font-size="16" text-anchor="middle">50% of cells fire</text>
+          <rect x="906" y="164" width="202" height="40" fill="#f1e9d6" stroke="#c3b791" stroke-width="1.4"/>
+          <text x="1007" y="190" fill="#857c68" font-size="16" text-anchor="middle">clamp to ±10</text>
+          <text x="1007" y="240" fill="#857c68" font-size="16" text-anchor="middle">then read the grid</text>
+
+          <path d="M1007 274V318H102V274" fill="none" stroke="#ab3520" stroke-width="2.5" marker-end="url(#ac)"/>
+          <text x="555" y="348" fill="#ab3520" font-size="22" font-weight="700" text-anchor="middle">× 64 STEPS</text>
+        </g>
+      </svg>
+    </div>
+    <div class="note">No global clock. No controller. No memory outside the grid.</div>
+  </section>
+
+  <!-- 5 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">it works</div>
+    <h2>Addition is <em>not</em> a local operation.</h2>
+    <div class="mid">
+      <div class="stack">
+        <div class="filmbox" style="--z:4.6"><div class="film" data-src="film_two_waves"></div></div>
+        <div class="cap"><b>239 + 33 = 272</b> · two separate carry runs</div>
+      </div>
+    </div>
+    <div class="note">A cell sees a 7×7 window, so a carry cannot jump — it has to travel. Here two of them do, and they land last.</div>
+  </section>
+
+  <!-- 6 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">under the hood</div>
+    <h2>We observed a <em>carry wave</em>.</h2>
+    <div class="mid">
+      <div class="stack">
+        <div class="filmbox" style="--z:4"><div class="film" data-src="film_longest"></div></div>
+        <div class="cap">visible channel</div>
+      </div>
+      <div class="stack">
+        <div class="filmbox" style="--z:4"><div class="film" data-src="film_hidden_ch4"></div></div>
+        <div class="cap">hidden channel <b>4</b></div>
+      </div>
+    </div>
+    <div class="note">Same run, <b>255 + 1</b>. One of the sixteen numbers each cell carries — the model invented it, with no target of any kind.
+      Red is above that frame's average, blue below. The front sweeping up and right <b>is</b> the carry.</div>
+  </section>
+
+  <!-- 7 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">the nice part</div>
+    <h2>It runs <em>wider</em> than it was trained.</h2>
+    <div class="mid" style="gap:34px;">
+      <div class="stack">
+        <div class="filmbox" style="--z:3.1"><div class="film" data-src="film_extrap_3bit_a"></div></div>
+        <div class="cap"><b>7 + 1</b> · 3-bit</div>
+      </div>
+      <div class="stack">
+        <div class="filmbox" style="--z:3.1"><div class="film" data-src="film_extrap_3bit_b"></div></div>
+        <div class="cap"><b>5 + 6</b> · 3-bit</div>
+      </div>
+      <div style="width:2px;height:300px;background:var(--rule)"></div>
+      <div class="stack">
+        <div class="filmbox" style="--z:3.1"><div class="film" data-src="film_extrap_8bit"></div></div>
+        <div class="cap"><b>145 + 103</b> · <span style="color:var(--accent)">8-bit</span></div>
+      </div>
+      <p class="sub" style="max-width:330px;">Same model, same weights.<br />
+        It was <b>only ever trained on sums up to 3 bits</b>.</p>
+    </div>
+    <div class="note">The rule is local and the bits sit against a fixed edge, so nothing in it refers to how wide the problem is.</div>
+  </section>
+
+  <!-- 8 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">measured two ways</div>
+    <h2>Bit-length <em>extrapolation</em>.</h2>
+    <div class="mid" style="gap:66px;">
+      <div class="mxwrap">
+        <div class="mxhd">% of bits correct<span>the usual measure</span></div>
+        <table class="mx">
+          <thead><tr><th></th><th>4-bit</th><th>6-bit</th><th>8-bit</th></tr></thead>
+          <tbody>
+            <tr><th>≤ 2-bit</th><td class="s3">96.5</td><td class="s2">93.9</td><td class="s2">91.9</td></tr>
+            <tr><th>≤ 3-bit</th><td class="s4">99.8</td><td class="s3">98.7</td><td class="s3">98.0</td></tr>
+            <tr><th>≤ 4-bit</th><td class="s4">100.0</td><td class="s4">100.0</td><td class="s4">99.7</td></tr>
+            <tr><th>≤ 6-bit</th><td class="s4">100.0</td><td class="s4">100.0</td><td class="s4">100.0</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="mxwrap">
+        <div class="mxhd">% of sums exactly right<span>every bit, or nothing</span></div>
+        <table class="mx">
+          <thead><tr><th></th><th>4-bit</th><th>6-bit</th><th>8-bit</th></tr></thead>
+          <tbody>
+            <tr><th>≤ 2-bit</th><td class="s2">93.0</td><td class="s1">82.8</td><td class="s0">74.6</td></tr>
+            <tr><th>≤ 3-bit</th><td class="s3">98.8</td><td class="s2">94.9</td><td class="s2">91.8</td></tr>
+            <tr><th>≤ 4-bit</th><td class="s4">100.0</td><td class="s4">100.0</td><td class="s3">98.8</td></tr>
+            <tr><th>≤ 6-bit</th><td class="s4">100.0</td><td class="s4">100.0</td><td class="s4">100.0</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">Rows: the widest sum the model saw in training. Columns: the width it was tested on.
+      128 random sums per cell, mean of 2 seeds. <b>A sum can be 8 bits out of 9 right and still be the wrong number</b> —
+      which is why the left table looks better than the model is.</div>
+  </section>
+
+  <!-- 9 --------------------------------------------------------------------- -->
+  <section class="slide">
+    <div class="kicker">try it</div>
+    <h2>It all runs <em>in the browser</em>.</h2>
+    <div class="mid" style="gap:60px;">
+      <div class="qr"><img src="assets/talk/qr.svg" alt="QR code to ncpu.pages.dev" /></div>
+      <div>
+        <div class="url">ncpu.pages.dev</div>
+        <p class="sub" style="margin-top:20px;">Flip the input bits and watch the grid settle.<br />
+          Scrub a rollout frame by frame.<br />
+          Weights, code and the poster are all there.</p>
+      </div>
+    </div>
+    <p class="byline"><span class="name">Iliya Zhechev</span> <span class="aff">Sofia University</span>
+       &nbsp;·&nbsp; <span class="name">Piotr Walas</span> <span class="aff">Warsaw University of Technology</span></p>
+  </section>
+
+  <div id="bar"><i></i></div>
+  <div id="num"></div>
+  <div id="help">← → move · F full · P pause · O overview</div>
+</div></div>
+
+<div id="overview"></div>
+
+<script>
+(function () {
+  const deck = document.getElementById('deck');
+  const slides = [...document.querySelectorAll('section.slide')];
+  const bar = document.querySelector('#bar > i');
+  const num = document.getElementById('num');
+  const ov = document.getElementById('overview');
+  let i = 0;
+
+  // The sprite sheets are set here rather than in CSS so each slide's films can
+  // be restarted from frame 0 when you arrive at it.
+  // The sheet width and the number of steps are read off the image itself. They
+  // used to be hard-coded, and when a rollout's length changed the CSS kept the
+  // old width — which stretches the sprite and steps to the wrong offsets.
+  document.querySelectorAll('.film').forEach((f) => {
+    const src = `assets/talk/${f.dataset.src}.png`;
+    f.style.backgroundImage = `url(${src})`;
+    const probe = new Image();
+    probe.onload = () => {
+      const fw = parseFloat(getComputedStyle(f).getPropertyValue('--fw')) || 80;
+      const frames = Math.round(probe.naturalWidth / fw);
+      f.style.setProperty('--sheet', probe.naturalWidth + 'px');
+      f.style.animationTimingFunction = `steps(${frames})`;
+    };
+    probe.src = src;
+  });
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('on', k === i));
+    // restart the rollouts on the slide we just landed on, so the run always
+    // plays from the first step while it is being talked over
+    slides[i].querySelectorAll('.film').forEach((f) => {
+      f.style.animation = 'none';
+      void f.offsetWidth;                       // force reflow so the restart takes
+      f.style.animation = '';
+    });
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    num.textContent = String(i + 1).padStart(2, '0') + ' / ' + slides.length;
+    location.hash = i + 1;
+  }
+
+  // scale the fixed 1600x900 sheet to fit whatever window it is shown in
+  function fit() {
+    const s = Math.min(innerWidth / 1600, innerHeight / 900);
+    deck.style.transform = `scale(${s})`;
+  }
+  addEventListener('resize', fit);
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { show(i + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { show(i - 1); e.preventDefault(); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key === 'f') document.documentElement.requestFullscreen?.();
+    else if (e.key === 'p') document.body.classList.toggle('paused');
+    else if (e.key === 'o') ov.classList.toggle('on');
+    else if (e.key === 'Escape') ov.classList.remove('on');
+  });
+  deck.addEventListener('click', (e) => show(i + (e.clientX < innerWidth / 3 ? -1 : 1)));
+
+  slides.forEach((s, k) => {
+    const b = document.createElement('button');
+    const h = s.querySelector('h1, h2');
+    b.innerHTML = `<span class="i">${String(k + 1).padStart(2, '0')}</span> ` +
+                  (h ? h.textContent.replace(/\s+/g, ' ').trim() : '');
+    b.onclick = () => { ov.classList.remove('on'); show(k); };
+    ov.appendChild(b);
+  });
+
+  fit();
+  show(parseInt(location.hash.slice(1), 10) - 1 || 0);
+})();
+</script>
+</body>
+</html>
