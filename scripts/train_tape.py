@@ -396,20 +396,24 @@ def train_cycle(x, runs):
 @torch.no_grad()
 def evaluate(cycles, bs):
     """Fresh tapes run ``cycles`` cycles; exact = memory right at the end of every
-    execute AND every instruction pixel right at both checkpoints."""
+    execute AND every instruction pixel right at both checkpoints. prog = memory
+    alone right at the end of every execute (the program computes correctly)."""
     erng = random.Random(991 + cycles)
     runs = [fresh_run(args.eval_instrs, args.eval_regs, erng) for _ in range(bs)]
     x = start_state(runs)
     exact = torch.ones(bs, dtype=torch.bool, device=DEV)
-    per = []
+    prog = exact.clone()
+    per, per_prog = [], []
     for _ in range(cycles):
         runs, t_load, t_mem, t_tape = cycle_targets(runs)
         seq = nca(x, K)
         exact &= torch.tensor(landed(seq[:, args.load_steps], seq[:, -1], t_load, t_tape, runs),
                               device=DEV)
+        prog &= (decode(runs, seq[:, -1, 0]) == want_bits(runs)).flatten(1).all(1)
         x = seq[:, -1]
         per.append(float(exact.float().mean()))
-    return per
+        per_prog.append(float(prog.float().mean()))
+    return per, per_prog
 
 
 tlog = (run_dir / "train.jsonl").open("a")
@@ -442,11 +446,13 @@ for step in bar:
             tlog.flush()
 
     if step % args.eval_every == 0:
-        per = evaluate(max(EVAL_CYCLES), args.eval_batch)
+        per, per_prog = evaluate(max(EVAL_CYCLES), args.eval_batch)
         rec = {"step": step, "loss": round(loss, 6),
                "pool": sum(len(p) for p in _pool.values())}
         for c in EVAL_CYCLES:
             rec[f"cyc{c}"] = round(per[c - 1], 4)
+        for c in EVAL_CYCLES:
+            rec[f"prog{c}"] = round(per_prog[c - 1], 4)
         score = float(np.mean([rec[f"cyc{c}"] for c in EVAL_CYCLES]))
         rec["score"] = round(score, 4)
         elog.write(json.dumps(rec) + "\n"); elog.flush()
@@ -456,7 +462,8 @@ for step in bar:
             best = score
             torch.save(ck, run_dir / "nca_best.pt")
         bar.set_description(f"loss {loss:.4f} pool {rec['pool']} "
-                            + " ".join(f"c{c}:{rec[f'cyc{c}']:.2f}" for c in EVAL_CYCLES))
+                            + " ".join(f"c{c}:{rec[f'cyc{c}']:.2f}" for c in EVAL_CYCLES)
+                            + " prog " + " ".join(f"{rec[f'prog{c}']:.2f}" for c in EVAL_CYCLES))
 
     if args.ckpt_every and step % args.ckpt_every == 0:
         torch.save({"nca": nca.state_dict(), "step": step, "config": vars(args)},

@@ -72,6 +72,7 @@ def report():
         runs = [T["fresh_run"](n, nr, rng) for _ in range(opt.batch)]
         x = T["start_state"](runs)
         alive = torch.ones(opt.batch, dtype=torch.bool, device=opt.device)
+        prog = alive.clone()                          # memory right at every cycle so far
         for c in range(opt.cycles):
             runs, t_load, t_mem, t_tape = T["cycle_targets"](runs)
             seq = nca(x, K)
@@ -79,13 +80,14 @@ def report():
             li, lt, lm = mse(xl[:, 1:4], t_load), mse(xe[:, 1:4], t_tape), mse(xe[:, 0], t_mem)
             got, want = T["decode"](runs, xe[:, 0]), T["want_bits"](runs)
             alive &= torch.tensor(T["landed"](xl, xe, t_load, t_tape, runs), device=opt.device)
+            prog &= (got == want).flatten(1).all(1)
             for i, r in enumerate(runs):
                 op, a, b, d = r["tape"][r["inmem"]]
                 rows.append(dict(op=op, instr=float(li[i] + lt[i]), mem=float(lm[i]),
                                  bit=float((got[i, d] == want[i, d]).float().mean()),
                                  reg=float((got[i, d] == want[i, d]).all()),
                                  memory=float((got[i] == want[i]).all()),
-                                 alive=float(alive[i]), cycle=c + 1))
+                                 alive=float(alive[i]), prog=float(prog[i]), cycle=c + 1))
             x = xe
     return rows
 
@@ -93,16 +95,18 @@ def report():
 rows = report()
 print(f"{run.name}  step {ck['step']:,}  ({opt.batches} batches x {opt.batch}, {opt.cycles} cycles, closed loop)\n")
 print(f"{'':8}{'n':>6}{'loss instr':>12}{'loss mem':>10}{'loss total':>12}"
-      f"{'dst bits':>10}{'dst reg':>9}{'memory':>8}{'run exact':>11}")
+      f"{'dst bits':>10}{'dst reg':>9}{'memory':>8}{'prog ok':>9}{'run exact':>11}")
 TABLE = {}
 for name in ("SUB", "SUBLEQ", "all"):
     rs = [r for r in rows if name == "all" or r["op"] == name]
-    m = {k: np.mean([r[k] for r in rs]) for k in ("instr", "mem", "bit", "reg", "memory", "alive")}
+    m = {k: np.mean([r[k] for r in rs]) for k in ("instr", "mem", "bit", "reg", "memory", "prog", "alive")}
     TABLE[name] = dict(m, n=len(rs))
     print(f"{name:8}{len(rs):>6}{m['instr']:>12.5f}{m['mem']:>10.5f}{m['instr'] + m['mem']:>12.5f}"
-          f"{m['bit']:>10.4f}{m['reg']:>9.4f}{m['memory']:>8.4f}{m['alive']:>11.4f}")
+          f"{m['bit']:>10.4f}{m['reg']:>9.4f}{m['memory']:>8.4f}{m['prog']:>9.4f}{m['alive']:>11.4f}")
 BY_CYCLE = [float(np.mean([r["alive"] for r in rows if r["cycle"] == c])) for c in range(1, opt.cycles + 1)]
-print("\nrun exact by cycle: " + "  ".join(f"{c}:{v:.3f}" for c, v in enumerate(BY_CYCLE, 1)))
+PROG_BY_CYCLE = [float(np.mean([r["prog"] for r in rows if r["cycle"] == c])) for c in range(1, opt.cycles + 1)]
+print("\nprog ok by cycle:   " + "  ".join(f"{c}:{v:.3f}" for c, v in enumerate(PROG_BY_CYCLE, 1)))
+print("run exact by cycle: " + "  ".join(f"{c}:{v:.3f}" for c, v in enumerate(BY_CYCLE, 1)))
 
 
 # ── GIF: one batch executing, every NCA step ────────────────────────────────
@@ -203,14 +207,15 @@ def page():
     import time
     ev = [json.loads(l) for l in (run / "metrics.jsonl").read_text().splitlines() if l.strip()] \
         if (run / "metrics.jsonl").exists() else []
-    cyc = [k for k in (ev[-1] if ev else {}) if k.startswith("cyc")]
+    cyc = [k for k in (ev[-1] if ev else {}) if k.startswith(("cyc", "prog"))]
     f = lambda v, d=4: f"{v:.{d}f}"
     trs = "".join(
         f"<tr class='{k.lower()}'><td>{k}</td><td>{m['n']}</td><td>{f(m['instr'], 5)}</td><td>{f(m['mem'], 5)}</td>"
         f"<td><b>{f(m['instr'] + m['mem'], 5)}</b></td><td>{f(m['bit'])}</td><td>{f(m['reg'])}</td>"
-        f"<td>{f(m['memory'])}</td><td>{f(m['alive'])}</td></tr>" for k, m in TABLE.items())
+        f"<td>{f(m['memory'])}</td><td>{f(m['prog'])}</td><td>{f(m['alive'])}</td></tr>" for k, m in TABLE.items())
     evr = "".join(f"<tr><td>{e['step']:,}</td><td>{f(e['loss'], 5)}</td>"
-                  + "".join(f"<td>{e[k]:.2f}</td>" for k in cyc) + "</tr>" for e in ev[::-1][:12])
+                  + "".join(f"<td>{e[k]:.2f}</td>" if k in e else "<td></td>" for k in cyc)
+                  + "</tr>" for e in ev[::-1][:12])
     import base64
     inline = lambda name, mime: f"data:{mime};base64," + base64.b64encode((ROOT / name).read_bytes()).decode()
     curves_src = inline("v15_progress_curves.png", "image/png") if (ROOT / "v15_progress_curves.png").exists() else ""
@@ -242,8 +247,9 @@ img{{width:100%;display:block;border-radius:3px;background:#fff}}
 <div class="dim">checkpoint step {ck['step']:,} · built {time.strftime('%Y-%m-%d %H:%M')}</div></div>
 <div class="card"><h2>loss report · closed loop, {opt.batches}×{opt.batch} runs × {opt.cycles} cycles</h2>
 <div class="scroll"><table><tr><th></th><th>n</th><th>loss instr</th><th>loss mem</th><th>loss total</th>
-<th>dst bits</th><th>dst reg</th><th>memory</th><th>run exact</th></tr>{trs}</table></div>
-<div class="dim" style="margin-top:6px">run exact by cycle: {" · ".join(f"{c}: {v:.3f}" for c, v in enumerate(BY_CYCLE, 1))}</div></div>
+<th>dst bits</th><th>dst reg</th><th>memory</th><th>prog ok</th><th>run exact</th></tr>{trs}</table></div>
+<div class="dim" style="margin-top:6px">prog ok (memory right every cycle so far) by cycle: {" · ".join(f"{c}: {v:.3f}" for c, v in enumerate(PROG_BY_CYCLE, 1))}</div>
+<div class="dim">run exact (also every tape pixel within 0.5) by cycle: {" · ".join(f"{c}: {v:.3f}" for c, v in enumerate(BY_CYCLE, 1))}</div></div>
 <div class="card"><h2>training curves</h2><img alt="loss and accuracy curves" src="{curves_src}"></div>
 <div class="card"><h2>a batch executing</h2><img alt="NCA executing a batch" src="{gif_src}"></div>
 <div class="card"><h2>eval history · trainer, {len(ev)} evals</h2>
