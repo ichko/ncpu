@@ -317,7 +317,7 @@ def pool_push(key, x_end, runs, depth, ok):
     for i, run in enumerate(runs):
         if args.pool_gate and not ok[i]:
             continue
-        p.append((xs[i], run, depth[i] + args.cycles))
+        p.append((xs[i].copy(), run, depth[i] + args.cycles))  # a view would pin the whole batch
         k += 1
     if len(p) > args.pool_size:
         del p[: len(p) - args.pool_size]
