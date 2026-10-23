@@ -470,8 +470,10 @@ for step in bar:
         elog.write(json.dumps(rec) + "\n"); elog.flush()
         ck = {"nca": nca.state_dict(), "step": step, "config": vars(args)}
         torch.save(ck, run_dir / "nca_latest.pt")
-        if score > best:
-            best = score
+        # best = the program still computing right at the longest eval horizon
+        prog_long = rec[f"prog{max(EVAL_CYCLES)}"]
+        if prog_long > best:
+            best = prog_long
             torch.save(ck, run_dir / "nca_best.pt")
         bar.set_description(f"loss {loss:.4f} pool {rec['pool']} "
                             + " ".join(f"c{c}:{rec[f'cyc{c}']:.2f}" for c in EVAL_CYCLES)
