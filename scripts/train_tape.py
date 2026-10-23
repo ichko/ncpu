@@ -90,6 +90,9 @@ ap.add_argument("--cycles", type=int, default=3,
                 help="cycles per rollout (3 = 120 steps): gradients cross cycle boundaries, so "
                      "hidden state has to stay usable from one instruction to the next")
 ap.add_argument("--boundary-noise", type=float, default=0.02)
+ap.add_argument("--visible-noise", type=float, default=0.0,
+                help="noise on memory and instruction channels (0-3) at the start of each "
+                     "rollout, so the model learns to pull a drifted picture back")
 # training
 ap.add_argument("--lr", type=float, default=1e-4)
 ap.add_argument("--batch-size", type=int, default=16)
@@ -97,7 +100,9 @@ ap.add_argument("--grad-clip", type=float, default=1.0)
 # pool
 ap.add_argument("--pool-size", type=int, default=4096, help="per program length")
 ap.add_argument("--pool-frac", type=float, default=0.5)
-ap.add_argument("--pool-gate", type=int, default=1)
+ap.add_argument("--pool-gate", type=int, default=1,
+                help="0 keep every state; 1 keep only states that landed exactly (memory and "
+                     "every tape pixel); 2 keep states whose memory is right, drifted tape or not")
 # bookkeeping
 ap.add_argument("--log-every", type=int, default=10)
 ap.add_argument("--eval-every", type=int, default=2500)
@@ -366,8 +371,12 @@ def train_cycle(x, runs):
     if args.boundary_noise:
         x = x.clone()
         x[:, 4:] = x[:, 4:] + torch.randn_like(x[:, 4:]) * args.boundary_noise
+    if args.visible_noise:
+        x = x.clone()
+        x[:, :4] = x[:, :4] + torch.randn_like(x[:, :4]) * args.visible_noise
     ll = ml = tl = 0.0
     ok = [True] * len(runs)
+    mem_ok = torch.ones(len(runs), dtype=torch.bool, device=DEV)
     st = {op: {"instr": [], "mem": [], "bit": [], "reg": []} for op in OPS}
     for _ in range(args.cycles):
         runs, t_load, t_mem, t_tape = cycle_targets(runs)
@@ -381,6 +390,7 @@ def train_cycle(x, runs):
         xe = seq[:, -1].detach()
         ok = [a and b for a, b in zip(ok, landed(seq[:, args.load_steps].detach(), xe, t_load, t_tape, runs))]
         hit = decode(runs, xe[:, 0]) == want_bits(runs)
+        mem_ok &= hit.flatten(1).all(1)
         for i, r in enumerate(runs):
             op, _, _, d = r["tape"][r["inmem"]]
             st[op]["instr"].append(float(li[i] + lt[i])); st[op]["mem"].append(float(lm[i]))
@@ -390,7 +400,9 @@ def train_cycle(x, runs):
     loss = ll + ml + tl
     loss.backward()
     ops = {f"{k}_{op.lower()}": round(float(np.mean(v)), 6) for op in OPS for k, v in st[op].items() if v}
-    return float(loss), float(ll), float(ml), float(tl), x.detach(), runs, ok, ops
+    ops["batch_mem_ok"] = round(float(mem_ok.float().mean()), 3)
+    keep = mem_ok.tolist() if args.pool_gate == 2 else ok
+    return float(loss), float(ll), float(ml), float(tl), x.detach(), runs, ok, keep, ops
 
 
 @torch.no_grad()
@@ -431,10 +443,10 @@ for step in bar:
         x, depth = start_state(runs), [0] * args.batch_size
 
     opt.zero_grad(set_to_none=True)
-    loss, ll, ml, tl, x_end, done, ok, ops = train_cycle(x, runs)
+    loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs)
     gn = torch.nn.utils.clip_grad_norm_(nca.parameters(), args.grad_clip or float("inf")).item()
     opt.step()
-    pushed = pool_push((n, nr), x_end, done, depth, ok)
+    pushed = pool_push((n, nr), x_end, done, depth, keep)
 
     if step % args.log_every == 0:
         tlog.write(json.dumps({
