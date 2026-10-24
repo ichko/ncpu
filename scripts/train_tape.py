@@ -100,6 +100,19 @@ ap.add_argument("--grad-clip", type=float, default=1.0)
 # pool
 ap.add_argument("--pool-size", type=int, default=4096, help="per program length")
 ap.add_argument("--pool-frac", type=float, default=0.5)
+ap.add_argument("--pool-fp16", type=int, default=0, help="store pool states as float16 (RAM)")
+ap.add_argument("--deep-every", type=int, default=0,
+                help="every this many steps, take a batch from the pool and run it on WITHOUT "
+                     "gradients for --deep-advance cycles; memory-correct survivors go back in. "
+                     "Training then replays states hundreds of cycles deep")
+ap.add_argument("--deep-advance", default="10,60", help="cycles per deep advance, drawn uniformly")
+ap.add_argument("--noise-uniform", type=int, default=0,
+                help="1: each sample's noise std is drawn uniformly in [0, the given std]")
+ap.add_argument("--batch-ref-instrs", type=int, default=0,
+                help="programs longer than this get a proportionally smaller batch, so every "
+                     "step holds about the same number of pixels (0 = fixed batch)")
+ap.add_argument("--instrs-dist", default="uniform", choices=["uniform", "log"],
+                help="log: program length log-uniform over --instrs, so long programs stay cheap")
 ap.add_argument("--pool-gate", type=int, default=1,
                 help="0 keep every state; 1 keep only states that landed exactly (memory and "
                      "every tape pixel); 2 keep states whose memory is right, drifted tape or not")
@@ -315,14 +328,15 @@ def landed(x_load, x_end, t_load, t_tape, runs):
 _pool = {}
 
 
-def pool_push(key, x_end, runs, depth, ok):
+def pool_push(key, x_end, runs, depth, ok, adv=None):
     p = _pool.setdefault(key, [])
-    xs = x_end.detach().cpu().numpy()
+    xs = x_end.detach().cpu().numpy().astype(np.float16 if args.pool_fp16 else np.float32)
+    adv = args.cycles if adv is None else adv
     k = 0
     for i, run in enumerate(runs):
         if args.pool_gate and not ok[i]:
             continue
-        p.append((xs[i].copy(), run, depth[i] + args.cycles))  # a view would pin the whole batch
+        p.append((xs[i].copy(), run, depth[i] + adv))  # a view would pin the whole batch
         k += 1
     if len(p) > args.pool_size:
         del p[: len(p) - args.pool_size]
@@ -334,8 +348,29 @@ def pool_draw(key, bs, rng):
     if len(p) < bs:
         return None
     ent = [p[rng.randrange(len(p))] for _ in range(bs)]
-    return (torch.from_numpy(np.stack([e[0] for e in ent])).to(DEV),
+    return (torch.from_numpy(np.stack([e[0] for e in ent])).to(DEV).float(),
             [e[1] for e in ent], [e[2] for e in ent])
+
+
+def noise_std(x, std):
+    """std, or with --noise-uniform a per-sample std drawn in [0, std]."""
+    if not args.noise_uniform:
+        return std
+    return torch.rand(x.shape[0], 1, 1, 1, device=x.device) * std
+
+
+def batch_for(n):
+    ref = args.batch_ref_instrs
+    if not ref or n <= ref:
+        return args.batch_size
+    return max(2, round(args.batch_size * (3 * ref + 21) / (3 * n + 21)))   # H ~ 3n + 21
+
+
+def draw_n(rng):
+    lo, hi = N_RANGE
+    if args.instrs_dist == "log":
+        return min(hi, int(np.exp(rng.uniform(np.log(lo), np.log(hi + 1)))))
+    return rng.randint(lo, hi)
 
 
 # ── model ───────────────────────────────────────────────────────────────────
@@ -370,10 +405,10 @@ def train_cycle(x, runs):
     cycle landed. Also returns per-op stats of the batch for the log."""
     if args.boundary_noise:
         x = x.clone()
-        x[:, 4:] = x[:, 4:] + torch.randn_like(x[:, 4:]) * args.boundary_noise
+        x[:, 4:] = x[:, 4:] + torch.randn_like(x[:, 4:]) * noise_std(x, args.boundary_noise)
     if args.visible_noise:
         x = x.clone()
-        x[:, :4] = x[:, :4] + torch.randn_like(x[:, :4]) * args.visible_noise
+        x[:, :4] = x[:, :4] + torch.randn_like(x[:, :4]) * noise_std(x, args.visible_noise)
     ll = ml = tl = 0.0
     ok = [True] * len(runs)
     mem_ok = torch.ones(len(runs), dtype=torch.bool, device=DEV)
@@ -428,39 +463,70 @@ def evaluate(cycles, bs):
     return per, per_prog
 
 
+DEEP = tuple(int(v) for v in args.deep_advance.split(","))
+deep_log = {"n": 0, "kept": 0, "depth": 0.0}
+
+
+@torch.no_grad()
+def deep_advance(rng):
+    """Run one pool batch on for many cycles without gradients; put back the
+    memory-correct survivors, so the pool reaches states far deeper than a rollout."""
+    keys = [k for k, p in _pool.items() if len(p) >= batch_for(k[0])]
+    if not keys:
+        return
+    key = keys[rng.randrange(len(keys))]
+    x, runs, depth = pool_draw(key, batch_for(key[0]), rng)
+    d = rng.randint(*DEEP)
+    alive = torch.ones(len(runs), dtype=torch.bool, device=DEV)
+    for _ in range(d):
+        runs, _, _, _ = cycle_targets(runs)
+        x = nca(x, K)[:, -1]
+        alive &= (decode(runs, x[:, 0]) == want_bits(runs)).flatten(1).all(1)
+    keep = alive.tolist()
+    k = pool_push(key, x, runs, depth, keep, adv=d)
+    deep_log.update(n=deep_log["n"] + 1, kept=k,
+                    depth=float(np.mean([e[2] for e in _pool[key]])))
+
+
 tlog = (run_dir / "train.jsonl").open("a")
 elog = (run_dir / "metrics.jsonl").open("a")
 best = -1.0
 bar = tqdm(range(args.steps), dynamic_ncols=True)
 for step in bar:
-    n = rng.randint(*N_RANGE)
+    n = draw_n(rng)
     nr = rng.randint(*R_RANGE)
-    drawn = pool_draw((n, nr), args.batch_size, rng) if rng.random() < args.pool_frac else None
+    bs = batch_for(n)
+    drawn = pool_draw((n, nr), bs, rng) if rng.random() < args.pool_frac else None
     if drawn:
         x, runs, depth = drawn
     else:
-        runs = [fresh_run(n, nr, rng) for _ in range(args.batch_size)]
-        x, depth = start_state(runs), [0] * args.batch_size
+        runs = [fresh_run(n, nr, rng) for _ in range(bs)]
+        x, depth = start_state(runs), [0] * bs
 
     opt.zero_grad(set_to_none=True)
     loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs)
     gn = torch.nn.utils.clip_grad_norm_(nca.parameters(), args.grad_clip or float("inf")).item()
     opt.step()
     pushed = pool_push((n, nr), x_end, done, depth, keep)
+    if args.deep_every and step % args.deep_every == 0:
+        deep_advance(rng)
 
     if step % args.log_every == 0:
         tlog.write(json.dumps({
             "step": step, "loss": round(loss, 6), "load": round(ll, 6), "mem": round(ml, 6),
             "tape": round(tl, 6), "grad_norm": round(gn, 4), "n": n, "from_pool": bool(drawn),
-            "mean_depth": round(float(np.mean(depth)), 2), "batch_ok": round(float(np.mean(ok)), 3),
+            "mean_depth": round(float(np.mean(depth)), 2), "deep_kept": deep_log["kept"], "batch_ok": round(float(np.mean(ok)), 3),
             "pool": sum(len(p) for p in _pool.values()), "pushed": pushed, **ops}) + "\n")
         if step % (args.log_every * 20) == 0:
             tlog.flush()
 
     if step % args.eval_every == 0:
         per, per_prog = evaluate(max(EVAL_CYCLES), args.eval_batch)
+        depths = [e[2] for p in _pool.values() for e in p]
         rec = {"step": step, "loss": round(loss, 6),
-               "pool": sum(len(p) for p in _pool.values())}
+               "pool": sum(len(p) for p in _pool.values()),
+               "pool_depth_mean": round(float(np.mean(depths)), 1) if depths else 0,
+               "pool_depth_max": int(max(depths)) if depths else 0}
         for c in EVAL_CYCLES:
             rec[f"cyc{c}"] = round(per[c - 1], 4)
         for c in EVAL_CYCLES:
@@ -475,7 +541,7 @@ for step in bar:
         if prog_long > best:
             best = prog_long
             torch.save(ck, run_dir / "nca_best.pt")
-        bar.set_description(f"loss {loss:.4f} pool {rec['pool']} "
+        bar.set_description(f"loss {loss:.4f} pool {rec['pool']} depth {rec['pool_depth_mean']} "
                             + " ".join(f"c{c}:{rec[f'cyc{c}']:.2f}" for c in EVAL_CYCLES)
                             + " prog " + " ".join(f"{rec[f'prog{c}']:.2f}" for c in EVAL_CYCLES))
 
