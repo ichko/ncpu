@@ -106,6 +106,10 @@ ap.add_argument("--deep-every", type=int, default=0,
                      "gradients for --deep-advance cycles; memory-correct survivors go back in. "
                      "Training then replays states hundreds of cycles deep")
 ap.add_argument("--deep-advance", default="10,60", help="cycles per deep advance, drawn uniformly")
+ap.add_argument("--tape-noise", type=float, default=-1,
+                help="noise std on the instruction channels 1-3 alone (-1 = same as --visible-noise)")
+ap.add_argument("--pool-evict", default="oldest", choices=["oldest", "shallow"],
+                help="shallow: a full pool drops its shallowest states first, so deep ones stay")
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -339,6 +343,8 @@ def pool_push(key, x_end, runs, depth, ok, adv=None):
         p.append((xs[i].copy(), run, depth[i] + adv))  # a view would pin the whole batch
         k += 1
     if len(p) > args.pool_size:
+        if args.pool_evict == "shallow":
+            p.sort(key=lambda e: e[2])
         del p[: len(p) - args.pool_size]
     return k
 
@@ -408,7 +414,11 @@ def train_cycle(x, runs):
         x[:, 4:] = x[:, 4:] + torch.randn_like(x[:, 4:]) * noise_std(x, args.boundary_noise)
     if args.visible_noise:
         x = x.clone()
-        x[:, :4] = x[:, :4] + torch.randn_like(x[:, :4]) * noise_std(x, args.visible_noise)
+        x[:, :1] = x[:, :1] + torch.randn_like(x[:, :1]) * noise_std(x, args.visible_noise)
+    tape_noise = args.visible_noise if args.tape_noise < 0 else args.tape_noise
+    if tape_noise:
+        x = x.clone()
+        x[:, 1:4] = x[:, 1:4] + torch.randn_like(x[:, 1:4]) * noise_std(x, tape_noise)
     ll = ml = tl = 0.0
     ok = [True] * len(runs)
     mem_ok = torch.ones(len(runs), dtype=torch.bool, device=DEV)
