@@ -108,8 +108,16 @@ ap.add_argument("--deep-every", type=int, default=0,
 ap.add_argument("--deep-advance", default="10,60", help="cycles per deep advance, drawn uniformly")
 ap.add_argument("--tape-noise", type=float, default=-1,
                 help="noise std on the instruction channels 1-3 alone (-1 = same as --visible-noise)")
-ap.add_argument("--pool-evict", default="oldest", choices=["oldest", "shallow"],
-                help="shallow: a full pool drops its shallowest states first, so deep ones stay")
+ap.add_argument("--pool-evict", default="oldest", choices=["oldest", "shallow", "balanced"],
+                help="shallow: a full pool drops its shallowest states first, so deep ones stay; "
+                     "balanced: it drops from the fullest depth band (<10, 10-99, 100+ cycles)")
+ap.add_argument("--pool-draw", default="uniform", choices=["uniform", "balanced"],
+                help="balanced: each batch comes from one depth band, bands equally likely")
+ap.add_argument("--tape-hold", type=int, default=0,
+                help="1: score the instruction channels on every execute frame, not only at the "
+                     "checkpoint (nothing on the tape moves then, so the target is the same)")
+ap.add_argument("--tape-loss", default="mse", choices=["mse", "l1"],
+                help="l1 keeps pulling small tape errors to exactly zero")
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -345,14 +353,28 @@ def pool_push(key, x_end, runs, depth, ok, adv=None):
     if len(p) > args.pool_size:
         if args.pool_evict == "shallow":
             p.sort(key=lambda e: e[2])
-        del p[: len(p) - args.pool_size]
+        if args.pool_evict == "balanced":
+            while len(p) > args.pool_size:
+                bands = [[j for j, e in enumerate(p) if depth_band(e[2]) == b] for b in range(3)]
+                full = max(bands, key=len)
+                del p[full[0]]                                      # oldest of the fullest band
+        else:
+            del p[: len(p) - args.pool_size]
     return k
+
+
+def depth_band(d):
+    return 0 if d < 10 else 1 if d < 100 else 2
 
 
 def pool_draw(key, bs, rng):
     p = _pool.get(key, [])
     if len(p) < bs:
         return None
+    if args.pool_draw == "balanced":
+        bands = [b for b in ([e for e in p if depth_band(e[2]) == k] for k in range(3)) if len(b) >= bs]
+        if bands:
+            p = bands[rng.randrange(len(bands))]
     ent = [p[rng.randrange(len(p))] for _ in range(bs)]
     return (torch.from_numpy(np.stack([e[0] for e in ent])).to(DEV).float(),
             [e[1] for e in ent], [e[2] for e in ent])
@@ -402,6 +424,12 @@ def scored(seq, t, tail):
     return seq[:, t - tail + 1:t + 1]
 
 
+def tape_err(a, b):
+    if args.tape_loss == "l1":
+        return (a - b).abs().flatten(1).mean(1)
+    return per_sample(a, b)
+
+
 def per_sample(a, b):
     return ((a - b) ** 2).flatten(1).mean(1)
 
@@ -428,9 +456,10 @@ def train_cycle(x, runs):
         seq = nca(x, K)                               # (B, K+1, C, H, W)
         fl = scored(seq, args.load_steps, args.tail)
         fe = scored(seq, K, args.tail)
-        li = per_sample(fl[:, :, 1:4], t_load[:, None]) * args.load_weight
+        li = tape_err(fl[:, :, 1:4], t_load[:, None]) * args.load_weight
         lm = per_sample(fe[:, :, 0], t_mem[:, None])
-        lt = per_sample(fe[:, :, 1:4], t_tape[:, None]) * args.tape_weight
+        ft = seq[:, args.load_steps:K + 1] if args.tape_hold else fe
+        lt = tape_err(ft[:, :, 1:4], t_tape[:, None]) * args.tape_weight
         ll, ml, tl = ll + li.mean(), ml + lm.mean(), tl + lt.mean()
         xe = seq[:, -1].detach()
         ok = [a and b for a, b in zip(ok, landed(seq[:, args.load_steps].detach(), xe, t_load, t_tape, runs))]
