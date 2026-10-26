@@ -50,6 +50,7 @@ nca = T["NeuralCA"](channels=args.channels, hidden_channels=args.hidden, fire_ra
                     perception="static_sobel", padding_type="circular", read_only_dims=[],
                     state_bound=10.0).to(opt.device)
 nca.load_state_dict(ck["nca"])
+T["apply_fire"](nca, cfg)
 nca.eval()
 
 COL = {k: np.array(v) for k, v in T["TileLayoutV8"].COLORS.items()}

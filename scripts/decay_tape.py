@@ -70,6 +70,7 @@ def measure():
                         perception="static_sobel", padding_type="circular", read_only_dims=[],
                         state_bound=10.0).to(dev)
     nca.load_state_dict(ck["nca"])
+    T["apply_fire"](nca, cfg)
     nca.eval()
     torch.manual_seed(opt.seed)
 

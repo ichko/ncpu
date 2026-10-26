@@ -126,6 +126,9 @@ ap.add_argument("--repair", type=float, default=0.0,
                      "ghost ink in other register columns, speckle, hidden noise); the targets stay "
                      "clean, so the model has to restore them. The right register stays strongest")
 ap.add_argument("--repair-bands", default="1,3", help="bands damaged per sample: min,max")
+ap.add_argument("--mean-fire", type=int, default=0,
+                help="1: no stochastic fire; every cell applies fire_rate * delta every step "
+                     "(the same mean update, deterministic)")
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -409,6 +412,22 @@ def draw_n(rng):
     return rng.randint(lo, hi)
 
 
+class MeanFire(torch.nn.Module):
+    """Deterministic stand-in for StochasticUpdate: the expected update."""
+
+    def __init__(self, rate):
+        super().__init__()
+        self.rate = rate
+
+    def forward(self, delta):
+        return delta * self.rate
+
+
+def apply_fire(nca, cfg):
+    if cfg.get("mean_fire"):
+        nca.stochastic_update = MeanFire(cfg["fire_rate"])
+
+
 # ── model ───────────────────────────────────────────────────────────────────
 
 nca = NeuralCA(channels=C, hidden_channels=args.hidden, fire_rate=args.fire_rate,
@@ -419,6 +438,7 @@ root = Path(__file__).resolve().parent.parent
 if args.init_from:
     sd = torch.load(root / args.init_from, map_location=DEV, weights_only=False)["nca"]
     print("warm start:", args.init_from, nca.load_state_dict(sd, strict=False))
+apply_fire(nca, vars(args))
 opt = torch.optim.Adam(nca.parameters(), lr=args.lr)
 
 run_dir = root / "runs" / f"TAPE_{time.strftime('%Y%m%d_%H%M%S')}_{args.tag}_s{args.seed}"
