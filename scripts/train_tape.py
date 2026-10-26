@@ -113,6 +113,9 @@ ap.add_argument("--pool-evict", default="oldest", choices=["oldest", "shallow", 
                      "balanced: it drops from the fullest depth band (<10, 10-99, 100+ cycles)")
 ap.add_argument("--pool-draw", default="uniform", choices=["uniform", "balanced"],
                 help="balanced: each batch comes from one depth band, bands equally likely")
+ap.add_argument("--step-noise", type=float, default=0.0,
+                help="gaussian noise added to every channel after EVERY step of a training "
+                     "rollout (denoising: the model must keep pulling the picture back); off in eval")
 ap.add_argument("--tape-hold", type=int, default=0,
                 help="1: score the instruction channels on every execute frame, not only at the "
                      "checkpoint (nothing on the tape moves then, so the target is the same)")
@@ -437,6 +440,7 @@ def per_sample(a, b):
 def train_cycle(x, runs):
     """``--cycles`` cycles in one graph, every checkpoint scored; landed only if every
     cycle landed. Also returns per-op stats of the batch for the log."""
+    nca.gaussian_noise.std, nca.gaussian_noise.prob = args.step_noise, 1.0
     if args.boundary_noise:
         x = x.clone()
         x[:, 4:] = x[:, 4:] + torch.randn_like(x[:, 4:]) * noise_std(x, args.boundary_noise)
@@ -470,6 +474,7 @@ def train_cycle(x, runs):
             st[op]["instr"].append(float(li[i] + lt[i])); st[op]["mem"].append(float(lm[i]))
             st[op]["bit"].append(float(hit[i, d].float().mean())); st[op]["reg"].append(float(hit[i, d].all()))
         x = seq[:, -1]
+    nca.gaussian_noise.std = 0.0                     # eval and deep advances run clean
     ll, ml, tl = ll / args.cycles, ml / args.cycles, tl / args.cycles
     loss = ll + ml + tl
     loss.backward()
