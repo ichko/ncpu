@@ -121,6 +121,11 @@ ap.add_argument("--tape-hold", type=int, default=0,
                      "checkpoint (nothing on the tape moves then, so the target is the same)")
 ap.add_argument("--tape-loss", default="mse", choices=["mse", "l1"],
                 help="l1 keeps pulling small tape errors to exactly zero")
+ap.add_argument("--repair", type=float, default=0.0,
+                help="fraction of each batch whose bands are damaged before the rollout (faded, "
+                     "ghost ink in other register columns, speckle, hidden noise); the targets stay "
+                     "clean, so the model has to restore them. The right register stays strongest")
+ap.add_argument("--repair-bands", default="1,3", help="bands damaged per sample: min,max")
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -484,6 +489,31 @@ def train_cycle(x, runs):
     return float(loss), float(ll), float(ml), float(tl), x.detach(), runs, ok, keep, ops
 
 
+REPAIR_BANDS = tuple(int(v) for v in args.repair_bands.split(","))
+
+
+def damage(x, runs, rng):
+    """--repair: damage a few bands of some samples, keeping them decodable."""
+    x = x.clone()
+    for i, run in enumerate(runs):
+        if rng.random() >= args.repair:
+            continue
+        g, L = run["g"], lay(run["nr"])
+        for k in rng.sample(sorted(run["ring"]), min(len(run["ring"]), rng.randint(*REPAIR_BANDS))):
+            y = g.slot_row(run["ring"][k])
+            ys = slice(y, y + args.band)
+            f = rng.uniform(0.2, 0.8)
+            x[i, 1:4, ys] *= f                                       # fade
+            for ch, reg, v in cols(run["tape"][k]):
+                for r in range(run["nr"]):
+                    if r != reg and rng.random() < 0.5:              # ghost, weaker than the band
+                        cx = L.col_x[r]
+                        x[i, 1 + ch, ys, cx - L.r:cx + L.r + 1] += rng.uniform(-0.5, 0.5) * f * abs(v)
+            x[i, 1:4, ys] += torch.randn_like(x[i, 1:4, ys]) * 0.05     # speckle
+            x[i, 4:, ys] += torch.randn_like(x[i, 4:, ys]) * 0.1        # hidden
+    return x
+
+
 @torch.no_grad()
 def evaluate(cycles, bs):
     """Fresh tapes run ``cycles`` cycles; exact = memory right at the end of every
@@ -547,6 +577,8 @@ for step in bar:
         runs = [fresh_run(n, nr, rng) for _ in range(bs)]
         x, depth = start_state(runs), [0] * bs
 
+    if args.repair:
+        x = damage(x, runs, rng)
     opt.zero_grad(set_to_none=True)
     loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs)
     gn = torch.nn.utils.clip_grad_norm_(nca.parameters(), args.grad_clip or float("inf")).item()
