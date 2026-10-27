@@ -137,6 +137,12 @@ ap.add_argument("--warm-regs", type=float, default=0.0,
                      "program in software for 0..--warm-cycles cycles first: long runs collapse "
                      "towards zeros, which uniform random registers never show")
 ap.add_argument("--warm-cycles", type=int, default=200)
+ap.add_argument("--regs-set", default="",
+                help="registers drawn from this list (e.g. 4,8,16,44) instead of --regs min,max; "
+                     "few shapes keep the per-shape pools full")
+ap.add_argument("--batch-ref-regs", type=int, default=0,
+                help="pictures wider than this many registers get a proportionally smaller "
+                     "batch (0 = off)")
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -163,6 +169,7 @@ rng = random.Random(args.seed)
 EVAL_CYCLES = [int(c) for c in args.eval_cycles.split(",") if c.strip()]
 N_RANGE = tuple(int(v) for v in args.instrs.split(","))
 R_RANGE = tuple(int(v) for v in args.regs.split(","))
+REGS_SET = [int(v) for v in args.regs_set.split(",") if v.strip()]
 K = args.load_steps + args.exec_steps
 P = args.band + args.gap                              # slot pitch
 assert min(N_RANGE) >= 2, "a 1-instruction program never moves"
@@ -411,11 +418,15 @@ def noise_std(x, std):
     return torch.rand(x.shape[0], 1, 1, 1, device=x.device) * std
 
 
-def batch_for(n):
+def batch_for(n, nr=0):
+    bs = args.batch_size
     ref = args.batch_ref_instrs
-    if not ref or n <= ref:
-        return args.batch_size
-    return max(2, round(args.batch_size * (3 * ref + 21) / (3 * n + 21)))   # H ~ 3n + 21
+    if ref and n > ref:
+        bs = bs * (3 * ref + 21) / (3 * n + 21)                    # H ~ 3n + 21
+    ref = args.batch_ref_regs
+    if ref and nr > ref:
+        bs = bs * (args.pitch * ref + 7) / (args.pitch * nr + 7)   # W ~ pitch * regs
+    return max(2, round(bs))
 
 
 def draw_n(rng):
@@ -578,11 +589,11 @@ deep_log = {"n": 0, "kept": 0, "depth": 0.0}
 def deep_advance(rng):
     """Run one pool batch on for many cycles without gradients; put back the
     memory-correct survivors, so the pool reaches states far deeper than a rollout."""
-    keys = [k for k, p in _pool.items() if len(p) >= batch_for(k[0])]
+    keys = [k for k, p in _pool.items() if len(p) >= batch_for(*k)]
     if not keys:
         return
     key = keys[rng.randrange(len(keys))]
-    x, runs, depth = pool_draw(key, batch_for(key[0]), rng)
+    x, runs, depth = pool_draw(key, batch_for(*key), rng)
     d = rng.randint(*DEEP)
     alive = torch.ones(len(runs), dtype=torch.bool, device=DEV)
     for _ in range(d):
@@ -619,8 +630,8 @@ best = -1.0
 bar = tqdm(range(args.steps), dynamic_ncols=True)
 for step in bar:
     n = draw_n(rng)
-    nr = rng.randint(*R_RANGE)
-    bs = batch_for(n)
+    nr = rng.choice(REGS_SET) if REGS_SET else rng.randint(*R_RANGE)
+    bs = batch_for(n, nr)
     drawn = pool_draw((n, nr), bs, rng) if rng.random() < args.pool_frac else None
     if drawn:
         x, runs, depth = drawn
