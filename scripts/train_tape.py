@@ -132,6 +132,11 @@ ap.add_argument("--mean-fire", type=int, default=0,
 ap.add_argument("--ema", type=float, default=0.0,
                 help="EMA decay of the weights (0 = off). Evals and checkpoints ('nca') use the "
                      "averaged weights; the raw ones are saved as 'nca_raw'")
+ap.add_argument("--warm-regs", type=float, default=0.0,
+                help="fraction of fresh training samples whose registers come from running the "
+                     "program in software for 0..--warm-cycles cycles first: long runs collapse "
+                     "towards zeros, which uniform random registers never show")
+ap.add_argument("--warm-cycles", type=int, default=200)
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -227,7 +232,7 @@ def sample_instr(rng, nr):
     return (rng.choice(OPS), *(rng.randrange(nr) for _ in range(3)))
 
 
-def fresh_run(n, nr, rng):
+def fresh_run(n, nr, rng, warm=False):
     """A random VALID boundary state: any instruction j loaded (and executed), the
     rest in program order behind it with j + 1 on the head, any register values.
     Memory is at the bottom; which band is where is what varies."""
@@ -235,8 +240,13 @@ def fresh_run(n, nr, rng):
     tape = [sample_instr(rng, nr) for _ in range(n)]
     j = rng.randrange(n)
     ring = {(j + m) % n: (g.head - (m - 1)) % g.N for m in range(1, n)}
-    regs = tuple(rng.randint(0, (1 << args.word_bits) - 1) for _ in range(nr))
-    return dict(g=g, nr=nr, tape=tape, ring=ring, inmem=j, regs=regs)
+    regs = [rng.randint(0, (1 << args.word_bits) - 1) for _ in range(nr)]
+    if warm:                                      # the registers k instructions after random ones
+        k = rng.randint(0, args.warm_cycles)
+        for m in range(k - 1, -1, -1):            # ... ending with instruction j itself
+            op, a, b, d = tape[(j - m) % n]
+            regs[d] = apply_op(op, regs[a], regs[b], regs[d], args.word_bits)
+    return dict(g=g, nr=nr, tape=tape, ring=ring, inmem=j, regs=tuple(regs))
 
 
 def load_event(run):
@@ -615,7 +625,7 @@ for step in bar:
     if drawn:
         x, runs, depth = drawn
     else:
-        runs = [fresh_run(n, nr, rng) for _ in range(bs)]
+        runs = [fresh_run(n, nr, rng, bool(args.warm_regs) and rng.random() < args.warm_regs) for _ in range(bs)]
         x, depth = start_state(runs), [0] * bs
 
     if args.repair:

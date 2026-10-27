@@ -4,6 +4,8 @@
 Random programs of several lengths run closed loop for up to --cycles cycles; for
 each run we record the first cycle whose memory is wrong. Prints survival (fraction
 of runs still computing right) at a few horizons and writes v15_long_eval.json.
+"zeros" = share of the reference registers at 0 after cycle 100: random SUB/SUBLEQ
+programs collapse towards all-zero memory (long ones fully), which is easy to hold.
 
     uv run python scripts/long_eval_tape.py --run runs/TAPE_... --ckpt nca_best.pt
 """
@@ -59,15 +61,17 @@ def survive(n):
     runs = [T["fresh_run"](n, args.eval_regs, rng) for _ in range(opt.batch)]
     x = T["start_state"](runs)
     fail = np.full(opt.batch, opt.cycles + 1)       # first wrong cycle; cycles+1 = never
+    zeros = []                                      # reference registers at 0, per cycle
     for c in range(1, opt.cycles + 1):
         runs, _, _, _ = T["cycle_targets"](runs)
+        zeros.append(np.mean([v == 0 for r in runs for v in r["regs"]]))
         for _ in range(K):                          # one step at a time: only the last frame is kept
             x = nca(x, 1)[:, -1]
         ok = (T["decode"](runs, x[:, 0]) == T["want_bits"](runs)).flatten(1).all(1).cpu().numpy()
         fail[(~ok) & (fail > opt.cycles)] = c
         if (fail <= opt.cycles).all():
             break
-    return fail
+    return fail, float(np.mean(zeros[99:])) if len(zeros) > 99 else float("nan")
 
 
 HORIZONS = [h for h in (8, 32, 100, 300, 1000) if h <= opt.cycles]
@@ -75,13 +79,14 @@ res = {"run": run.name, "ckpt": opt.ckpt, "step": ck["step"], "cycles": opt.cycl
        "batch": opt.batch, "lengths": {}}
 print(f"{run.name}/{opt.ckpt} step {ck['step']:,}: {opt.batch} programs per length, "
       f"up to {opt.cycles} cycles\n")
-print(f"{'instrs':>7}" + "".join(f"{f'@{h}':>8}" for h in HORIZONS) + f"{'median fail':>13}{'time':>8}")
+print(f"{'instrs':>7}" + "".join(f"{f'@{h}':>8}" for h in HORIZONS) + f"{'median fail':>13}{'zeros':>7}{'time':>8}")
 for n in (int(v) for v in opt.lengths.split(",")):
     t0 = time.time()
-    fail = survive(n)
+    fail, z = survive(n)
     med = float(np.median(fail))
-    res["lengths"][n] = dict(fail=fail.tolist(), **{f"at{h}": float((fail > h).mean()) for h in HORIZONS})
+    res["lengths"][n] = dict(fail=fail.tolist(), zeros_after100=z,
+                            **{f"at{h}": float((fail > h).mean()) for h in HORIZONS})
     print(f"{n:>7}" + "".join(f"{(fail > h).mean():>8.3f}" for h in HORIZONS)
           + f"{('>' if med > opt.cycles else '') + str(int(min(med, opt.cycles))):>13}"
-          + f"{time.time() - t0:>7.0f}s", flush=True)
+          + f"{z:>7.2f}{time.time() - t0:>7.0f}s", flush=True)
     (ROOT / opt.out).write_text(json.dumps(res, indent=1))
