@@ -129,6 +129,9 @@ ap.add_argument("--repair-bands", default="1,3", help="bands damaged per sample:
 ap.add_argument("--mean-fire", type=int, default=0,
                 help="1: no stochastic fire; every cell applies fire_rate * delta every step "
                      "(the same mean update, deterministic)")
+ap.add_argument("--ema", type=float, default=0.0,
+                help="EMA decay of the weights (0 = off). Evals and checkpoints ('nca') use the "
+                     "averaged weights; the raw ones are saved as 'nca_raw'")
 ap.add_argument("--noise-uniform", type=int, default=0,
                 help="1: each sample's noise std is drawn uniformly in [0, the given std]")
 ap.add_argument("--batch-ref-instrs", type=int, default=0,
@@ -582,6 +585,24 @@ def deep_advance(rng):
                     depth=float(np.mean([e[2] for e in _pool[key]])))
 
 
+ema = {k: v.detach().clone() for k, v in nca.state_dict().items()} if args.ema else None
+
+
+def ema_update():
+    with torch.no_grad():
+        for k, v in nca.state_dict().items():
+            if v.dtype.is_floating_point:
+                ema[k].lerp_(v, 1 - args.ema)
+
+
+def snapshot(step):
+    """The checkpoint dict; with --ema the averaged weights are 'nca'."""
+    ck = {"nca": nca.state_dict(), "step": step, "config": vars(args)}
+    if ema is not None:
+        ck["nca_raw"], ck["nca"] = ck["nca"], ema
+    return ck
+
+
 tlog = (run_dir / "train.jsonl").open("a")
 elog = (run_dir / "metrics.jsonl").open("a")
 best = -1.0
@@ -603,6 +624,8 @@ for step in bar:
     loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs)
     gn = torch.nn.utils.clip_grad_norm_(nca.parameters(), args.grad_clip or float("inf")).item()
     opt.step()
+    if ema is not None:
+        ema_update()
     pushed = pool_push((n, nr), x_end, done, depth, keep)
     if args.deep_every and step % args.deep_every == 0:
         deep_advance(rng)
@@ -617,7 +640,12 @@ for step in bar:
             tlog.flush()
 
     if step % args.eval_every == 0:
+        if ema is not None:                          # evaluate the averaged weights
+            raw = {k: v.clone() for k, v in nca.state_dict().items()}
+            nca.load_state_dict(ema)
         per, per_prog = evaluate(max(EVAL_CYCLES), args.eval_batch)
+        if ema is not None:
+            nca.load_state_dict(raw)
         depths = [e[2] for p in _pool.values() for e in p]
         rec = {"step": step, "loss": round(loss, 6),
                "pool": sum(len(p) for p in _pool.values()),
@@ -630,7 +658,7 @@ for step in bar:
         score = float(np.mean([rec[f"cyc{c}"] for c in EVAL_CYCLES]))
         rec["score"] = round(score, 4)
         elog.write(json.dumps(rec) + "\n"); elog.flush()
-        ck = {"nca": nca.state_dict(), "step": step, "config": vars(args)}
+        ck = snapshot(step)
         torch.save(ck, run_dir / "nca_latest.pt")
         # best = the program still computing right at the longest eval horizon
         prog_long = rec[f"prog{max(EVAL_CYCLES)}"]
@@ -642,8 +670,6 @@ for step in bar:
                             + " prog " + " ".join(f"{rec[f'prog{c}']:.2f}" for c in EVAL_CYCLES))
 
     if args.ckpt_every and step % args.ckpt_every == 0:
-        torch.save({"nca": nca.state_dict(), "step": step, "config": vars(args)},
-                   run_dir / f"nca_{step:07d}.pt")
-torch.save({"nca": nca.state_dict(), "step": args.steps, "config": vars(args)},
-           run_dir / "nca_last.pt")
+        torch.save(snapshot(step), run_dir / f"nca_{step:07d}.pt")
+torch.save(snapshot(args.steps), run_dir / "nca_last.pt")
 print("done:", run_dir)
