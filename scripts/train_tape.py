@@ -103,6 +103,8 @@ ap.add_argument("--batch-size", type=int, default=16)
 ap.add_argument("--grad-clip", type=float, default=1.0)
 # pool
 ap.add_argument("--pool-size", type=int, default=4096, help="per program length")
+ap.add_argument("--pool-gb", type=float, default=0,
+                help="RAM budget for the whole pool: each (length, registers) pool gets an equal share")
 ap.add_argument("--pool-frac", type=float, default=0.5)
 ap.add_argument("--pool-fp16", type=int, default=0, help="store pool states as float16 (RAM)")
 ap.add_argument("--deep-every", type=int, default=0,
@@ -392,16 +394,20 @@ def pool_push(key, x_end, runs, depth, ok, adv=None):
             continue
         p.append((xs[i].copy(), run, depth[i] + adv))  # a view would pin the whole batch
         k += 1
-    if len(p) > args.pool_size:
+    cap = args.pool_size
+    if args.pool_gb and len(xs):
+        keys = (N_RANGE[1] - N_RANGE[0] + 1) * (len(REGS_SET) or R_RANGE[1] - R_RANGE[0] + 1)
+        cap = max(8, min(cap, int(args.pool_gb * 2 ** 30 / keys / xs[0].nbytes)))
+    if len(p) > cap:
         if args.pool_evict == "shallow":
             p.sort(key=lambda e: e[2])
         if args.pool_evict == "balanced":
-            while len(p) > args.pool_size:
+            while len(p) > cap:
                 bands = [[j for j, e in enumerate(p) if depth_band(e[2]) == b] for b in range(3)]
                 full = max(bands, key=len)
                 del p[full[0]]                                      # oldest of the fullest band
         else:
-            del p[: len(p) - args.pool_size]
+            del p[: len(p) - cap]
     return k
 
 

@@ -3,13 +3,14 @@
 # Life needs 43), cycles per rollout 1..6. Batch shrinks with height, width and cycles so the
 # graph stays the size of 3 cycles of a 12-instruction, 4-register batch (big pictures: fewer cycles).
 # Seamless memory (wrap gap = register gap); 48 exec steps reach 144 px, and the farthest
-# column of a seamless 44-register row is 132 px away. From the mem24 40k checkpoint.
+# column of a seamless 44-register row is 132 px away. Resumes the mix run at 20k (it was
+# stopped for low RAM: 902 pools x 512 states), now with an 8 GB pool budget.
 set -u
 cd "$(dirname "$0")/.."
-BASE=runs/TAPE_20261028_062316_mem24_s0/nca_keep_40k.pt
-uv run python scripts/train_tape.py --tag mix --channels 24 --hidden 384 --load-weight 3 \
+BASE=runs/TAPE_20261028_121612_mix_s0/nca_keep_20k.pt
+uv run python scripts/train_tape.py --tag mix2 --channels 24 --hidden 384 --load-weight 3 \
     --tape-weight 3 --lr 3e-5 --pool-gate 2 --visible-noise 0.05 --pool-fp16 1 --tape-hold 1 --seamless 1 \
-    --mean-fire 1 --exec-steps 48 --ema 0.999 --init-from $BASE --steps 60001 \
-    --word-bits 6 --regs 4,44 --instrs 3,24 --cycles-range 1,6 --batch-ref-regs 4 --batch-ref-instrs 12 --pool-size 512 \
-    --eval-regs 32 --eval-batch 64 --eval-cycles 1,2,4,8,16,32,64,128 > runs/mix.log 2>&1
-echo mix done
+    --mean-fire 1 --exec-steps 48 --ema 0.999 --init-from $BASE --steps 40001 \
+    --word-bits 6 --regs 4,44 --instrs 3,24 --cycles-range 1,6 --batch-ref-regs 4 --batch-ref-instrs 12 --pool-size 512 --pool-gb 8 \
+    --eval-regs 32 --eval-batch 64 --eval-cycles 1,2,4,8,16,32,64,128 > runs/mix2.log 2>&1
+echo mix2 done

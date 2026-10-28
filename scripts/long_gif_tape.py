@@ -24,6 +24,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--run", required=True)
 ap.add_argument("--ckpt", default="nca_best.pt")
 ap.add_argument("--instrs", type=int, default=8)
+ap.add_argument("--regs", type=int, default=0, help="registers (default: the run's --eval-regs)")
 ap.add_argument("--cycles", type=int, default=200)
 ap.add_argument("--batch", type=int, default=32)
 ap.add_argument("--show", type=int, default=4)
@@ -69,7 +70,7 @@ def rgb(ch0, ins):
 
 with torch.no_grad():
     rng = random.Random(opt.seed)
-    runs = [T["fresh_run"](opt.instrs, args.eval_regs, rng) for _ in range(opt.batch)]
+    runs = [T["fresh_run"](opt.instrs, opt.regs or args.eval_regs, rng) for _ in range(opt.batch)]
     x = T["start_state"](runs)
     model, truth = [x[:, :4].cpu().numpy()], [x[:, :4].cpu().numpy()]
     fail = np.full(opt.batch, opt.cycles + 1)
