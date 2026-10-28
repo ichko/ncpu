@@ -143,6 +143,13 @@ ap.add_argument("--warm-regs", type=float, default=0.0,
                      "program in software for 0..--warm-cycles cycles first: long runs collapse "
                      "towards zeros, which uniform random registers never show")
 ap.add_argument("--warm-cycles", type=int, default=200)
+ap.add_argument("--instrs-set", default="",
+                help="program lengths drawn from this list instead of --instrs min,max")
+ap.add_argument("--local-span", type=int, default=0,
+                help="> 0: every instruction's a, b, d lie in span + 1 consecutive registers "
+                     "(what a local compiler emits); 0 = anywhere")
+ap.add_argument("--max-area", type=int, default=0,
+                help="redraw (length, registers) until the picture has at most this many pixels")
 ap.add_argument("--regs-set", default="",
                 help="registers drawn from this list (e.g. 4,8,16,44) instead of --regs min,max; "
                      "few shapes keep the per-shape pools full")
@@ -177,6 +184,7 @@ N_RANGE = tuple(int(v) for v in args.instrs.split(","))
 R_RANGE = tuple(int(v) for v in args.regs.split(","))
 CYC_RANGE = tuple(int(v) for v in args.cycles_range.split(",")) if args.cycles_range else ()
 REGS_SET = [int(v) for v in args.regs_set.split(",") if v.strip()]
+INSTRS_SET = [int(v) for v in args.instrs_set.split(",") if v.strip()]
 K = args.load_steps + args.exec_steps
 P = args.band + args.gap                              # slot pitch
 assert min(N_RANGE) >= 2, "a 1-instruction program never moves"
@@ -249,6 +257,10 @@ def geom(n, A):
 # the register values. Everything the targets need follows from it.
 
 def sample_instr(rng, nr):
+    S = args.local_span
+    if S and nr > S:
+        c = rng.randrange(nr - S)
+        return (rng.choice(OPS), *(c + rng.randrange(S + 1) for _ in range(3)))
     return (rng.choice(OPS), *(rng.randrange(nr) for _ in range(3)))
 
 
@@ -396,7 +408,7 @@ def pool_push(key, x_end, runs, depth, ok, adv=None):
         k += 1
     cap = args.pool_size
     if args.pool_gb and len(xs):
-        keys = (N_RANGE[1] - N_RANGE[0] + 1) * (len(REGS_SET) or R_RANGE[1] - R_RANGE[0] + 1)
+        keys = (len(INSTRS_SET) or N_RANGE[1] - N_RANGE[0] + 1) * (len(REGS_SET) or R_RANGE[1] - R_RANGE[0] + 1)
         cap = max(8, min(cap, int(args.pool_gb * 2 ** 30 / keys / xs[0].nbytes)))
     if len(p) > cap:
         if args.pool_evict == "shallow":
@@ -447,6 +459,8 @@ def batch_for(n, nr=0, exact=False):
 
 
 def draw_n(rng):
+    if INSTRS_SET:
+        return rng.choice(INSTRS_SET)
     lo, hi = N_RANGE
     if args.instrs_dist == "log":
         return min(hi, int(np.exp(rng.uniform(np.log(lo), np.log(hi + 1)))))
@@ -647,8 +661,11 @@ elog = (run_dir / "metrics.jsonl").open("a")
 best = -1.0
 bar = tqdm(range(args.steps), dynamic_ncols=True)
 for step in bar:
-    n = draw_n(rng)
-    nr = rng.choice(REGS_SET) if REGS_SET else rng.randint(*R_RANGE)
+    while True:
+        n = draw_n(rng)
+        nr = rng.choice(REGS_SET) if REGS_SET else rng.randint(*R_RANGE)
+        if not args.max_area or geom(n, n - 1 - min(args.below, n - 1)).H * lay(nr).W <= args.max_area:
+            break
     bs = batch_for(n, nr)
     nc = args.cycles
     if CYC_RANGE:                                     # same graph size as --cycles: fewer samples
