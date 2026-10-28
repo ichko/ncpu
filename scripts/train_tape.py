@@ -68,6 +68,8 @@ ap.add_argument("--regs", default="4,4", help="registers: min,max (drawn per ste
 ap.add_argument("--word-bits", type=int, default=4)
 ap.add_argument("--radius", type=int, default=2)
 ap.add_argument("--pitch", type=int, default=6)
+ap.add_argument("--seamless", type=int, default=0,
+                help="1: memory is nr * pitch wide, so the horizontal wrap gap equals the register gap")
 ap.add_argument("--instrs", default="3,12", help="program length: min,max (drawn per step)")
 ap.add_argument("--band", type=int, default=2, help="band height, px")
 ap.add_argument("--gap", type=int, default=1, help="gap between bands (and above memory), px")
@@ -180,7 +182,13 @@ _lay = {}
 def lay(nr):
     """The v12 register layout for ``nr`` registers (its width is the picture's)."""
     if nr not in _lay:
-        _lay[nr] = TileLayoutV8(n_regs=nr, word_bits=args.word_bits, r=args.radius, pitch=args.pitch)
+        L = TileLayoutV8(n_regs=nr, word_bits=args.word_bits, r=args.radius, pitch=args.pitch)
+        if args.seamless:                             # the row wraps with the register pitch, like the tape
+            L.col_x = [args.pitch // 2 + c * args.pitch for c in range(nr)]
+            L.grid_x = [L.col_x]
+            L.W = nr * args.pitch
+            L._yx = np.ogrid[: L.H, : L.W]
+        _lay[nr] = L
     return _lay[nr]
 
 
