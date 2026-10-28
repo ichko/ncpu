@@ -429,7 +429,7 @@ def noise_std(x, std):
     return torch.rand(x.shape[0], 1, 1, 1, device=x.device) * std
 
 
-def batch_for(n, nr=0):
+def batch_for(n, nr=0, exact=False):
     bs = args.batch_size
     ref = args.batch_ref_instrs
     if ref and n > ref:
@@ -437,7 +437,7 @@ def batch_for(n, nr=0):
     ref = args.batch_ref_regs
     if ref and nr > ref:
         bs = bs * (args.pitch * ref + 7) / (args.pitch * nr + 7)   # W ~ pitch * regs
-    return max(2, round(bs))
+    return bs if exact else max(2, round(bs))
 
 
 def draw_n(rng):
@@ -644,8 +644,11 @@ for step in bar:
     n = draw_n(rng)
     nr = rng.choice(REGS_SET) if REGS_SET else rng.randint(*R_RANGE)
     bs = batch_for(n, nr)
-    nc = rng.randint(*CYC_RANGE) if CYC_RANGE else args.cycles
-    bs = max(2, round(bs * args.cycles / nc))         # same graph size as --cycles
+    nc = args.cycles
+    if CYC_RANGE:                                     # same graph size as --cycles: fewer samples
+        budget = batch_for(n, nr, exact=True) * args.cycles   # (sample x cycle) units
+        nc = min(rng.randint(*CYC_RANGE), max(1, int(budget)))  # big pictures: fewer cycles
+        bs = max(1, round(budget / nc))
     drawn = pool_draw((n, nr), bs, rng) if rng.random() < args.pool_frac else None
     if drawn:
         x, runs, depth = drawn
