@@ -76,7 +76,7 @@ with torch.no_grad():
     fail = np.full(opt.batch, opt.cycles + 1)
     for c in range(1, opt.cycles + 1):
         runs, _, t_mem, t_tape = T["cycle_targets"](runs)
-        x = nca(x, K)[:, -1]
+        x = nca(x, K)[:, -1].clone()                 # a view would keep the whole rollout alive
         ok = (T["decode"](runs, x[:, 0]) == T["want_bits"](runs)).flatten(1).all(1).cpu().numpy()
         fail[(~ok) & (fail > opt.cycles)] = c
         model.append(x[:, :4].cpu().numpy())
