@@ -91,6 +91,8 @@ ap.add_argument("--tape-weight", type=float, default=1.0)
 ap.add_argument("--cycles", type=int, default=3,
                 help="cycles per rollout (3 = 120 steps): gradients cross cycle boundaries, so "
                      "hidden state has to stay usable from one instruction to the next")
+ap.add_argument("--cycles-range", default="",
+                help="lo,hi: cycles per rollout drawn per step (batch scaled by --cycles / drawn)")
 ap.add_argument("--boundary-noise", type=float, default=0.02)
 ap.add_argument("--visible-noise", type=float, default=0.0,
                 help="noise on memory and instruction channels (0-3) at the start of each "
@@ -171,6 +173,7 @@ rng = random.Random(args.seed)
 EVAL_CYCLES = [int(c) for c in args.eval_cycles.split(",") if c.strip()]
 N_RANGE = tuple(int(v) for v in args.instrs.split(","))
 R_RANGE = tuple(int(v) for v in args.regs.split(","))
+CYC_RANGE = tuple(int(v) for v in args.cycles_range.split(",")) if args.cycles_range else ()
 REGS_SET = [int(v) for v in args.regs_set.split(",") if v.strip()]
 K = args.load_steps + args.exec_steps
 P = args.band + args.gap                              # slot pitch
@@ -494,8 +497,8 @@ def per_sample(a, b):
     return ((a - b) ** 2).flatten(1).mean(1)
 
 
-def train_cycle(x, runs):
-    """``--cycles`` cycles in one graph, every checkpoint scored; landed only if every
+def train_cycle(x, runs, nc=None):
+    """``nc`` (default ``--cycles``) cycles in one graph, every checkpoint scored; landed only if every
     cycle landed. Also returns per-op stats of the batch for the log."""
     nca.gaussian_noise.std, nca.gaussian_noise.prob = args.step_noise, 1.0
     if args.boundary_noise:
@@ -512,7 +515,8 @@ def train_cycle(x, runs):
     ok = [True] * len(runs)
     mem_ok = torch.ones(len(runs), dtype=torch.bool, device=DEV)
     st = {op: {"instr": [], "mem": [], "bit": [], "reg": []} for op in OPS}
-    for _ in range(args.cycles):
+    nc = nc or args.cycles
+    for _ in range(nc):
         runs, t_load, t_mem, t_tape = cycle_targets(runs)
         seq = nca(x, K)                               # (B, K+1, C, H, W)
         fl = scored(seq, args.load_steps, args.tail)
@@ -532,7 +536,7 @@ def train_cycle(x, runs):
             st[op]["bit"].append(float(hit[i, d].float().mean())); st[op]["reg"].append(float(hit[i, d].all()))
         x = seq[:, -1]
     nca.gaussian_noise.std = 0.0                     # eval and deep advances run clean
-    ll, ml, tl = ll / args.cycles, ml / args.cycles, tl / args.cycles
+    ll, ml, tl = ll / nc, ml / nc, tl / nc
     loss = ll + ml + tl
     loss.backward()
     ops = {f"{k}_{op.lower()}": round(float(np.mean(v)), 6) for op in OPS for k, v in st[op].items() if v}
@@ -640,6 +644,8 @@ for step in bar:
     n = draw_n(rng)
     nr = rng.choice(REGS_SET) if REGS_SET else rng.randint(*R_RANGE)
     bs = batch_for(n, nr)
+    nc = rng.randint(*CYC_RANGE) if CYC_RANGE else args.cycles
+    bs = max(2, round(bs * args.cycles / nc))         # same graph size as --cycles
     drawn = pool_draw((n, nr), bs, rng) if rng.random() < args.pool_frac else None
     if drawn:
         x, runs, depth = drawn
@@ -650,19 +656,19 @@ for step in bar:
     if args.repair:
         x = damage(x, runs, rng)
     opt.zero_grad(set_to_none=True)
-    loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs)
+    loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs, nc)
     gn = torch.nn.utils.clip_grad_norm_(nca.parameters(), args.grad_clip or float("inf")).item()
     opt.step()
     if ema is not None:
         ema_update()
-    pushed = pool_push((n, nr), x_end, done, depth, keep)
+    pushed = pool_push((n, nr), x_end, done, depth, keep, adv=nc)
     if args.deep_every and step % args.deep_every == 0:
         deep_advance(rng)
 
     if step % args.log_every == 0:
         tlog.write(json.dumps({
             "step": step, "loss": round(loss, 6), "load": round(ll, 6), "mem": round(ml, 6),
-            "tape": round(tl, 6), "grad_norm": round(gn, 4), "n": n, "from_pool": bool(drawn),
+            "tape": round(tl, 6), "grad_norm": round(gn, 4), "n": n, "nr": nr, "nc": nc, "from_pool": bool(drawn),
             "mean_depth": round(float(np.mean(depth)), 2), "deep_kept": deep_log["kept"], "batch_ok": round(float(np.mean(ok)), 3),
             "pool": sum(len(p) for p in _pool.values()), "pushed": pushed, **ops}) + "\n")
         if step % (args.log_every * 20) == 0:
