@@ -148,6 +148,10 @@ ap.add_argument("--instrs-set", default="",
 ap.add_argument("--local-span", type=int, default=0,
                 help="> 0: every instruction's a, b, d lie in span + 1 consecutive registers "
                      "(what a local compiler emits); 0 = anywhere")
+ap.add_argument("--ncc-frac", type=float, default=0.0,
+                help="fraction of fresh samples cut from COMPILED programs (src/ncpu/ncc.py random "
+                     "programs): a window of the real instruction stream on the real memory state")
+ap.add_argument("--ncc-progs", type=int, default=300, help="random compiled programs to cut from")
 ap.add_argument("--max-area", type=int, default=0,
                 help="redraw (length, registers) until the picture has at most this many pixels")
 ap.add_argument("--regs-set", default="",
@@ -187,6 +191,11 @@ REGS_SET = [int(v) for v in args.regs_set.split(",") if v.strip()]
 INSTRS_SET = [int(v) for v in args.instrs_set.split(",") if v.strip()]
 K = args.load_steps + args.exec_steps
 P = args.band + args.gap                              # slot pitch
+NCC = []
+if args.ncc_frac:
+    from ncpu.ncc import random_traces                # noqa: E402
+    assert args.word_bits == 6, "ncc emits 6-bit code"
+    NCC = random_traces(args.ncc_progs, seed=args.seed)
 assert min(N_RANGE) >= 2, "a 1-instruction program never moves"
 
 _lay = {}
@@ -264,10 +273,38 @@ def sample_instr(rng, nr):
     return (rng.choice(OPS), *(rng.randrange(nr) for _ in range(3)))
 
 
-def fresh_run(n, nr, rng, warm=False):
+def ncc_run(n, nr, rng):
+    """n instructions of a compiled program's stream, from a random point of its run, on the
+    machine state there, shifted into nr registers (None if the window spans more)."""
+    tape_full, states = rng.choice(NCC)
+    L, k = len(tape_full), rng.randrange(len(states) - 1)
+    stream = [tape_full[(k + m) % L] for m in range(n)]
+    used = [r for ins in stream for r in ins[1:]]
+    lo, hi = min(used), max(used)
+    if hi - lo + 1 > nr:
+        return None
+    sh = rng.randint(0, nr - (hi - lo + 1)) - lo
+    st = states[k]
+    regs = [st[j - sh] if 0 <= j - sh < len(st) else 0 for j in range(nr)]
+    g = geom(n, n - 1 - min(args.below, n - 1))
+    j = rng.randrange(n)                          # instruction j loaded; stream[0] loads next
+    tape = [None] * n
+    for m, (op, a, b, d) in enumerate(stream):
+        tape[(j + 1 + m) % n] = (op, a + sh, b + sh, d + sh)
+    ring = {(j + m) % n: (g.head - (m - 1)) % g.N for m in range(1, n)}
+    return dict(g=g, nr=nr, tape=tape, ring=ring, inmem=j, regs=tuple(regs))
+
+
+def fresh_run(n, nr, rng, warm=False, kind=None):
     """A random VALID boundary state: any instruction j loaded (and executed), the
     rest in program order behind it with j + 1 on the head, any register values.
-    Memory is at the bottom; which band is where is what varies."""
+    Memory is at the bottom; which band is where is what varies.
+    kind: None = compiled with probability --ncc-frac, "ncc" = compiled, "random" = not."""
+    if NCC and kind != "random" and (kind == "ncc" or rng.random() < args.ncc_frac):
+        for _ in range(8):
+            r = ncc_run(n, nr, rng)
+            if r is not None:
+                return r
     g = geom(n, n - 1 - min(args.below, n - 1))
     tape = [sample_instr(rng, nr) for _ in range(n)]
     j = rng.randrange(n)
@@ -591,12 +628,12 @@ def damage(x, runs, rng):
 
 
 @torch.no_grad()
-def evaluate(cycles, bs):
+def evaluate(cycles, bs, kind="random"):
     """Fresh tapes run ``cycles`` cycles; exact = memory right at the end of every
     execute AND every instruction pixel right at both checkpoints. prog = memory
     alone right at the end of every execute (the program computes correctly)."""
     erng = random.Random(991 + cycles)
-    runs = [fresh_run(args.eval_instrs, args.eval_regs, erng) for _ in range(bs)]
+    runs = [fresh_run(args.eval_instrs, args.eval_regs, erng, kind=kind) for _ in range(bs)]
     x = start_state(runs)
     exact = torch.ones(bs, dtype=torch.bool, device=DEV)
     prog = exact.clone()
@@ -705,6 +742,7 @@ for step in bar:
             raw = {k: v.clone() for k, v in nca.state_dict().items()}
             nca.load_state_dict(ema)
         per, per_prog = evaluate(max(EVAL_CYCLES), args.eval_batch)
+        nper = evaluate(max(EVAL_CYCLES), args.eval_batch, "ncc")[1] if NCC else None
         if ema is not None:
             nca.load_state_dict(raw)
         depths = [e[2] for p in _pool.values() for e in p]
@@ -716,19 +754,22 @@ for step in bar:
             rec[f"cyc{c}"] = round(per[c - 1], 4)
         for c in EVAL_CYCLES:
             rec[f"prog{c}"] = round(per_prog[c - 1], 4)
+            if nper:
+                rec[f"nprog{c}"] = round(nper[c - 1], 4)
         score = float(np.mean([rec[f"cyc{c}"] for c in EVAL_CYCLES]))
         rec["score"] = round(score, 4)
         elog.write(json.dumps(rec) + "\n"); elog.flush()
         ck = snapshot(step)
         torch.save(ck, run_dir / "nca_latest.pt")
         # best = the program still computing right at the longest eval horizon
-        prog_long = rec[f"prog{max(EVAL_CYCLES)}"]
+        prog_long = rec[f"{'n' if nper else ''}prog{max(EVAL_CYCLES)}"]
         if prog_long > best:
             best = prog_long
             torch.save(ck, run_dir / "nca_best.pt")
         bar.set_description(f"loss {loss:.4f} pool {rec['pool']} depth {rec['pool_depth_mean']} "
                             + " ".join(f"c{c}:{rec[f'cyc{c}']:.2f}" for c in EVAL_CYCLES)
-                            + " prog " + " ".join(f"{rec[f'prog{c}']:.2f}" for c in EVAL_CYCLES))
+                            + " prog " + " ".join(f"{rec[f'prog{c}']:.2f}" for c in EVAL_CYCLES)
+                            + (" ncc " + " ".join(f"{rec[f'nprog{c}']:.2f}" for c in EVAL_CYCLES) if nper else ""))
 
     if args.ckpt_every and step % args.ckpt_every == 0:
         torch.save(snapshot(step), run_dir / f"nca_{step:07d}.pt")

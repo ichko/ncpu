@@ -765,3 +765,65 @@ def reference(src, max_steps=100_000):
     except Halt:
         pass
     return env
+
+
+# ── random programs (fuzzing, training data) ────────────────────────────────
+
+def random_program(rng, n_vars=4):
+    """Random source with nested if / while / && / || over n_vars variables."""
+    V = "abcdefgh"[:n_vars]
+
+    def ex(d=0):
+        if d > 1 or rng.random() < 0.4:
+            return rng.choice(list(V) + [str(rng.randint(0, 5))])
+        return f"({ex(d + 1)} {rng.choice('+-')} {ex(d + 1)})"
+
+    def cond(d=0):
+        k = rng.random()
+        if d < 1 and k < 0.25:
+            return f"({cond(d + 1)} {rng.choice(['&&', '||'])} {cond(d + 1)})"
+        if d < 1 and k < 0.35:
+            return f"!({cond(d + 1)})"
+        return f"{ex(1)} {rng.choice(['<', '<=', '>', '>=', '==', '!='])} {ex(1)}"
+
+    def st(d=0):
+        k = rng.random()
+        if d < 2 and k < 0.2:
+            return f"if ({cond()}) {{ {blk(d + 1)} }} else {{ {blk(d + 1)} }}"
+        if d < 2 and k < 0.3:
+            i = f"i{d}{rng.randint(0, 99)}"
+            return f"int {i} = {rng.randint(1, 3)}; while ({i} > 0) {{ {blk(d + 1)} {i}--; }}"
+        return f"{rng.choice(V)} = {ex()};"
+
+    def blk(d):
+        return " ".join(st(d) for _ in range(rng.randint(1, 3)))
+
+    return "int " + ", ".join(f"{v} = {rng.randint(-5, 5)}" for v in V) + "; " + blk(0)
+
+
+def trace(p, max_cycles=4000):
+    """Register states before every cycle until the program halts (or max_cycles)."""
+    regs, out = list(p.regs0), []
+    n = len(p.tape)
+    for c in range(max_cycles):
+        out.append(tuple(regs))
+        step(regs, p.tape[c % n])
+        if (c + 1) % n == 0 and p.halted(regs):
+            break
+    out.append(tuple(regs))
+    return out
+
+
+def random_traces(n_progs, seed=0, max_cycles=4000):
+    """(tape, states) for n_progs random programs that compile and stay in range."""
+    import random
+    rng, out = random.Random(seed), []
+    while len(out) < n_progs:
+        src = random_program(rng)
+        try:
+            reference(src, 20000)
+            p = compile_src(src)
+        except (CompileError, RuntimeError, KeyError):
+            continue
+        out.append((p.tape, trace(p, max_cycles)))
+    return out
