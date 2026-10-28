@@ -603,7 +603,10 @@ def signed(v):
     return v - (1 << WB) if v & (1 << (WB - 1)) else v
 
 
-def compile_src(src):
+def compile_src(src, layout_iters=2000, seed=0):
+    """Source -> Compiled. The V-lane order starts as order of first use and is then improved
+    by a local search (move one register elsewhere, keep it if the ring gets shorter): most
+    instructions are carries along the T lane, so the layout sets the program length."""
     ast = Parser(src).program()
     low = Lower()
     entry = low.new()
@@ -645,6 +648,23 @@ def compile_src(src):
             use(("f", t[1]))
     for x in low.vars:
         use(("v", x))
+    best = _build(order, blocks, low)
+    import random
+    rng = random.Random(seed)
+    for _ in range(layout_iters if len(order) > 2 else 0):
+        o = list(order)
+        i, j = rng.randrange(len(o)), rng.randrange(len(o))
+        o.insert(j, o.pop(i))
+        try:
+            c = _build(o, blocks, low)
+        except CompileError:
+            continue
+        if len(c.tape) <= len(best.tape):
+            best, order = c, o
+    return best
+
+
+def _build(order, blocks, low):
     MARGIN = 3
     slot = {k: MARGIN + i for i, k in enumerate(order)}
     P = len(order) + 2 * MARGIN
