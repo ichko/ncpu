@@ -35,6 +35,7 @@ How it runs without jumps:
   The machine halts when every flag is idle: the memory stops changing.
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -61,7 +62,7 @@ class CompileError(Exception):
 # ── parser ──────────────────────────────────────────────────────────────────
 
 TOK = re.compile(r"\s*(?:(//[^\n]*|/\*.*?\*/)|(\d+)|([A-Za-z_]\w*)|"
-                 r"(\+\+|--|\+=|-=|==|!=|<=|>=|&&|\|\||[-+*/(){};,=<>!]))", re.S)
+                 r"(\+\+|--|\+=|-=|==|!=|<=|>=|&&|\|\||[-+*/%(){};,=<>!\[\]]))", re.S)
 KEYWORDS = {"int", "if", "else", "while", "for", "halt"}
 
 
@@ -137,8 +138,21 @@ class Parser:
                 name = self.next()
                 if name[0] != "id":
                     raise CompileError(f"expected a name, got {name[1]!r}")
-                init = self.expr() if self.accept("=") else ("num", 0)
-                decls.append(("decl", name[1], init))
+                if self.accept("["):
+                    size = self.next()
+                    if size[0] != "num":
+                        raise CompileError("array size must be a number")
+                    self.expect("]")
+                    vals = []
+                    if self.accept("="):
+                        self.expect("{")
+                        while not self.accept("}"):
+                            vals.append(self.expr())
+                            self.accept(",")
+                    decls.append(("adecl", name[1], size[1], vals))
+                else:
+                    init = self.expr() if self.accept("=") else ("num", 0)
+                    decls.append(("decl", name[1], init))
                 if not self.accept(","):
                     break
             self.expect(";")
@@ -180,14 +194,17 @@ class Parser:
         name = self.next()
         if name[0] != "id":
             raise CompileError(f"expected a statement, got {name[1]!r}")
-        x = name[1]
+        lv = ("var", name[1])
+        if self.accept("["):
+            lv = ("idx", name[1], self.expr())
+            self.expect("]")
         op = self.next()[1]
         if op == "=":
-            return ("assign", x, self.expr())
+            return ("assign", lv, self.expr())
         if op in ("+=", "-="):
-            return ("assign", x, (op[0], ("var", x), self.expr()))
+            return ("assign", lv, (op[0], lv, self.expr()))
         if op in ("++", "--"):
-            return ("assign", x, (op[0], ("var", x), ("num", 1)))
+            return ("assign", lv, (op[0], lv, ("num", 1)))
         raise CompileError(f"unknown statement operator {op!r}")
 
     def expr(self):
@@ -199,7 +216,7 @@ class Parser:
 
     def term(self):
         e = self.unary()
-        while self.peek()[1] in ("*", "/"):
+        while self.peek()[1] in ("*", "/", "%"):
             op = self.next()[1]
             e = (op, e, self.unary())
         return e
@@ -213,6 +230,10 @@ class Parser:
         if tok[0] == "num":
             return ("num", tok[1])
         if tok[0] == "id":
+            if self.accept("["):
+                e = self.expr()
+                self.expect("]")
+                return ("idx", tok[1], e)
             return ("var", tok[1])
         if tok[1] == "(":
             e = self.expr()
@@ -241,7 +262,7 @@ class Parser:
             try:
                 c = self.cond()
                 self.expect(")")
-                if self.peek()[1] in ("==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/"):
+                if self.peek()[1] in ("==", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%"):
                     raise CompileError("expression")
                 return c
             except CompileError:
@@ -273,9 +294,13 @@ def linear(e):
         for x, a in v2.items():
             out[x] = out.get(x, 0) + s * a
         return {x: a for x, a in out.items() if a}, c1 + s * c2
-    if k in ("*", "/"):
+    if k in ("*", "/", "%"):
         v1, c1 = linear(e[1])
         v2, c2 = linear(e[2])
+        if k == "%":
+            if v1 or v2:
+                raise CompileError("internal: % not hoisted")
+            return {}, int(math.fmod(c1, c2))
         if k == "*" and not v1:
             v1, c1, v2, c2 = v2, c2, v1, c1
         if v2:
@@ -299,7 +324,7 @@ class Block:
 
 class Lower:
     def __init__(self):
-        self.blocks, self.vars, self.init = [], [], {}
+        self.blocks, self.vars, self.init, self.arrays, self.ntemp = [], [], {}, {}, 0
 
     def new(self):
         b = Block(len(self.blocks))
@@ -321,6 +346,102 @@ class Lower:
             self.var(x)
         return v, c
 
+    def temp(self):
+        self.ntemp += 1
+        name = f"_t{self.ntemp}"
+        self.var(name, declare=True)
+        self.init[name] = 0
+        return name
+
+    def element(self, a, k):
+        if a not in self.arrays:
+            raise CompileError(f"{a} is not an array")
+        if not 0 <= k < self.arrays[a]:
+            raise CompileError(f"{a}[{k}] is out of bounds")
+        return f"{a}[{k}]"
+
+    def chain(self, it, n, body):
+        """if (it == 0) body(0) else if (it == 1) body(1) ... (an out-of-range index does nothing)."""
+        out = ("block", [])
+        for k in reversed(range(n)):
+            out = ("if", ("rel", "==", ("var", it), ("num", k)), body(k), out)
+        return out
+
+    def hoist(self, e, cur):
+        """Rewrite e so that it is linear: array reads with a variable index and products /
+        quotients of variables become code (in new blocks) that leaves the value in a temp.
+        Returns (expression, the block control continues in)."""
+        k = e[0]
+        if k in ("num", "var"):
+            return e, cur
+        if k == "neg":
+            a, cur = self.hoist(e[1], cur)
+            return ("neg", a), cur
+        if k in ("+", "-"):
+            a, cur = self.hoist(e[1], cur)
+            b, cur = self.hoist(e[2], cur)
+            return (k, a, b), cur
+        if k == "idx":
+            ie, cur = self.hoist(e[2], cur)
+            v, c = linear(ie)
+            if not v:
+                return ("var", self.element(e[1], c)), cur
+            self.element(e[1], 0)
+            it, t = self.temp(), self.temp()
+            cur.stmts.append((it,) + self.lin(ie))
+            cur = self.stmt(self.chain(it, self.arrays[e[1]],
+                                       lambda j: ("assign", ("var", t), ("var", f"{e[1]}[{j}]"))), cur)
+            return ("var", t), cur
+        if k in ("*", "/", "%"):
+            a, cur = self.hoist(e[1], cur)
+            b, cur = self.hoist(e[2], cur)
+            try:
+                linear((k, a, b))
+                return (k, a, b), cur
+            except CompileError:
+                pass
+            x, y, r = self.temp(), self.temp(), self.temp()
+            V = lambda n: ("var", n)
+            setup = [("assign", V(x), a), ("assign", V(y), b), ("assign", V(r), ("num", 0))]
+            inc = lambda n, d: ("assign", V(n), ("+" if d > 0 else "-", V(n), ("num", 1)))
+            if k == "*":                             # r += x, y times (y counts to 0 from either side)
+                code = setup + [
+                    ("while", ("rel", ">", V(y), ("num", 0)),
+                     ("block", [("assign", V(r), ("+", V(r), V(x))), inc(y, -1)])),
+                    ("while", ("rel", "<", V(y), ("num", 0)),
+                     ("block", [("assign", V(r), ("-", V(r), V(x))), inc(y, +1)]))]
+                out = r
+            else:                                    # C division: x ends as the remainder
+                def loop(test, step, dq):
+                    return ("while", test, ("block", [("assign", V(x), step), inc(r, dq)]))
+                pos = ("if", ("rel", ">=", V(x), ("num", 0)),
+                       loop(("rel", ">=", V(x), V(y)), ("-", V(x), V(y)), +1),
+                       loop(("rel", "<=", ("+", V(x), V(y)), ("num", 0)), ("+", V(x), V(y)), -1))
+                neg = ("if", ("rel", ">=", V(x), ("num", 0)),
+                       loop(("rel", ">=", ("+", V(x), V(y)), ("num", 0)), ("+", V(x), V(y)), -1),
+                       loop(("rel", "<=", ("-", V(x), V(y)), ("num", 0)), ("-", V(x), V(y)), +1))
+                code = setup + [("if", ("rel", ">", V(y), ("num", 0)), pos,
+                                 ("if", ("rel", "<", V(y), ("num", 0)), neg, ("block", [])))]
+                out = r if k == "/" else x
+            cur = self.stmt(("block", code), cur)
+            return ("var", out), cur
+        raise CompileError(f"bad expression {e}")
+
+    def hoist_cond(self, c, cur):
+        k = c[0]
+        if k == "true":
+            return c, cur
+        if k == "not":
+            a, cur = self.hoist_cond(c[1], cur)
+            return ("not", a), cur
+        if k in ("and", "or"):
+            a, cur = self.hoist_cond(c[1], cur)
+            b, cur = self.hoist_cond(c[2], cur)
+            return (k, a, b), cur
+        a, cur = self.hoist(c[2], cur)
+        b, cur = self.hoist(c[3], cur)
+        return ("rel", c[1], a, b), cur
+
     def stmt(self, s, cur):
         """Lower s starting in block cur; returns the block control continues in (or None)."""
         k = s[0]
@@ -332,26 +453,52 @@ class Lower:
                 if cur is None:
                     cur = self.new()
             return cur
+        if k == "adecl":                             # int a[n] = {...}: n variables a[0] .. a[n-1]
+            _, a, n, vals = s
+            if a in self.arrays or a in self.vars:
+                raise CompileError(f"{a} declared twice")
+            if len(vals) > n:
+                raise CompileError(f"too many initial values for {a}")
+            self.arrays[a] = n
+            for j in range(n):
+                cur = self.stmt(("decl", f"{a}[{j}]", vals[j] if j < len(vals) else ("num", 0)), cur)
+            return cur
         if k == "decl":                              # entry-block constants are initial memory
-            v, c = linear(s[2])
+            e, cur = self.hoist(s[2], cur)
+            v, c = linear(e)
             self.var(s[1], declare=True)
             if v or cur.id != 0:
-                cur.stmts.append((s[1],) + self.lin(s[2]))
+                cur.stmts.append((s[1],) + self.lin(e))
                 self.init[s[1]] = 0
             else:
                 check_range(c, f"initial value of {s[1]}")
                 self.init[s[1]] = c
             return cur
         if k == "assign":
-            self.var(s[1])
-            cur.stmts.append((s[1],) + self.lin(s[2]))
-            return cur
+            lv = s[1]
+            e, cur = self.hoist(s[2], cur)
+            if lv[0] == "var":
+                self.var(lv[1])
+                cur.stmts.append((lv[1],) + self.lin(e))
+                return cur
+            ie, cur = self.hoist(lv[2], cur)
+            v, c = linear(ie)
+            if not v:
+                cur.stmts.append((self.element(lv[1], c),) + self.lin(e))
+                return cur
+            self.element(lv[1], 0)
+            tv, it = self.temp(), self.temp()
+            cur.stmts.append((tv,) + self.lin(e))
+            cur.stmts.append((it,) + self.lin(ie))
+            return self.stmt(self.chain(it, self.arrays[lv[1]],
+                                        lambda j: ("assign", ("var", f"{lv[1]}[{j}]"), ("var", tv))), cur)
         if k == "halt":
             cur.term = ("halt",)
             return None
         if k == "if":
+            c, cur = self.hoist_cond(s[1], cur)
             then, other, after = self.new(), self.new(), self.new()
-            self.cond(s[1], cur, then.id, other.id)
+            self.cond(c, cur, then.id, other.id)
             for blk, body in ((then, s[2]), (other, s[3])):
                 end = self.stmt(body, blk)
                 if end is not None:
@@ -360,7 +507,8 @@ class Lower:
         if k == "while":
             head, body, after = self.new(), self.new(), self.new()
             cur.term = ("goto", head.id)
-            self.cond(s[1], head, body.id, after.id)
+            c, test = self.hoist_cond(s[1], head)
+            self.cond(c, test, body.id, after.id)
             end = self.stmt(s[2], body)
             if end is not None:
                 end.term = ("goto", head.id)
@@ -736,11 +884,51 @@ def run_machine(p, max_passes=10_000):
 def reference(src, max_steps=100_000):
     """Direct interpretation of the source (ints checked to stay in range)."""
     ast = Parser(src).program()
-    env = {}
+    env, arrays = {}, {}
 
     def ev(e):
-        v, c = linear(e)
-        return sum(a * env[x] for x, a in v.items()) + c
+        k = e[0]
+        if k == "num":
+            return e[1]
+        if k == "var":
+            return env[e[1]]
+        if k == "neg":
+            return -ev(e[1])
+        if k == "idx":
+            i = ev(e[2])
+            if not 0 <= i < arrays[e[1]]:
+                raise CompileError(f"{e[1]}[{i}] out of bounds")
+            return env[f"{e[1]}[{i}]"]
+        a, b = ev(e[1]), ev(e[2])
+        if k == "+":
+            return a + b
+        if k == "-":
+            return a - b
+        const = not linear_ok(e[1]) or not linear_ok(e[2])
+        if k == "*":
+            r = a * b
+        elif b == 0:
+            raise CompileError("division by zero")
+        else:
+            r = int(a / b) if k == "/" else int(math.fmod(a, b))
+        if const:                                    # the compiler keeps it in a register
+            check_range(r, "product / quotient")
+        return r
+
+    def linear_ok(e):
+        try:
+            v, _ = linear(e)
+            return not v
+        except CompileError:
+            return False
+
+    def lval(lv):
+        if lv[0] == "var":
+            return lv[1]
+        i = ev(lv[2])
+        if not 0 <= i < arrays[lv[1]]:
+            raise CompileError(f"{lv[1]}[{i}] out of bounds")
+        return f"{lv[1]}[{i}]"
 
     def cond(c):
         k = c[0]
@@ -770,9 +958,15 @@ def reference(src, max_steps=100_000):
         if k == "block":
             for t in s[1]:
                 run(t)
+        elif k == "adecl":
+            arrays[s[1]] = s[2]
+            for j in range(s[2]):
+                env[f"{s[1]}[{j}]"] = ev(s[3][j]) if j < len(s[3]) else 0
+                check_range(env[f"{s[1]}[{j}]"], s[1])
         elif k in ("decl", "assign"):
-            env[s[1]] = ev(s[2])
-            check_range(env[s[1]], s[1])
+            x = s[1] if k == "decl" else lval(s[1])
+            env[x] = ev(s[2])
+            check_range(env[x], x)
         elif k == "halt":
             raise Halt
         elif k == "if":
