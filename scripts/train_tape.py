@@ -127,6 +127,11 @@ ap.add_argument("--tape-hold", type=int, default=0,
                      "checkpoint (nothing on the tape moves then, so the target is the same)")
 ap.add_argument("--tape-loss", default="mse", choices=["mse", "l1"],
                 help="l1 keeps pulling small tape errors to exactly zero")
+ap.add_argument("--clock", type=float, default=0.0,
+                help="weight of a SUPERVISED clock: the last two channels are painted once with the phase "
+                     "(cos, sin = 1, 0) and every step is scored against cos/sin(2 pi t / K); the NCA keeps "
+                     "it itself, nothing overwrites the state (its own time drifted: bands moved later "
+                     "every cycle and regions lost sync)")
 ap.add_argument("--topk", type=int, default=0,
                 help="also score the mean of each sample's K worst squared pixel errors (memory and "
                      "instruction channels): one flipped band pixel is ~3e-5 of a whole-picture mean")
@@ -383,6 +388,8 @@ def start_state(runs):
     for i, run in enumerate(runs):
         x[i, 0] = memory(run)
         x[i, 1:4] = instr_channels(run)
+        if args.clock:
+            x[i, C - 2] = 1.0
     return torch.from_numpy(x).to(DEV)
 
 
@@ -565,6 +572,15 @@ def per_sample(a, b):
     return ((a - b) ** 2).flatten(1).mean(1) + topk_err(a, b)
 
 
+CLOCK_T = torch.stack([torch.cos(torch.arange(K + 1) * 2 * np.pi / K),
+                       torch.sin(torch.arange(K + 1) * 2 * np.pi / K)], 1).to(DEV)    # (K+1, 2)
+
+
+def clock_err(seq):
+    """Per-sample MSE of the clock channels over the whole cycle against the phase."""
+    return ((seq[:, :, C - 2:] - CLOCK_T[None, :, :, None, None]) ** 2).mean(dim=(1, 2, 3, 4))
+
+
 def train_cycle(x, runs, nc=None):
     """``nc`` (default ``--cycles``) cycles in one graph, every checkpoint scored; landed only if every
     cycle landed. Also returns per-op stats of the batch for the log."""
@@ -586,13 +602,15 @@ def train_cycle(x, runs, nc=None):
     nc = nc or args.cycles
     for _ in range(nc):
         runs, t_load, t_mem, t_tape = cycle_targets(runs)
-        seq = nca(x, K)                               # (B, K+1, C, H, W)
+        seq = nca(x, K)                      # (B, K+1, C, H, W)
         fl = scored(seq, args.load_steps, args.tail)
         fe = scored(seq, K, args.tail)
         li = tape_err(fl[:, :, 1:4], t_load[:, None]) * args.load_weight
         lm = per_sample(fe[:, :, 0], t_mem[:, None])
         ft = seq[:, args.load_steps:K + 1] if args.tape_hold else fe
         lt = tape_err(ft[:, :, 1:4], t_tape[:, None]) * args.tape_weight
+        if args.clock:
+            lt = lt + clock_err(seq) * args.clock
         ll, ml, tl = ll + li.mean(), ml + lm.mean(), tl + lt.mean()
         xe = seq[:, -1].detach()
         ok = [a and b for a, b in zip(ok, landed(seq[:, args.load_steps].detach(), xe, t_load, t_tape, runs))]
