@@ -540,6 +540,13 @@ nca = NeuralCA(channels=C, hidden_channels=args.hidden, fire_rate=args.fire_rate
 root = Path(__file__).resolve().parent.parent
 if args.init_from:
     sd = torch.load(root / args.init_from, map_location=DEV, weights_only=False)["nca"]
+    own = nca.state_dict()
+    for k, v in sd.items():                       # more channels than the checkpoint: the new ones go
+        if k in own and own[k].shape != v.shape:  # last, their weights start at zero (old dynamics kept)
+            w = torch.zeros_like(own[k]) if "rule" in k else own[k].clone()
+            w[tuple(slice(0, n) for n in v.shape)] = v
+            sd[k] = w
+            print("widened", k, tuple(v.shape), "->", tuple(w.shape))
     print("warm start:", args.init_from, nca.load_state_dict(sd, strict=False))
 apply_fire(nca, vars(args))
 opt = torch.optim.Adam(nca.parameters(), lr=args.lr)
