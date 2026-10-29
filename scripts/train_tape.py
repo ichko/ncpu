@@ -132,6 +132,10 @@ ap.add_argument("--clock", type=float, default=0.0,
                      "(cos, sin = 1, 0) and every step is scored against cos/sin(2 pi t / K); the NCA keeps "
                      "it itself, nothing overwrites the state (its own time drifted: bands moved later "
                      "every cycle and regions lost sync)")
+ap.add_argument("--time-free", type=int, default=0,
+                help="1: at every checkpoint the picture may show this cycle's state OR the previous one "
+                     "(it lags: its software machine waits a cycle); never twice in a row. The NCA may run "
+                     "slow, nothing asks it to keep the trainer's time. Eval follows the same rule")
 ap.add_argument("--topk", type=int, default=0,
                 help="also score the mean of each sample's K worst squared pixel errors (memory and "
                      "instruction channels): one flipped band pixel is ~3e-5 of a whole-picture mean")
@@ -607,15 +611,29 @@ def train_cycle(x, runs, nc=None):
     mem_ok = torch.ones(len(runs), dtype=torch.bool, device=DEV)
     st = {op: {"instr": [], "mem": [], "bit": [], "reg": []} for op in OPS}
     nc = nc or args.cycles
+    lagged = torch.zeros(len(runs), dtype=torch.bool, device=DEV)
     for _ in range(nc):
+        before = runs
         runs, t_load, t_mem, t_tape = cycle_targets(runs)
         seq = nca(x, K)                      # (B, K+1, C, H, W)
         fl = scored(seq, args.load_steps, args.tail)
         fe = scored(seq, K, args.tail)
+        ft = seq[:, args.load_steps:K + 1] if args.tape_hold else fe
         li = tape_err(fl[:, :, 1:4], t_load[:, None]) * args.load_weight
         lm = per_sample(fe[:, :, 0], t_mem[:, None])
-        ft = seq[:, args.load_steps:K + 1] if args.tape_hold else fe
         lt = tape_err(ft[:, :, 1:4], t_tape[:, None]) * args.tape_weight
+        if args.time_free:                   # or: still the state before this cycle (one cycle late)
+            p_mem = torch.from_numpy(np.stack([memory(r) for r in before])).to(DEV)
+            p_tape = torch.from_numpy(np.stack([instr_channels(r) for r in before])).to(DEV)
+            li0 = tape_err(fl[:, :, 1:4], p_tape[:, None]) * args.load_weight
+            lm0 = per_sample(fe[:, :, 0], p_mem[:, None])
+            lt0 = tape_err(ft[:, :, 1:4], p_tape[:, None]) * args.tape_weight
+            lag = ((li0 + lm0 + lt0) < (li + lm + lt)).detach() & ~lagged
+            li, lm, lt = torch.where(lag, li0, li), torch.where(lag, lm0, lm), torch.where(lag, lt0, lt)
+            sel = lag[:, None, None, None]
+            t_load, t_tape = torch.where(sel, p_tape, t_load), torch.where(sel, p_tape, t_tape)
+            runs = [b if l else r for b, r, l in zip(before, runs, lag.tolist())]
+            lagged = lag
         if args.clock:
             lt = lt + clock_err(seq) * args.clock
         ll, ml, tl = ll + li.mean(), ml + lm.mean(), tl + lt.mean()
@@ -674,9 +692,20 @@ def evaluate(cycles, bs, kind="random"):
     exact = torch.ones(bs, dtype=torch.bool, device=DEV)
     prog = exact.clone()
     per, per_prog = [], []
+    lagged = [False] * bs
     for _ in range(cycles):
+        before = runs
         runs, t_load, t_mem, t_tape = cycle_targets(runs)
         seq = nca(x, K)
+        if args.time_free:                   # one cycle late is fine, never twice in a row
+            now = (decode(runs, seq[:, -1, 0]) == want_bits(runs)).flatten(1).all(1).tolist()
+            old = (decode(before, seq[:, -1, 0]) == want_bits(before)).flatten(1).all(1).tolist()
+            lag = [not a and b and not l for a, b, l in zip(now, old, lagged)]
+            runs = [b if l else r for b, r, l in zip(before, runs, lag)]
+            p_tape = torch.from_numpy(np.stack([instr_channels(r) for r in before])).to(DEV)
+            sel = torch.tensor(lag, device=DEV)[:, None, None, None]
+            t_load, t_tape = torch.where(sel, p_tape, t_load), torch.where(sel, p_tape, t_tape)
+            lagged = lag
         exact &= torch.tensor(landed(seq[:, args.load_steps], seq[:, -1], t_load, t_tape, runs),
                               device=DEV)
         prog &= (decode(runs, seq[:, -1, 0]) == want_bits(runs)).flatten(1).all(1)
