@@ -127,6 +127,10 @@ ap.add_argument("--tape-hold", type=int, default=0,
                      "checkpoint (nothing on the tape moves then, so the target is the same)")
 ap.add_argument("--tape-loss", default="mse", choices=["mse", "l1"],
                 help="l1 keeps pulling small tape errors to exactly zero")
+ap.add_argument("--topk", type=int, default=0,
+                help="also score the mean of each sample's K worst squared pixel errors (memory and "
+                     "instruction channels): one flipped band pixel is ~3e-5 of a whole-picture mean")
+ap.add_argument("--topk-weight", type=float, default=1.0)
 ap.add_argument("--repair", type=float, default=0.0,
                 help="fraction of each batch whose bands are damaged before the rollout (faded, "
                      "ghost ink in other register columns, speckle, hidden noise); the targets stay "
@@ -546,12 +550,19 @@ def scored(seq, t, tail):
 
 def tape_err(a, b):
     if args.tape_loss == "l1":
-        return (a - b).abs().flatten(1).mean(1)
+        return (a - b).abs().flatten(1).mean(1) + topk_err(a, b)
     return per_sample(a, b)
 
 
+def topk_err(a, b):
+    if not args.topk:
+        return 0.0
+    e = ((a - b) ** 2).flatten(1)
+    return e.topk(min(args.topk, e.shape[1]), dim=1).values.mean(1) * args.topk_weight
+
+
 def per_sample(a, b):
-    return ((a - b) ** 2).flatten(1).mean(1)
+    return ((a - b) ** 2).flatten(1).mean(1) + topk_err(a, b)
 
 
 def train_cycle(x, runs, nc=None):
