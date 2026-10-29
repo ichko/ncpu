@@ -136,6 +136,12 @@ ap.add_argument("--time-free", type=int, default=0,
                 help="1: at every checkpoint the picture may show this cycle's state OR the previous one "
                      "(it lags: its software machine waits a cycle); never twice in a row. The NCA may run "
                      "slow, nothing asks it to keep the trainer's time. Eval follows the same rule")
+ap.add_argument("--desync", type=float, default=0.0,
+                help="fraction of training samples where a random horizontal strip (1/4-1/2 of the "
+                     "height) starts k steps AHEAD: that strip, all channels, is taken from the state "
+                     "run k more steps; targets unchanged. Regions drifted apart in closed loop and "
+                     "training never showed a desynced state")
+ap.add_argument("--desync-k", type=int, default=4)
 ap.add_argument("--topk", type=int, default=0,
                 help="also score the mean of each sample's K worst squared pixel errors (memory and "
                      "instruction channels): one flipped band pixel is ~3e-5 of a whole-picture mean")
@@ -750,6 +756,22 @@ def ema_update():
                 ema[k].lerp_(v, 1 - args.ema)
 
 
+@torch.no_grad()
+def desync(x, rng):
+    k = rng.randint(1, args.desync_k)
+    pick = [i for i in range(len(x)) if rng.random() < args.desync]
+    if not pick:
+        return x
+    ahead = nca(x[pick], k)[:, -1]
+    x = x.clone()
+    H = x.shape[2]
+    for j, i in enumerate(pick):
+        h = rng.randint(H // 4, H // 2)
+        rows = [(rng.randrange(H) + r) % H for r in range(h)]
+        x[i, :, rows] = ahead[j, :, rows]
+    return x
+
+
 def snapshot(step):
     """The checkpoint dict; with --ema the averaged weights are 'nca'."""
     ck = {"nca": nca.state_dict(), "step": step, "config": vars(args)}
@@ -783,6 +805,8 @@ for step in bar:
 
     if args.repair:
         x = damage(x, runs, rng)
+    if args.desync:
+        x = desync(x, rng)
     opt.zero_grad(set_to_none=True)
     loss, ll, ml, tl, x_end, done, ok, keep, ops = train_cycle(x, runs, nc)
     gn = torch.nn.utils.clip_grad_norm_(nca.parameters(), args.grad_clip or float("inf")).item()
