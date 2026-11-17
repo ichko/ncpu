@@ -27,6 +27,7 @@ dependencies = [
     "nbstripout>=0.9.1",
     "streamlit>=1.55.0",
     "ipython>=9.8.0",
+    "gradio>=6.30.0",
 ]
 
 [project.scripts]

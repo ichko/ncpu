@@ -39,6 +39,7 @@ class NeuralCA(nn.Module):
         gaussian_noise_fire_rate: float = 0.0,
     ) -> None:
         super().__init__()
+        self.is_stateful = False
         self.learnable_initial_state = learnable_initial_state
         self.fire_rate = fire_rate
         self.read_only_dims = read_only_dims
@@ -67,6 +68,26 @@ class NeuralCA(nn.Module):
         if self.learnable_initial_state:
             self.add_initial_state = LazyLearnableInitialState()
 
+    def step(self, x, update_mask=None):
+        """Apply one NCA update to a single state tensor ``(B, C, H, W)``.
+
+        Mirrors the per-iteration body of :meth:`forward`, so a :class:`~ncpu.sweep.WindowSweep`
+        (or any rolling-window driver) can advance the local rule one hop at a
+        time on arbitrarily sized crops.
+        """
+        delta = self.perception(x)
+        delta = self.rule(delta)
+        delta = self.read_only_channels(delta)
+        delta = self.alive_masking(x, delta)
+        delta = self.stochastic_update(delta)
+        if update_mask is not None:
+            delta = delta * update_mask
+
+        x = x + delta
+        torch.clip_(x, -10, 10)
+        x = self.gaussian_noise(x)
+        return x
+
     def forward(self, x, steps, noise_std=None, noise_fire_rate=None):
         if self.learnable_initial_state:
             x = self.add_initial_state(x)
@@ -80,15 +101,7 @@ class NeuralCA(nn.Module):
 
         seq = [x]
         for _ in range(steps):
-            delta = self.perception(x)
-            delta = self.rule(delta)
-            delta = self.read_only_channels(delta)
-            delta = self.alive_masking(x, delta)
-            delta = self.stochastic_update(delta)
-
-            x = x + delta
-            torch.clip_(x, -10, 10)
-            x = g(x)
+            x = self.step(x)
             seq.append(x)
 
         g.std, g.prob = saved_std, saved_prob

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NCPU · Training progress</title>
+<style>
+:root{color-scheme:dark;font:14px/1.5 system-ui,sans-serif;background:#0c1018;color:#e7edf8}*{box-sizing:border-box}body{max-width:1200px;margin:auto;padding:28px}h1{font-size:25px;margin:0}h2{font-size:16px}p,small{color:#93a3bd}header{display:flex;justify-content:space-between;gap:20px;align-items:center}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0}.card,section{border:1px solid #253044;background:#141c2a;border-radius:14px;padding:20px}.card strong{display:block;font-size:26px;font-variant-numeric:tabular-nums}.card span{font-size:12px;color:#93a3bd}progress{width:100%;height:12px;accent-color:#79a7ff}section{margin-top:20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #253044;font-variant-numeric:tabular-nums}th{color:#93a3bd}img{width:100%;border-radius:8px;background:white}#run{overflow-wrap:anywhere;font-size:12px}#status{color:#79a7ff}#error{color:#ff9090}code{color:#c4d8ff}@media(max-width:700px){body{padding:16px}.cards{grid-template-columns:repeat(2,1fr)}th,td{padding:6px;font-size:12px}}
+</style>
+<header><div><h1>NCPU / Training progress</h1><p>AND + blank-input stability · live updates every 5 seconds</p></div><span id="status" role="status">Connecting…</span></header>
+<p id="run"></p><p id="error" role="alert"></p>
+<div class="cards"><div class="card"><span>Optimizer steps</span><strong id="step">—</strong><small id="total"></small></div><div class="card"><span>Training stage</span><strong id="stage">—</strong><small id="phase"></small></div><div class="card"><span>Latest train loss</span><strong id="loss">—</strong><small>Compound loss</small></div><div class="card"><span>NCA updates / rollout</span><strong id="updates">—</strong><small>Plus 4 settling updates</small></div></div>
+<progress id="progress" value="0" max="20000"></progress>
+<section><h2 id="evalTitle">Latest fixed evaluation</h2><table><thead><tr><th>Metric</th><th>Stationary</th><th>Displaced</th></tr></thead><tbody id="metrics"></tbody></table><p>Blank MSE and peak drift measure unwanted output on uniform no-gate inputs. Lower is better; zero means unchanged background.</p></section>
+<section><h2>Training curves</h2><p>Saved at each evaluation (every 100 optimizer steps).</p><img id="curves" alt="Training and evaluation loss and AND accuracy curves" hidden></section>
+<script>
+const $=id=>document.getElementById(id);
+const number=value=>typeof value==='number'?value.toLocaleString(): '—';
+const decimal=value=>typeof value==='number'?value.toPrecision(4):'—';
+let plottedStep=-1;
+async function refresh(){
+ try{
+  const response=await fetch('/api/progress');if(!response.ok)throw Error('HTTP '+response.status);
+  const data=await response.json(), latest=data.latest, evaluation=data.evaluation;
+  $('run').textContent=data.run;
+  $('step').textContent=number(latest.step);$('total').textContent='of '+number(data.total)+' total';
+  $('stage').textContent=latest.stage?'Stage '+latest.stage:'—';
+  $('phase').textContent=latest.stage===1?'Stationary AND + blank':'Displaced windows + blank';
+  $('loss').textContent=decimal(latest.loss);$('updates').textContent=number(latest.rollout_steps);
+  $('progress').max=data.total;$('progress').value=latest.step||0;
+  const age=Math.round(data.secondsSinceUpdate||0);
+  $('status').textContent=latest.step>=data.total?'Training complete':age>120?'No recent update · '+age+'s':'Latest step written '+age+'s ago';
+  $('evalTitle').textContent='Latest fixed evaluation · step '+number(evaluation.step);
+  const metrics=[['AND accuracy','acc',value=>(100*value).toFixed(1)+'%'],['Compound loss','loss',decimal],['Blank background MSE','blank_mse',decimal],['Blank peak |drift|','blank_peak',decimal]];
+  $('metrics').replaceChildren();
+  for(const [label,key,format] of metrics){const row=document.createElement('tr');for(const value of [label,...['stationary','displaced'].map(name=>typeof evaluation[name+'_'+key]==='number'?format(evaluation[name+'_'+key]):'—')]){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}$('metrics').append(row);}
+  if(data.hasCurves&&evaluation.step!==plottedStep){$('curves').src='/curves.png?v='+Date.now();$('curves').hidden=false;plottedStep=evaluation.step;}
+  $('error').textContent='';
+ }catch(error){$('error').textContent='Unable to refresh: '+error.message;}
+ setTimeout(refresh,5000);
+}
+refresh();
+</script>
+</html>

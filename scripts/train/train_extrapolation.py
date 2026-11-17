@@ -44,7 +44,7 @@ from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
 
 parser = ArgumentParser()
 parser.add_argument("--seed",           type=int, default=0)
-parser.add_argument("--steps",          type=int, default=100_000)
+parser.add_argument("--steps",          type=int, default=10_000)
 parser.add_argument("--max_train_bits", type=int, default=5)
 parser.add_argument("--device",         default="cuda")
 args = parser.parse_args()
@@ -62,12 +62,12 @@ VAL_BATCHES    = 4           # batches per val k
 DEVICE         = args.device
 NOISE_MAX_STD  = 0.3
 NOISE_MAX_PROB = 0.3
-BATCH_SIZE     = 8
+BATCH_SIZE     = 2
 
 # spacing=(among, side): side doubles as bottom margin for bottom_y = H - side
 ds_config = Namespace(
-    W=80, H=112, r=4,
-    spacing=(2, 21),
+    W=32, H=32, r=4,
+    spacing=(2, 2),  # Adjusted for 32x32 grid
     min_bits=1,
     max_bits=args.max_train_bits,
     batch_size=BATCH_SIZE,
@@ -90,8 +90,8 @@ optim_config = Namespace(
     batch_size=BATCH_SIZE,
     gaussian_noise=-1,
     grad_clip=None,
-    steps_min=64,
-    steps_max=128,
+    steps_min=32,
+    steps_max=64,
 )
 
 # ── Run directory ──────────────────────────────────────────────────────────────

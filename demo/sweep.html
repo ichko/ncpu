@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NCA sliding window</title>
+<style>
+  :root { --bg: #14161c; --panel: #1d2029; --fg: #e7e9ef; --muted: #8a8f9c; --accent: #5a8cff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid #2a2e3a; }
+  header h1 { margin: 0 0 4px; font-size: 18px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  main { display: flex; gap: 0; align-items: flex-start; }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; padding: 16px; }
+  #board, #overlay { display: block; width: 100%; max-width: 78vh; height: auto;
+                     image-rendering: pixelated; border: 1px solid #2a2e3a; }
+  #overlay { position: absolute; top: 16px; left: 16px; pointer-events: none; }
+  aside { width: 280px; padding: 16px; background: var(--panel);
+          border-left: 1px solid #2a2e3a; align-self: stretch; }
+  fieldset { border: 1px solid #2a2e3a; border-radius: 6px; margin: 0 0 14px; padding: 10px 12px; }
+  legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
+  label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 12px; }
+  input[type=range] { width: 100%; }
+  .readout { color: var(--fg); font-size: 12px; }
+  .row { display: flex; gap: 8px; }
+  button { flex: 1; padding: 8px 10px; background: #2a2e3a; color: var(--fg);
+           border: 1px solid #3a3f4d; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #343945; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0a0c12; }
+  .checks label { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; color: var(--fg); font-size: 13px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  :root { --bg:#0c1018; --panel:#141c2a; --fg:#e7edf8; --muted:#93a3bd; --accent:#79a7ff; }
+  header { padding:24px 32px; } header h1 { font-size:22px; margin-bottom:6px; }
+  main { padding:24px 32px; gap:24px; flex-direction:row-reverse; }
+  #stage { padding:16px; background:var(--panel); border:1px solid #253044; border-radius:16px; }
+  #board, #overlay { max-width:76vh; border:0; }
+  aside { border:1px solid #253044; border-radius:16px; padding:20px; }
+  fieldset { border:0; padding:0; margin-bottom:24px; }
+  legend { text-transform:uppercase; letter-spacing:.1em; margin-bottom:8px; }
+  button { border-radius:9px; padding:10px; }
+  input[type=range] { accent-color:var(--accent); }
+  select { padding:8px; border-radius:8px; border:1px solid #33435d; background:#202d42; color:var(--fg); width:100%; }
+  #status { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+  @media(max-width:760px){main{padding:16px;flex-direction:column;}aside{width:100%;}#board,#overlay{max-width:100%;}header{padding:20px;}}
+</style>
+</head>
+<body>
+<header>
+  <h1>NCPU / AND sliding-window lab</h1>
+  <p>Native WebGL inference · persistent state · overlapping windows · no server round trips.</p>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="board"></canvas>
+    <canvas id="overlay"></canvas>
+  </div>
+  <aside>
+    <fieldset>
+      <legend>Geometry</legend>
+      <label><input type="checkbox" id="showWindow" checked> Show scanning head</label>
+      <label for="scanningPattern">Scanning pattern</label>
+      <select id="scanningPattern">
+        <option value="raster" selected>Left to right (every row)</option>
+        <option value="serpentine">Serpentine (alternating rows)</option>
+        <option value="column">Top to bottom (then move right)</option>
+        <option value="random">Random jumps (shuffled sweep)</option>
+      </select>
+      <label>Board size</label>
+      <select id="boardSize">
+        <option value="128">128 &times; 128</option>
+        <option value="256">256 &times; 256</option>
+        <option value="512">512 &times; 512</option>
+        <option value="1024">1024 &times; 1024</option>
+      </select>
+      <label>Window <span class="readout" id="winOut">32</span></label>
+      <input type="range" id="window" min="32" max="32" step="1" value="32" disabled>
+      <label>Hop (stride) <span class="readout" id="hopOut">8</span></label>
+      <input type="range" id="hop" min="1" max="32" value="2">
+      <label>Vertical hop <span class="readout" id="verticalHopOut">16</span></label>
+      <input type="range" id="verticalHop" min="1" max="32" value="16">
+      <label for="contextPadding">Context padding <span class="readout" id="paddingOut">3</span> px</label>
+      <input type="range" id="contextPadding" min="0" max="16" value="3">
+      <div class="readout" style="margin-top:6px">Overlap: <b id="overlapOut">24</b> px</div>
+    </fieldset>
+    <fieldset>
+      <legend>Gates</legend>
+      <label>Number of gates</label>
+      <input type="range" id="numGates" min="1" max="256" value="16">
+      <div class="checks" style="margin-top:8px">
+        <label><input type="checkbox" class="kind" value="AND" checked>AND</label>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:#ffff00"></span>Window</span>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Run</legend>
+      <label for="updateHead">Scanning head</label>
+      <select id="updateHead">
+        <option value="uniform">Uniform (full update)</option>
+        <option value="gaussian">Gaussian (soft edges)</option>
+      </select>
+      <label for="maskSigma">Gaussian width σ <span class="readout" id="sigmaOut">8</span> px</label>
+      <input type="range" id="maskSigma" min="2" max="32" value="8" disabled>
+      <label>Steps / window <span class="readout" id="innerOut">8</span></label>
+      <input type="range" id="innerSteps" min="1" max="128" value="8">
+      <label>Updates / frame <span class="readout" id="speedOut">2</span></label>
+      <input type="range" id="speed" min="1" max="8" value="2">
+      <div class="row" style="margin-top:10px">
+        <button id="place" class="primary">Place gates</button>
+        <button id="step">Step</button>
+      </div>
+      <p id="status" role="status">Loading model…</p>
+      <div class="row" style="margin-top:8px">
+        <button id="play">Play</button>
+        <button id="clear">Clear</button>
+      </div>
+      <div class="readout" style="margin-top:10px">
+        window <span id="cursor">0</span> / <span id="total">0</span>
+        &middot; <span id="fps">0</span> fps
+      </div>
+    </fieldset>
+  </aside>
+</main>
+
+<script type="module">
+import { SweepSim } from './js/sweep.js';
+
+const $ = (id) => document.getElementById(id);
+const board = $('board'), overlay = $('overlay'), octx = overlay.getContext('2d');
+
+let model = null, sim = null, gates = [];
+let playing = false, speed = 2, innerSteps = 48, raf = 0;
+const params = new URLSearchParams(location.search);
+for (const [key,id] of [['canvas','boardSize'],['gates','numGates'],['steps','innerSteps'],['hop','hop'],['verticalHop','verticalHop']]) {
+  if (params.has(key)) {
+    if (id === 'boardSize' && ![...$(id).options].some(o=>o.value===params.get(key))) $(id).add(new Option(params.get(key),params.get(key)));
+    $(id).value=params.get(key);
+  }
+}
+let lastT = performance.now(), frames = 0, fps = 0;
+
+const CODES = { AND: -1, OR: 0.5, XOR: 1 };
+const COLORS = { AND: '#ff5050', OR: '#50dc50', XOR: '#5a8cff' };
+
+function geometry() {
+  const win = +$('window').value;
+  const inputPos = model.inputs, outPos = model.output, r = model.radius;
+  return { win, inputPos, outPos, r };
+}
+
+function circle(arr, W, H, cx, cy, r, val) {
+  const r2 = r * r;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (dx * dx + dy * dy > r2) continue;
+    const x = cx + dx, y = cy + dy;
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    arr[y * W + x] = val;
+  }
+}
+
+function buildBoard(gates, W, H, win) {
+  const input = new Float32Array(W * H).fill(0);
+  const selector = new Float32Array(W * H).fill(0);
+  const { inputPos, r } = geometry();
+  for (const g of gates) {
+    const x0 = g.tc * win, y0 = g.tr * win;
+    for (let yy = 0; yy < win; yy++) for (let xx = 0; xx < win; xx++) {
+      const px = x0 + xx, py = y0 + yy;
+      if (px < W && py < H) selector[py * W + px] = CODES[g.gate];
+    }
+    circle(input, W, H, x0 + inputPos[0][0], y0 + inputPos[0][1], r, g.a ? 1 : -1);
+    circle(input, W, H, x0 + inputPos[1][0], y0 + inputPos[1][1], r, g.b ? 1 : -1);
+  }
+  return { input, selector };
+}
+
+function placeRandomGates() {
+  const W = +$('boardSize').value, win = +$('window').value;
+  const nTiles = Math.floor(W / win);
+  const kinds = [...document.querySelectorAll('.kind:checked')].map((e) => e.value);
+  if (!kinds.length) return [];
+  const total = nTiles * nTiles;
+  const count = Math.min(+$('numGates').value, total);
+  const chosen = new Set();
+  while (chosen.size < count) chosen.add((Math.random() * total) | 0);
+  const out = [];
+  for (const idx of chosen) {
+    out.push({
+      tr: (idx / nTiles) | 0, tc: idx % nTiles,
+      gate: kinds[(Math.random() * kinds.length) | 0],
+      a: (Math.random() * 2) | 0, b: (Math.random() * 2) | 0,
+    });
+  }
+  return out;
+}
+
+function rebuild(g) {
+  const W = +$('boardSize').value, win = +$('window').value;
+  const hop = Math.min(+$('hop').value, win);
+  if (sim) { sim.dispose(); sim = null; }
+  sim = new SweepSim(board, model, { W, H: W, winW: win, winH: win, strideX: hop, strideY: +$('verticalHop').value, scanningPattern: $('scanningPattern').value, contextPadding: +$('contextPadding').value, updateHead: $('updateHead').value, maskSigma: +$('maskSigma').value });
+  board.width = W; board.height = W;
+  overlay.width = W; overlay.height = W;
+  $('total').textContent = sim.positions.length;
+  gates = g;
+  const { input, selector } = buildBoard(gates, W, W, win);
+  sim.uploadBoard(input, selector);
+  draw();
+}
+
+function draw() {
+  if (!sim) return;
+  sim.draw();
+  const W = sim.W;
+  octx.clearRect(0, 0, W, W);
+  if ($('showWindow').checked) {
+    const [y0, x0] = sim.currentWindow();
+    octx.strokeStyle = '#ffff00'; octx.lineWidth = 2;
+    octx.strokeRect(x0 + 0.5, y0 + 0.5, sim.winW, sim.winH);
+  }
+  $('cursor').textContent = sim.cursor;
+}
+
+function frame(now) {
+  if (playing && sim) sim.tick(speed, innerSteps);
+  draw();
+  frames++;
+  if (now - lastT >= 1000) { fps = Math.round(frames * 1000 / (now - lastT)); frames = 0; lastT = now; }
+  $('fps').textContent = fps;
+  raf = requestAnimationFrame(frame);
+}
+
+function updateReadouts() {
+  const win = +$('window').value, hop = Math.min(+$('hop').value, win);
+  $('winOut').textContent = win; $('hopOut').textContent = hop;
+  $('overlapOut').textContent = win - hop;
+  $('verticalHopOut').textContent = $('verticalHop').value;
+  $('speedOut').textContent = $('speed').value;
+  $('innerOut').textContent = $('innerSteps').value;
+}
+
+$('place').onclick = () => { playing = false; $('play').textContent = 'Play'; rebuild(placeRandomGates()); };
+$('clear').onclick = () => {
+  playing = false; $('play').textContent = 'Play';
+  const W = +$('boardSize').value, win = +$('window').value;
+  const z = new Float32Array(W * W);
+  if (!sim) rebuild([]);
+  else { gates = []; sim.uploadBoard(z, z); draw(); }
+};
+$('step').onclick = () => { if (sim) { sim.stepWindow(innerSteps); draw(); } };
+$('play').onclick = () => { playing = !playing; $('play').textContent = playing ? 'Pause' : 'Play'; };
+$('speed').oninput = () => { speed = +$('speed').value; updateReadouts(); };
+$('innerSteps').oninput = () => { innerSteps = +$('innerSteps').value; updateReadouts(); };
+function updateStride() {
+  updateReadouts();
+  if (sim) {
+    sim.setStride(+$('hop').value, +$('verticalHop').value);
+    $('total').textContent = sim.positions.length;
+  }
+}
+$('hop').oninput = updateStride;
+$('verticalHop').oninput = updateStride;
+$('scanningPattern').onchange = () => {
+  if (sim) { sim.setScanningPattern($('scanningPattern').value); draw(); }
+};
+$('showWindow').onchange = draw;
+$('contextPadding').oninput = () => {
+  $('paddingOut').textContent = $('contextPadding').value;
+  if (sim) sim.setContextPadding(+$('contextPadding').value);
+};
+$('updateHead').onchange = () => {
+  $('maskSigma').disabled = $('updateHead').value !== 'gaussian';
+  if (sim) sim.updateHead = $('updateHead').value;
+};
+$('maskSigma').oninput = () => {
+  $('sigmaOut').textContent = $('maskSigma').value;
+  if (sim) sim.maskSigma = +$('maskSigma').value;
+};
+$('boardSize').onchange = () => { playing=false; $('play').textContent='Play'; rebuild(placeRandomGates()); };
+$('window').oninput = updateReadouts;
+window.addEventListener('keydown', (e) => {
+  if (/INPUT|SELECT|BUTTON/.test(e.target.tagName)) return;
+  if (e.code === 'Space') { e.preventDefault(); $('play').click(); }
+  if (e.code === 'KeyS') $('step').click();
+});
+
+for (const id of ['place','clear','step','play']) $(id).disabled=true;
+fetch(params.get('model') || 'data/window_gates.json')
+  .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then((m) => {
+    model = m;
+    const savedPadding = m.training?.context_padding ?? 0;
+    const requestedPadding = params.has('contextPadding') ? Number(params.get('contextPadding')) : savedPadding;
+    $('contextPadding').value = Number.isInteger(requestedPadding) && requestedPadding >= 0 && requestedPadding <= 16 ? requestedPadding : savedPadding;
+    $('paddingOut').textContent = $('contextPadding').value;
+    $('updateHead').value = m.training?.update_head || 'uniform';
+    $('maskSigma').value = m.training?.mask_sigma || 8;
+    $('sigmaOut').textContent = $('maskSigma').value;
+    $('maskSigma').disabled = $('updateHead').value !== 'gaussian';
+    innerSteps=+$('innerSteps').value;
+    updateReadouts(); rebuild(placeRandomGates());
+    $('status').textContent='Ready · all inference runs on your GPU';
+    for (const id of ['place','clear','step','play']) $(id).disabled=false;
+    requestAnimationFrame(frame);
+  })
+  .catch((err) => { $('status').textContent='Failed to load model: '+err.message; });
+</script>
+</body>
+</html>
