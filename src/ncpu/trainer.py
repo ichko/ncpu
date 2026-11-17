@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from ncpu.base_trainer import BaseTrainer
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
+from ncpu.noise import Damage, apply_input_damage
 from ncpu.normalizers import normalize_neg1_to_1
 from ncpu.utils import (
     add_gaussian_noise,
@@ -39,6 +40,8 @@ class NCPUTrainer(BaseTrainer):
         input_dims=(1,),
         input_implant_type: Optional[str] = None,
         normalize_fn=normalize_neg1_to_1,
+        input_damages: Optional[Sequence[Damage]] = None,
+        damage_mode: str = "all",
     ):
         super().__init__(
             **(
@@ -71,6 +74,9 @@ class NCPUTrainer(BaseTrainer):
         self.input_dims = list(input_dims)
         self.input_implant_type = input_implant_type
         self.normalize_fn = normalize_fn
+        self.input_damages = list(input_damages) if input_damages else []
+        # "all": apply every input damage each step; "sample": pick one at random
+        self.damage_mode = damage_mode
         self.pool = None  # set externally to enable state-pool training
 
     def sanity_check(self):
@@ -126,7 +132,27 @@ class NCPUTrainer(BaseTrainer):
         first_state = first_state.to(self.nca.device)
         return first_state
 
-    def optim_step(self, steps, return_rollout=False, noise_std=None, noise_fire_rate=None):
+    def _apply_input_damages(self, inp):
+        if not self.input_damages:
+            return inp
+        if self.damage_mode == "sample":
+            idx = int(torch.randint(len(self.input_damages), (1,)).item())
+            d = self.input_damages[idx]
+            return apply_input_damage(inp, d)
+        for d in self.input_damages:
+            inp = apply_input_damage(inp, d)
+        return inp
+
+    def _resolve_state_damages(self, state_damages):
+        if state_damages is None:
+            state_damages = self.nca.state_damages
+            if self.damage_mode == "sample" and state_damages:
+                idx = int(torch.randint(len(state_damages), (1,)).item())
+                state_damages = [state_damages[idx]]
+        return state_damages
+
+    def optim_step(self, steps, return_rollout=False, noise_std=None,
+                   noise_fire_rate=None, state_damages=None):
         forward_steps = steps
         if isinstance(steps, (tuple, list)):
             forward_steps = np.random.randint(steps[0], steps[1])
@@ -135,6 +161,7 @@ class NCPUTrainer(BaseTrainer):
             noise_std = self.nca.gaussian_noise.std
         if noise_fire_rate is None:
             noise_fire_rate = self.nca.gaussian_noise.prob
+        state_damages = self._resolve_state_damages(state_damages)
 
         if self.pool is not None:
             inp, out, first_state, pool_indices = self.pool.sample(self.device)
@@ -143,6 +170,7 @@ class NCPUTrainer(BaseTrainer):
             inp, out = batch
             if self.gaussian_noise > 0:
                 inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+            inp = self._apply_input_damages(inp)
             inp = self.normalize_fn(inp)
             out = self.normalize_fn(out)
             inp = inp.to(self.device)
@@ -155,6 +183,7 @@ class NCPUTrainer(BaseTrainer):
             steps=forward_steps,
             noise_std=noise_std,
             noise_fire_rate=noise_fire_rate,
+            state_damages=state_damages,
         )
 
         if self.pool is not None:
@@ -210,47 +239,71 @@ class NCPUTrainer(BaseTrainer):
         tgt_bit = (out.unsqueeze(1) * bm.unsqueeze(0)).sum(dim=(-1, -2)) / bm_sum
         return ((nca_bit > 0) == (tgt_bit > 0)).float().sum(dim=1).mean().item()
 
-    def evaluate(self, eval_batch, noise_configs, n_rollouts=5, steps=80):
-        """Evaluate the NCA on a fixed batch with stochastic noise.
+    def evaluate(self, eval_batch, noise_configs, n_rollouts=5, steps=80, damage_configs=None):
+        """Evaluate the NCA on a fixed batch with stochastic noise/damages.
 
         RL-style evaluation: the NCA is rolled out `n_rollouts` times per
-        (noise_std, noise_fire_rate) config under torch.no_grad(), and the
-        bit accuracy (num_valid_bits) is averaged over all rollouts to reduce
-        the variance of stochastic runs. The model weights are untouched.
+        config under torch.no_grad(), and the bit accuracy (num_valid_bits)
+        is averaged over all rollouts to reduce the variance of stochastic
+        runs. The model weights are untouched.
 
         Args:
-            eval_batch:    (inp, out) batch exactly as produced by the dataset
-                           (normalized inside, matching optim_step).
-            noise_configs: iterable of (std, fire_rate) pairs. Passing an empty
-                           list uses the model's current gaussian_noise settings.
-            n_rollouts:    stochastic rollouts per config.
-            steps:         fixed rollout length for evaluation.
+            eval_batch:      (inp, out) batch exactly as produced by the dataset
+                             (normalized inside, matching optim_step).
+            noise_configs:   iterable of (std, fire_rate) pairs for the legacy
+                             per-step GaussianNoise. Passing an empty list uses
+                             the model's current gaussian_noise settings.
+                             Ignored when `damage_configs` is given.
+            n_rollouts:      stochastic rollouts per config.
+            steps:           fixed rollout length for evaluation.
+            damage_configs:  optional list of dicts, one per evaluation cell of
+                             the robustness matrix. Each dict may contain:
+                               - "label":         name of the eval cell
+                               - "input_damages": list[Damage] applied to the raw
+                                 input screen before normalization
+                               - "state_damages": list[Damage] applied each
+                                 rollout step
+                               - "noise_std" / "noise_fire_rate": legacy
+                                 GaussianNoise overrides for this cell
 
         Returns dict with eval_bits (mean accuracy), eval_loss (mean loss), and
-        per_cfg (list of per-config means).
+        per_cfg (list of per-config means, including the damage labels).
         """
-        inp, out = eval_batch
-        inp = self.normalize_fn(inp)
-        out = self.normalize_fn(out)
-        if self.gaussian_noise > 0:
-            inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
-        inp = inp.to(self.device)
-        out = out.to(self.device)
-        first_state = self._implant_input(inp)
+        inp_raw, out = eval_batch
+        out = self.normalize_fn(out).to(self.device)
 
-        if not noise_configs:
-            noise_configs = [(self.nca.gaussian_noise.std, self.nca.gaussian_noise.prob)]
+        if damage_configs is None:
+            if not noise_configs:
+                noise_configs = [(self.nca.gaussian_noise.std, self.nca.gaussian_noise.prob)]
+            damage_configs = [
+                {
+                    "label": f"gauss_s{std:g}_p{fr:g}",
+                    "noise_std": std,
+                    "noise_fire_rate": fr,
+                }
+                for std, fr in noise_configs
+            ]
 
         bits_all, loss_all, per_cfg = [], [], []
         with torch.no_grad():
-            for std, fire_rate in noise_configs:
+            for cfg in damage_configs:
+                inp = inp_raw.clone()
+                for d in cfg.get("input_damages", []):
+                    inp = apply_input_damage(inp, d)
+                inp = self.normalize_fn(inp)
+                if self.gaussian_noise > 0:
+                    inp = add_gaussian_noise(inp, 0, self.gaussian_noise)
+                inp = inp.to(self.device)
+                first_state = self._implant_input(inp)
+
                 cfg_bits, cfg_losses = [], []
                 for _ in range(n_rollouts):
                     rollout = self.nca.forward(
                         first_state,
                         steps=steps,
-                        noise_std=std,
-                        noise_fire_rate=fire_rate,
+                        noise_std=cfg.get("noise_std"),
+                        noise_fire_rate=cfg.get("noise_fire_rate"),
+                        state_damages=cfg.get("state_damages"),
                     )
                     nca_out = rollout[:, -1, 0]
                     loss = self.loss_fn(
@@ -264,8 +317,11 @@ class NCPUTrainer(BaseTrainer):
                     cfg_losses.append(loss.item())
                 per_cfg.append(
                     {
-                        "noise_std": std,
-                        "noise_fire_rate": fire_rate,
+                        "label": cfg.get("label", "default"),
+                        "noise_std": cfg.get("noise_std"),
+                        "noise_fire_rate": cfg.get("noise_fire_rate"),
+                        "input_damages": [d.to_dict() for d in cfg.get("input_damages", [])],
+                        "state_damages": [d.to_dict() for d in cfg.get("state_damages", [])],
                         "bits": sum(cfg_bits) / len(cfg_bits),
                         "loss": sum(cfg_losses) / len(cfg_losses),
                     }

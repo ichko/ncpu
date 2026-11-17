@@ -1,9 +1,10 @@
-from typing import Literal
+from typing import Literal, Optional, Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ncpu.noise import Damage, apply_state_damage
 from ncpu.nca_utils import (
     AliveMasking,
     BorderMask,
@@ -37,6 +38,7 @@ class NeuralCA(nn.Module):
         read_only_dims=[],
         gaussian_noise: float = 0.0,
         gaussian_noise_fire_rate: float = 0.0,
+        state_damages: Optional[Sequence[Damage]] = None,
     ) -> None:
         super().__init__()
         self.learnable_initial_state = learnable_initial_state
@@ -62,12 +64,14 @@ class NeuralCA(nn.Module):
         self.gaussian_noise = GaussianNoise(channels, read_only_dims)
         self.gaussian_noise.std = gaussian_noise
         self.gaussian_noise.prob = gaussian_noise_fire_rate
+        self.state_damages = list(state_damages) if state_damages else []
         # self.border_mask = BorderMask()
         self.read_only_channels = ReadOnlyChannels(channels, read_only_dims)
         if self.learnable_initial_state:
             self.add_initial_state = LazyLearnableInitialState()
 
-    def forward(self, x, steps, noise_std=None, noise_fire_rate=None):
+    def forward(self, x, steps, noise_std=None, noise_fire_rate=None,
+                state_damages=None):
         if self.learnable_initial_state:
             x = self.add_initial_state(x)
 
@@ -77,6 +81,8 @@ class NeuralCA(nn.Module):
             g.std = noise_std
         if noise_fire_rate is not None:
             g.prob = noise_fire_rate
+
+        damages = self.state_damages if state_damages is None else list(state_damages)
 
         seq = [x]
         for _ in range(steps):
@@ -89,6 +95,9 @@ class NeuralCA(nn.Module):
             x = x + delta
             torch.clip_(x, -10, 10)
             x = g(x)
+            for d in damages:
+                if torch.rand(1).item() < d.prob:
+                    x = apply_state_damage(x, d, channel_mask=g.mask)
             seq.append(x)
 
         g.std, g.prob = saved_std, saved_prob
