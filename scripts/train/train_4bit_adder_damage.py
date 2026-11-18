@@ -44,7 +44,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from ncpu.dataset import NCPUDataset, sample_4bit_adder
 from ncpu.loss import combined_loss
 from ncpu.nca import NeuralCA
-from ncpu.noise import Damage, parse_damage_specs
+from ncpu.noise import (
+    DEFAULT_INPUT_DAMAGE_SPECS,
+    DEFAULT_STATE_DAMAGE_SPECS,
+    Damage,
+    parse_damage_specs,
+)
 from ncpu.trainer import NCPUTrainer
 from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
 
@@ -74,7 +79,8 @@ parser.add_argument(
     action="append",
     default=None,
     help="input damage spec 'kind:amplitude[:prob[:k=v,...]]'; repeatable. "
-    "Defaults to a representative mix of all input-side kinds",
+    "Defaults to a representative mix of all input-side kinds; "
+    "pass 'none' to disable input damages",
 )
 parser.add_argument(
     "--state-damage",
@@ -82,7 +88,8 @@ parser.add_argument(
     default=None,
     dest="state_damage",
     help="state damage spec (state_gaussian/state_perlin/channel_dropout/"
-    "block_dropout); repeatable. Defaults to a mix of all state-side kinds",
+    "block_dropout); repeatable. Defaults to a mix of all state-side kinds; "
+    "pass 'none' to disable state damages",
 )
 parser.add_argument(
     "--damage-mode",
@@ -112,26 +119,8 @@ SAVE_ROLLOUT_NPZ = args.save_rollout_npz
 
 # amplitude is in pixel units on the raw [0,255] screen for input damages,
 # and on the [-10,10] state scale for state damages.
-DEFAULT_INPUT_DAMAGES = [
-    "gaussian:20:0.5",
-    "perlin:40:0.5",
-    "salt_pepper:0.05:0.5",
-    "occlusion:2:0.5:block_size=8,fill=0",
-    "blur:2.0:0.5",
-    "brightness_contrast:0.3:0.5",
-    "quantize:1:0.5:levels=4",
-    "jitter:2:0.5",
-    "speckle:0.3:0.5",
-]
-DEFAULT_STATE_DAMAGES = [
-    "state_gaussian:0.5:0.5",
-    "state_perlin:0.5:0.5",
-    "channel_dropout:0.1:0.5",
-    "block_dropout:1:0.5:block_size=8",
-]
-
-input_damages = parse_damage_specs(args.damage or DEFAULT_INPUT_DAMAGES)
-state_damages = parse_damage_specs(args.state_damage or DEFAULT_STATE_DAMAGES)
+input_damages = parse_damage_specs(args.damage or DEFAULT_INPUT_DAMAGE_SPECS)
+state_damages = parse_damage_specs(args.state_damage or DEFAULT_STATE_DAMAGE_SPECS)
 
 ds_config = Namespace(
     W=64,

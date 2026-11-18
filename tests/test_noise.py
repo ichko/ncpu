@@ -12,6 +12,7 @@ from ncpu.noise import (
     Damage,
     apply_input_damage,
     apply_state_damage,
+    damages_slug,
     parse_damage_specs,
     perlin_field_2d,
 )
@@ -46,6 +47,19 @@ class TestDamageSpec(unittest.TestCase):
         ds = parse_damage_specs(["gaussian:10:0.5", "jitter:2"])
         self.assertEqual([d.kind for d in ds], ["gaussian", "jitter"])
         self.assertEqual(parse_damage_specs(None), [])
+
+    def test_parse_none_disables_side(self):
+        self.assertEqual(parse_damage_specs(["none"]), [])
+        ds = parse_damage_specs(["none", "perlin:40:0.5"])
+        self.assertEqual([d.kind for d in ds], ["perlin"])
+
+    def test_slug_is_filename_safe(self):
+        d = Damage.parse("occlusion:2:0.5:block_size=8,fill=0")
+        s = d.slug()
+        self.assertNotRegex(s, r"[^A-Za-z0-9-]")
+        self.assertIn("occlusion", s)
+        self.assertEqual(damages_slug([]), "clean")
+        self.assertEqual(len(damages_slug([d])), len(s))
 
     def test_registry_sides(self):
         for k in INPUT_DAMAGE_KINDS:

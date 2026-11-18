@@ -30,6 +30,7 @@ Conventions / assumptions:
   damage pipeline itself always runs pre-normalization, like ``optim_step``.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
@@ -58,6 +59,10 @@ class Damage:
         if self.params:
             s += ":" + ",".join(f"{k}={v}" for k, v in sorted(self.params.items()))
         return s
+
+    def slug(self) -> str:
+        """Filename-safe label, e.g. ``perlin-a40-p0-5-octaves-4``."""
+        return re.sub(r"[^A-Za-z0-9]+", "-", self.label()).strip("-")
 
     def to_dict(self) -> dict:
         return {
@@ -111,7 +116,16 @@ def _parse_value(v: str):
 
 
 def parse_damage_specs(specs: Optional[Sequence[str]]) -> list:
-    return [Damage.parse(s) for s in (specs or [])]
+    """Parse specs; the literal spec ``"none"`` disables that damage side."""
+    return [Damage.parse(s) for s in (specs or []) if s != "none"]
+
+
+def damages_slug(damages: Sequence[Damage], max_len: int = 60) -> str:
+    """Filename-safe tag for a whole damage set, e.g. for run names."""
+    if not damages:
+        return "clean"
+    s = "+".join(d.slug() for d in damages)
+    return s[:max_len]
 
 
 # ── Shared generators ────────────────────────────────────────────────────────
@@ -313,6 +327,27 @@ INPUT_DAMAGE_KINDS = sorted(
 STATE_DAMAGE_KINDS = sorted(
     k for k, v in DAMAGE_REGISTRY.items() if v["side"] == "state"
 )
+
+# Canonical default damage mixes for the damage-sweep train scripts
+# (D4 adder / D5 gates): input amplitudes in [0, 255] pixel units,
+# state amplitudes on the [-10, 10] state scale.
+DEFAULT_INPUT_DAMAGE_SPECS = [
+    "gaussian:20:0.5",
+    "perlin:40:0.5",
+    "salt_pepper:0.05:0.5",
+    "occlusion:2:0.5:block_size=8,fill=0",
+    "blur:2.0:0.5",
+    "brightness_contrast:0.3:0.5",
+    "quantize:1:0.5:levels=4",
+    "jitter:2:0.5",
+    "speckle:0.3:0.5",
+]
+DEFAULT_STATE_DAMAGE_SPECS = [
+    "state_gaussian:0.5:0.5",
+    "state_perlin:0.5:0.5",
+    "channel_dropout:0.1:0.5",
+    "block_dropout:1:0.5:block_size=8",
+]
 
 
 def apply_input_damage(img, damage: Damage):
