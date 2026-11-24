@@ -48,6 +48,7 @@ from ncpu.noise import (
     DEFAULT_INPUT_DAMAGE_SPECS,
     DEFAULT_STATE_DAMAGE_SPECS,
     Damage,
+    damages_slug,
     parse_damage_specs,
 )
 from ncpu.trainer import NCPUTrainer
@@ -174,7 +175,11 @@ if args.resume:
     print(f"Resuming run {run_dir.name}: damage config comes from the pickled trainer")
 else:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"D4_adder4_dmg_s{args.seed}_{timestamp}"
+    using_defaults = args.damage is None and args.state_damage is None
+    dmg_tag = (
+        "mix" if using_defaults else damages_slug([*input_damages, *state_damages])
+    )
+    run_name = f"D4_adder4_{dmg_tag}_s{args.seed}_{timestamp}"
     run_dir = Path("runs") / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "rollouts").mkdir()
@@ -194,6 +199,7 @@ else:
                     "save_rollout_npz": SAVE_ROLLOUT_NPZ,
                     "device": DEVICE,
                     "damage_mode": args.damage_mode,
+                    "damage_tag": dmg_tag,
                 },
                 "ds": {
                     k: (v.__name__ if callable(v) else v)
