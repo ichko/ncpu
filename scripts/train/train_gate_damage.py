@@ -85,33 +85,67 @@ GATES = {
 
 # ── Args ───────────────────────────────────────────────────────────────────────
 
-parser = ArgumentParser(description="Train one logic gate under programmatic damages (D5).")
+parser = ArgumentParser(
+    description="Train one logic gate under programmatic damages (D5)."
+)
 parser.add_argument("--gate", required=True, choices=GATES.keys())
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--steps", type=int, default=50_000)
-parser.add_argument("--n-inputs", type=int, default=2, dest="n_inputs",
-                    help="inputs for general boolean gates; ignored for half_adder/majority3")
-parser.add_argument("--damage", action="append", default=None,
-                    help="input damage spec 'kind:amplitude[:prob[:k=v,...]]'; repeatable. "
-                         "Defaults to the full input-side mix; pass 'none' to disable "
-                         "input damages (e.g. for state-only ablations)")
-parser.add_argument("--state-damage", action="append", default=None, dest="state_damage",
-                    help="state damage spec; repeatable. Defaults to the full state-side mix; "
-                         "pass 'none' to disable state damages")
-parser.add_argument("--damage-mode", choices=["sample", "all"], default="sample",
-                    help="sample: one input+state damage per step; all: stack them all")
-parser.add_argument("--eval-damage", action="append", default=None, dest="eval_damage",
-                    help="extra input damage spec to add to the eval matrix; repeatable")
+parser.add_argument(
+    "--n-inputs",
+    type=int,
+    default=2,
+    dest="n_inputs",
+    help="inputs for general boolean gates; ignored for half_adder/majority3",
+)
+parser.add_argument(
+    "--damage",
+    action="append",
+    default=None,
+    help="input damage spec 'kind:amplitude[:prob[:k=v,...]]'; repeatable. "
+    "Defaults to the full input-side mix; pass 'none' to disable "
+    "input damages (e.g. for state-only ablations)",
+)
+parser.add_argument(
+    "--state-damage",
+    action="append",
+    default=None,
+    dest="state_damage",
+    help="state damage spec; repeatable. Defaults to the full state-side mix; "
+    "pass 'none' to disable state damages",
+)
+parser.add_argument(
+    "--damage-mode",
+    choices=["sample", "all"],
+    default="sample",
+    help="sample: one input+state damage per step; all: stack them all",
+)
+parser.add_argument(
+    "--eval-damage",
+    action="append",
+    default=None,
+    dest="eval_damage",
+    help="extra input damage spec to add to the eval matrix; repeatable",
+)
 parser.add_argument("--kernel_size", type=int, default=5, choices=[3, 5, 7])
 parser.add_argument("--alive_threshold", type=float, default=0.0)
 parser.add_argument("--zero_init", action="store_true", default=False)
-parser.add_argument("--eval-every", type=int, default=1_000, dest="eval_every",
-                    help="evaluate the robustness matrix every N steps (default 1000)")
+parser.add_argument(
+    "--eval-every",
+    type=int,
+    default=1_000,
+    dest="eval_every",
+    help="evaluate the robustness matrix every N steps (default 1000)",
+)
 parser.add_argument("--device", default="cuda")
-parser.add_argument("--resume", type=str, default=None,
-                    help="Run name to resume, or 'last'")
-parser.add_argument("--save-rollout-npz", action="store_true",
-                    help="save rollout arrays as compressed NPZ files instead of GIFs")
+parser.add_argument(
+    "--resume", type=str, default=None, help="Run name to resume, or 'last'"
+)
+parser.add_argument(
+    "--save-rollout-npz",
+    action="store_true",
+    help="also save rollout arrays as compressed NPZ (a rollout GIF is always written)",
+)
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -145,8 +179,12 @@ ds_config = Namespace(
     sampler=sampler,
     balanced=False,
     screen_fn=lambda left_input=[], right_input=[], **kw: make_io_screen_cols1(
-        cfg.H, cfg.W, cfg.r, cfg.spacing,
-        left_input=left_input, right_input=right_input,
+        cfg.H,
+        cfg.W,
+        cfg.r,
+        cfg.spacing,
+        left_input=left_input,
+        right_input=right_input,
         n_input_cols=1,
     ),
 )
@@ -169,7 +207,7 @@ nca_config = Namespace(
 optim_config = Namespace(
     lr=1e-4,
     batch_size=16,
-    gaussian_noise=-1,   # legacy input noise disabled; input_damages replace it
+    gaussian_noise=-1,  # legacy input noise disabled; input_damages replace it
     grad_clip=None,
     steps_min=32,
     steps_max=64,
@@ -178,8 +216,11 @@ optim_config = Namespace(
 # ── Run directory ──────────────────────────────────────────────────────────────
 
 if args.resume == "last":
-    d5_runs = sorted(d.name for d in Path("runs").iterdir()
-                     if d.name.startswith("D5_") and (d / "checkpoints" / "trainer.pkl").exists())
+    d5_runs = sorted(
+        d.name
+        for d in Path("runs").iterdir()
+        if d.name.startswith("D5_") and (d / "checkpoints" / "trainer.pkl").exists()
+    )
     if not d5_runs:
         raise RuntimeError("No resumable D5 runs found")
     args.resume = d5_runs[-1]
@@ -203,30 +244,56 @@ else:
         json.dump(
             {
                 "run": {
-                    "name": run_name, "experiment": "D5", "gate": args.gate,
-                    "n_inputs": args.n_inputs, "seed": args.seed,
-                    "total_steps": TOTAL_STEPS, "plot_every": PLOT_EVERY,
-                    "eval_every": EVAL_EVERY, "save_rollout_npz": SAVE_ROLLOUT_NPZ,
-                    "device": DEVICE, "damage_mode": args.damage_mode,
+                    "name": run_name,
+                    "experiment": "D5",
+                    "gate": args.gate,
+                    "n_inputs": args.n_inputs,
+                    "seed": args.seed,
+                    "total_steps": TOTAL_STEPS,
+                    "plot_every": PLOT_EVERY,
+                    "eval_every": EVAL_EVERY,
+                    "save_rollout_npz": SAVE_ROLLOUT_NPZ,
+                    "device": DEVICE,
+                    "damage_mode": args.damage_mode,
                     "damage_tag": dmg_tag,
                 },
                 "ds": {
-                    **{k: v for k, v in vars(ds_config).items() if k not in ("sampler", "screen_fn")},
-                    "sampler": sampler.__name__ if hasattr(sampler, "__name__") else str(sampler),
+                    **{
+                        k: v
+                        for k, v in vars(ds_config).items()
+                        if k not in ("sampler", "screen_fn")
+                    },
+                    "sampler": (
+                        sampler.__name__
+                        if hasattr(sampler, "__name__")
+                        else str(sampler)
+                    ),
                     "screen_fn": "make_io_screen_cols1",
                 },
-                "nca": {**{k: v for k, v in vars(nca_config).items() if k != "state_damages"},
-                        "state_damages": [d.to_dict() for d in state_damages]},
+                "nca": {
+                    **{
+                        k: v
+                        for k, v in vars(nca_config).items()
+                        if k != "state_damages"
+                    },
+                    "state_damages": [d.to_dict() for d in state_damages],
+                },
                 "optim": vars(optim_config),
                 "input_damages": [d.to_dict() for d in input_damages],
-                "env": {"python": sys.version, "torch": torch.__version__, "git": git_info()},
+                "env": {
+                    "python": sys.version,
+                    "torch": torch.__version__,
+                    "git": git_info(),
+                },
             },
             f,
             indent=2,
             default=str,
         )
 
-print(f"Gate: {args.gate} n_inputs={args.n_inputs} seed={args.seed} damage={dmg_tag} mode={args.damage_mode}")
+print(
+    f"Gate: {args.gate} n_inputs={args.n_inputs} seed={args.seed} damage={dmg_tag} mode={args.damage_mode}"
+)
 print(f"  input damages: {[d.label() for d in input_damages]}")
 print(f"  state damages: {[d.label() for d in state_damages]}")
 print(f"Run dir: {run_dir}\n")
@@ -239,17 +306,17 @@ if args.resume:
     trainer = NCPUTrainer.load_trainer(checkpoints_dir)
     trainer.nca.to(DEVICE)
     trainer.to(DEVICE)
-    trainer.dataloader    = dataset.get_dataloader(batch_size=optim_config.batch_size)
-    trainer.ds            = dataset
-    trainer.dataset_iter  = iter(trainer.dataloader)
-    trainer.optim         = torch.optim.Adam(trainer.nca.parameters(), lr=optim_config.lr)
-    trainer.loss_fn       = output_masked_rollout_loss
+    trainer.dataloader = dataset.get_dataloader(batch_size=optim_config.batch_size)
+    trainer.ds = dataset
+    trainer.dataset_iter = iter(trainer.dataloader)
+    trainer.optim = torch.optim.Adam(trainer.nca.parameters(), lr=optim_config.lr)
+    trainer.loss_fn = output_masked_rollout_loss
     left_mask, right_mask = dataset.get_io_mask()
-    trainer.inp_mask        = torch.tensor(left_mask).to(DEVICE)
-    trainer.out_mask        = torch.tensor(right_mask).to(DEVICE)
+    trainer.inp_mask = torch.tensor(left_mask).to(DEVICE)
+    trainer.out_mask = torch.tensor(right_mask).to(DEVICE)
     trainer.out_mask_binary = (trainer.out_mask > 128).float()
     trainer.inp_mask_binary = (trainer.inp_mask > 128).float()
-    trainer.bit_masks       = dataset.get_output_bit_masks().to(DEVICE)
+    trainer.bit_masks = dataset.get_output_bit_masks().to(DEVICE)
     input_damages = trainer.input_damages
     state_damages = trainer.nca.state_damages
     print(f"Resumed from step {trainer.learning_step}")
@@ -281,9 +348,13 @@ for d in state_damages:
 for d in parse_damage_specs(args.eval_damage):
     eval_damage_configs.append({"label": f"eval_{d.label()}", "input_damages": [d]})
 eval_damage_configs.append({"label": "all_in", "input_damages": list(input_damages)})
-eval_damage_configs.append({"label": "all",
-                            "input_damages": list(input_damages),
-                            "state_damages": list(state_damages)})
+eval_damage_configs.append(
+    {
+        "label": "all",
+        "input_damages": list(input_damages),
+        "state_damages": list(state_damages),
+    }
+)
 
 N_EVAL_ROLLOUTS = 5
 EVAL_STEPS = 64
@@ -291,21 +362,31 @@ eval_metrics = []
 log_path = run_dir / "log.jsonl"
 
 
-def run_eval(trainer, eval_batch, damage_configs, n_rollouts=N_EVAL_ROLLOUTS, steps=EVAL_STEPS):
+def run_eval(
+    trainer, eval_batch, damage_configs, n_rollouts=N_EVAL_ROLLOUTS, steps=EVAL_STEPS
+):
     """Evaluate the persisted model (save -> load round-trip), not the in-memory one."""
     trainer.save_checkpoint()
     trainer.load_checkpoint(trainer.learning_step)
     ckpt = Path(trainer.checkpoint_pattern.format(step=trainer.learning_step))
-    result = trainer.evaluate(eval_batch, [], n_rollouts=n_rollouts, steps=steps,
-                              damage_configs=damage_configs)
+    result = trainer.evaluate(
+        eval_batch,
+        [],
+        n_rollouts=n_rollouts,
+        steps=steps,
+        damage_configs=damage_configs,
+    )
     return {**result, "checkpoint": str(ckpt)}
 
 
 # ── Training loop ──────────────────────────────────────────────────────────────
 
 start_step = trainer.learning_step
-pbar = tqdm(range(start_step, start_step + TOTAL_STEPS), ncols=100,
-            desc=f"{args.gate} dmg s{args.seed}")
+pbar = tqdm(
+    range(start_step, start_step + TOTAL_STEPS),
+    ncols=100,
+    desc=f"{args.gate} dmg s{args.seed}",
+)
 
 for step in pbar:
     info = trainer.optim_step(
@@ -321,26 +402,51 @@ for step in pbar:
     )
 
     with open(log_path, "a") as f:
-        f.write(json.dumps({
-            "step": step, "loss": loss, "num_valid_bits": num_valid_bits,
-            "grad_norm": grad_norm, "gate": args.gate, "n_inputs": args.n_inputs,
-            "seed": args.seed, "ts": datetime.now().isoformat(),
-        }) + "\n")
+        f.write(
+            json.dumps(
+                {
+                    "step": step,
+                    "loss": loss,
+                    "num_valid_bits": num_valid_bits,
+                    "grad_norm": grad_norm,
+                    "gate": args.gate,
+                    "n_inputs": args.n_inputs,
+                    "seed": args.seed,
+                    "ts": datetime.now().isoformat(),
+                }
+            )
+            + "\n"
+        )
 
     if step % EVAL_EVERY == 0 and step > 0:
         eval_result = run_eval(trainer, eval_batch, eval_damage_configs)
-        eval_metrics.append({"step": step, **{
-            cfg["label"]: {"bits": cfg["bits"], "loss": cfg["loss"]}
-            for cfg in eval_result["per_cfg"]
-        }})
+        eval_metrics.append(
+            {
+                "step": step,
+                **{
+                    cfg["label"]: {"bits": cfg["bits"], "loss": cfg["loss"]}
+                    for cfg in eval_result["per_cfg"]
+                },
+            }
+        )
         with open(log_path, "a") as f:
-            f.write(json.dumps({
-                "step": step, "eval_bits": eval_result["eval_bits"],
-                "eval_loss": eval_result["eval_loss"], "gate": args.gate,
-                "n_inputs": args.n_inputs, "seed": args.seed,
-                "per_cfg": eval_result["per_cfg"],
-            }) + "\n")
-        summary = "  ".join(f"{c['label']}={c['bits']:.2f}" for c in eval_result["per_cfg"])
+            f.write(
+                json.dumps(
+                    {
+                        "step": step,
+                        "eval_bits": eval_result["eval_bits"],
+                        "eval_loss": eval_result["eval_loss"],
+                        "gate": args.gate,
+                        "n_inputs": args.n_inputs,
+                        "seed": args.seed,
+                        "per_cfg": eval_result["per_cfg"],
+                    }
+                )
+                + "\n"
+            )
+        summary = "  ".join(
+            f"{c['label']}={c['bits']:.2f}" for c in eval_result["per_cfg"]
+        )
         print(f"\n  EVAL step {step}: {summary}")
 
     if step % PLOT_EVERY != 0:
@@ -359,18 +465,26 @@ for step in pbar:
     fig, ax = plt.subplots(figsize=(8, 3))
     ax.scatter(range(len(losses)), losses, s=0.5, alpha=0.4, color="steelblue")
     ax.set_yscale("log")
-    ax.set_xlabel("step"); ax.set_ylabel("loss")
-    ax.set_title(f"{args.gate} ni={args.n_inputs} dmg={dmg_tag} seed={args.seed} — step {step}")
-    fig.tight_layout(); fig.savefig(run_dir / "loss_curve.png", dpi=120); plt.close(fig)
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss")
+    ax.set_title(
+        f"{args.gate} ni={args.n_inputs} dmg={dmg_tag} seed={args.seed} — step {step}"
+    )
+    fig.tight_layout()
+    fig.savefig(run_dir / "loss_curve.png", dpi=120)
+    plt.close(fig)
 
     # bits curve
     bits_vals = [m["num_valid_bits"] for m in trainer.metrics if "num_valid_bits" in m]
     fig, ax = plt.subplots(figsize=(8, 3))
     ax.scatter(range(len(bits_vals)), bits_vals, s=0.5, alpha=0.4, color="darkorange")
     ax.set_ylim(0, len(trainer.bit_masks) + 0.5)
-    ax.set_xlabel("step"); ax.set_ylabel("valid bits")
+    ax.set_xlabel("step")
+    ax.set_ylabel("valid bits")
     ax.set_title(f"{args.gate} — valid bits — step {step}")
-    fig.tight_layout(); fig.savefig(run_dir / "bits_curve.png", dpi=120); plt.close(fig)
+    fig.tight_layout()
+    fig.savefig(run_dir / "bits_curve.png", dpi=120)
+    plt.close(fig)
 
     # eval curves: per damage label over training steps
     if eval_metrics:
@@ -382,53 +496,71 @@ for step in pbar:
             if xs:
                 ax.plot(xs, ys, marker="o", lw=1, ms=3, label=label)
         ax.set_ylim(0, len(trainer.bit_masks) + 0.5)
-        ax.set_xlabel("step"); ax.set_ylabel("mean eval bit accuracy")
+        ax.set_xlabel("step")
+        ax.set_ylabel("mean eval bit accuracy")
         ax.set_title(f"{args.gate} robustness matrix seed={args.seed} — step {step}")
         ax.legend(fontsize=6, ncol=2)
-        fig.tight_layout(); fig.savefig(run_dir / "eval_bits_curve.png", dpi=120); plt.close(fig)
+        fig.tight_layout()
+        fig.savefig(run_dir / "eval_bits_curve.png", dpi=120)
+        plt.close(fig)
 
         latest = eval_metrics[-1]
         fig, ax = plt.subplots(figsize=(11, 4))
         vals = [latest[label]["bits"] for label in labels if label in latest]
         ax.bar(range(len(vals)), vals, color="seagreen")
         ax.set_xticks(range(len(vals)))
-        ax.set_xticklabels([l for l in labels if l in latest], rotation=45, ha="right", fontsize=7)
+        ax.set_xticklabels(
+            [l for l in labels if l in latest], rotation=45, ha="right", fontsize=7
+        )
         ax.set_ylim(0, len(trainer.bit_masks) + 0.5)
         ax.set_ylabel("eval bit accuracy")
         ax.set_title(f"{args.gate} robustness matrix seed={args.seed} — step {step}")
-        fig.tight_layout(); fig.savefig(run_dir / "eval_bits_bar.png", dpi=120); plt.close(fig)
+        fig.tight_layout()
+        fig.savefig(run_dir / "eval_bits_bar.png", dpi=120)
+        plt.close(fig)
 
     # snapshot
     diff = (nca_out - out).abs()
     snap_b = min(B, 4)
     save_grid_image(
         run_dir / "snapshot_latest.png",
-        [inp[:snap_b].cpu(), out[:snap_b].cpu(),
-         nca_out[:snap_b].detach().cpu(), diff[:snap_b].detach().cpu()],
+        [
+            inp[:snap_b].cpu(),
+            out[:snap_b].cpu(),
+            nca_out[:snap_b].detach().cpu(),
+            diff[:snap_b].detach().cpu(),
+        ],
         row_vmin=[None, None, None, 0],
         row_vmax=[None, None, None, 2],
     )
 
-    # rollout output: channel 0 only, first 4 batch items
+    # rollout output: channel 0 only, first 4 batch items; always a GIF per
+    # run, plus NPZ on top when requested
     gif_b = min(B, 4)
     ch0 = rollout[:gif_b, ::2, 0:1]
+    frames = ch0.permute(2, 0, 1, 3, 4).reshape(gif_b, ch0.shape[1], H, W).numpy()
+    frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
+    grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
+    grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
+    media.write_video(
+        str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif"
+    )
     if SAVE_ROLLOUT_NPZ:
         np.savez_compressed(run_dir / "rollout_latest.npz", rollout=ch0.numpy())
-    else:
-        frames = ch0.permute(2, 0, 1, 3, 4).reshape(gif_b, ch0.shape[1], H, W).numpy()
-        frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
-        grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
-        grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
-        media.write_video(str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif")
 
     if step % 5000 == 0 and step > 0:
+        shutil.copy(
+            run_dir / "rollout_latest.gif",
+            run_dir / "rollouts" / f"rollout_{step:07d}.gif",
+        )
         if SAVE_ROLLOUT_NPZ:
-            shutil.copy(run_dir / "rollout_latest.npz",
-                        run_dir / "rollouts" / f"rollout_{step:07d}.npz")
-        else:
-            shutil.copy(run_dir / "rollout_latest.gif",
-                        run_dir / "rollouts" / f"rollout_{step:07d}.gif")
-        shutil.copy(run_dir / "snapshot_latest.png",
-                    run_dir / "snapshots" / f"snapshot_{step:07d}.png")
+            shutil.copy(
+                run_dir / "rollout_latest.npz",
+                run_dir / "rollouts" / f"rollout_{step:07d}.npz",
+            )
+        shutil.copy(
+            run_dir / "snapshot_latest.png",
+            run_dir / "snapshots" / f"snapshot_{step:07d}.png",
+        )
 
 print(f"\nDone. Run: {run_dir}")

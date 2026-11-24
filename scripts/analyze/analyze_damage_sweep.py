@@ -14,6 +14,7 @@ Outputs under results/damage_sweep/ (override with --out):
         bits_seeds_<group>.png    — valid bits, one color per seed + mean
         eval_clean_seeds_<group>.png — eval "clean" bit accuracy over steps, per seed
         eval_matrix_<group>.png   — latest eval robustness matrix, bars per seed
+        rollout_<group>_s<seed>.gif — each run's rollout GIF, copied per group
     overview:
         summary.csv               — one row per (group, seed) run
         matrix_final_bits.csv     — rows: (task, damage), cols: seeds + mean of final bits
@@ -29,6 +30,7 @@ import argparse
 import csv
 import json
 import re
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -61,10 +63,14 @@ def load_run(run_dir: Path):
     if run.get("experiment") not in EXPERIMENTS:
         return None
     task = run.get("gate") or "adder4"
-    input_damages = [f"in:{d['kind']}:a{d['amplitude']:g}:p{d.get('prob', 1.0):g}"
-                     for d in cfg.get("input_damages", [])]
-    state_damages = [f"st:{d['kind']}:a{d['amplitude']:g}:p{d.get('prob', 1.0):g}"
-                     for d in cfg.get("nca", {}).get("state_damages", [])]
+    input_damages = [
+        f"in:{d['kind']}:a{d['amplitude']:g}:p{d.get('prob', 1.0):g}"
+        for d in cfg.get("input_damages", [])
+    ]
+    state_damages = [
+        f"st:{d['kind']}:a{d['amplitude']:g}:p{d.get('prob', 1.0):g}"
+        for d in cfg.get("nca", {}).get("state_damages", [])
+    ]
     damage_key = "+".join(input_damages + state_damages) or "clean"
 
     steps, losses, bits = [], [], []
@@ -93,7 +99,9 @@ def load_run(run_dir: Path):
         "losses": np.array(losses, dtype=float),
         "bits": np.array([b if b is not None else np.nan for b in bits], dtype=float),
         "eval_steps": np.array(eval_steps),
-        "eval_clean": np.array([b if b is not None else np.nan for b in eval_clean], dtype=float),
+        "eval_clean": np.array(
+            [b if b is not None else np.nan for b in eval_clean], dtype=float
+        ),
         "eval_per_cfg": eval_per_cfg,
     }
 
@@ -126,14 +134,14 @@ def plot_seed_curves(group_runs, key, out_dir, metric, ylabel, logy, fname_suffi
     grid = None
     all_steps = [r["steps"] for r in group_runs if len(r["steps"])]
     if all_steps:
-        grid = np.linspace(min(s.min() for s in all_steps),
-                           max(s.max() for s in all_steps), 500)
+        grid = np.linspace(
+            min(s.min() for s in all_steps), max(s.max() for s in all_steps), 500
+        )
     vals = []
     for i, r in enumerate(group_runs):
         color = cmap(i % 10)
         v = r[metric]
-        ax.plot(r["steps"], v, color=color, alpha=0.75, lw=1,
-                label=f"seed {r['seed']}")
+        ax.plot(r["steps"], v, color=color, alpha=0.75, lw=1, label=f"seed {r['seed']}")
         vals.append(v)
     if grid is not None and vals:
         m = mean_curve([r["steps"] for r in group_runs], vals, grid)
@@ -145,7 +153,9 @@ def plot_seed_curves(group_runs, key, out_dir, metric, ylabel, logy, fname_suffi
     ax.set_title(f"{task} — {damage_key} — {len(group_runs)} seeds")
     ax.legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_dir / f"{fname_suffix}_{slug(task + '__' + damage_key)}.png", dpi=120)
+    fig.savefig(
+        out_dir / f"{fname_suffix}_{slug(task + '__' + damage_key)}.png", dpi=120
+    )
     plt.close(fig)
 
 
@@ -159,8 +169,15 @@ def plot_eval(group_runs, key, out_dir):
     plotted = False
     for i, r in enumerate(group_runs):
         if len(r["eval_steps"]):
-            ax.plot(r["eval_steps"], r["eval_clean"], color=cmap(i % 10),
-                    marker="o", ms=3, lw=1, label=f"seed {r['seed']}")
+            ax.plot(
+                r["eval_steps"],
+                r["eval_clean"],
+                color=cmap(i % 10),
+                marker="o",
+                ms=3,
+                lw=1,
+                label=f"seed {r['seed']}",
+            )
             plotted = True
     ax.set_xlabel("step")
     ax.set_ylabel("eval clean bit accuracy")
@@ -179,9 +196,16 @@ def plot_eval(group_runs, key, out_dir):
         width = 0.8 / len(runs_with_eval)
         fig, ax = plt.subplots(figsize=(12, 4))
         for i, r in enumerate(runs_with_eval):
-            vals = [r["eval_per_cfg"][-1].get(l, {}).get("bits", np.nan) for l in labels]
-            ax.bar(x + i * width, vals, width=width, color=cmap(i % 10),
-                   label=f"seed {r['seed']}")
+            vals = [
+                r["eval_per_cfg"][-1].get(l, {}).get("bits", np.nan) for l in labels
+            ]
+            ax.bar(
+                x + i * width,
+                vals,
+                width=width,
+                color=cmap(i % 10),
+                label=f"seed {r['seed']}",
+            )
         ax.set_xticks(x + width * (len(runs_with_eval) - 1) / 2)
         ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7)
         ax.set_ylabel("eval bit accuracy (latest)")
@@ -201,12 +225,14 @@ def final_bits(r):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     ap.add_argument("--out", type=Path, default=OUT_DIR)
-    ap.add_argument("--min-steps", type=int, default=0,
-                    help="ignore runs with fewer logged steps")
+    ap.add_argument(
+        "--min-steps", type=int, default=0, help="ignore runs with fewer logged steps"
+    )
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -230,20 +256,38 @@ def main():
     for key, gruns in sorted(groups.items()):
         task, damage_key = key
         for r in gruns:
-            summary_rows.append({
-                "experiment": r["experiment"], "task": task,
-                "damage_key": damage_key, "seed": r["seed"], "run": r["name"],
-                "steps_logged": len(r["steps"]),
-                "final_loss": float(r["losses"][-1]) if len(r["losses"]) else np.nan,
-                "final_bits": final_bits(r),
-            })
+            summary_rows.append(
+                {
+                    "experiment": r["experiment"],
+                    "task": task,
+                    "damage_key": damage_key,
+                    "seed": r["seed"],
+                    "run": r["name"],
+                    "steps_logged": len(r["steps"]),
+                    "final_loss": (
+                        float(r["losses"][-1]) if len(r["losses"]) else np.nan
+                    ),
+                    "final_bits": final_bits(r),
+                }
+            )
         plot_seed_curves(gruns, key, args.out, "losses", "loss", True, "loss_seeds")
-        plot_seed_curves(gruns, key, args.out, "bits", "valid bits", False, "bits_seeds")
+        plot_seed_curves(
+            gruns, key, args.out, "bits", "valid bits", False, "bits_seeds"
+        )
         plot_eval(gruns, key, args.out)
+
+        # collect each run's rollout GIF into the output dir, one per seed
+        gname = slug(task + "__" + damage_key)
+        for r in gruns:
+            gif = r["run_dir"] / "rollout_latest.gif"
+            if gif.exists():
+                shutil.copy(gif, args.out / f"rollout_{gname}_s{r['seed']}.gif")
 
     # summary.csv — one row per run
     with open(args.out / "summary.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()) if summary_rows else [])
+        w = csv.DictWriter(
+            f, fieldnames=list(summary_rows[0].keys()) if summary_rows else []
+        )
         w.writeheader()
         w.writerows(summary_rows)
 
@@ -251,7 +295,9 @@ def main():
     matrix = {}
     for key, gruns in groups.items():
         task, damage_key = key
-        matrix.setdefault(task, {})[damage_key] = {r["seed"]: final_bits(r) for r in gruns}
+        matrix.setdefault(task, {})[damage_key] = {
+            r["seed"]: final_bits(r) for r in gruns
+        }
     seeds = sorted({r["seed"] for r in runs})
     with open(args.out / "matrix_final_bits.csv", "w", newline="") as f:
         w = csv.writer(f)
@@ -260,8 +306,11 @@ def main():
             for damage_key, per_seed in sorted(matrix[task].items()):
                 vals = [per_seed.get(s, np.nan) for s in seeds]
                 mean = np.nanmean(vals) if vals else np.nan
-                w.writerow([task, damage_key] + [f"{v:.3f}" if not np.isnan(v) else "" for v in vals]
-                           + [f"{mean:.3f}" if not np.isnan(mean) else ""])
+                w.writerow(
+                    [task, damage_key]
+                    + [f"{v:.3f}" if not np.isnan(v) else "" for v in vals]
+                    + [f"{mean:.3f}" if not np.isnan(mean) else ""]
+                )
 
     # overview heatmap: tasks x damage sets, mean final bits over seeds
     tasks = sorted(matrix)
@@ -273,10 +322,16 @@ def main():
                 vals = [v for v in matrix[t].get(d, {}).values() if not np.isnan(v)]
                 if vals:
                     M[i, j] = np.mean(vals)
-        fig, ax = plt.subplots(figsize=(max(8, len(damages) * 0.9), max(4, len(tasks) * 0.5)))
-        im = ax.imshow(M, aspect="auto", cmap="viridis",
-                       vmin=np.nanmin(M) if np.isfinite(M).any() else 0,
-                       vmax=np.nanmax(M) if np.isfinite(M).any() else 1)
+        fig, ax = plt.subplots(
+            figsize=(max(8, len(damages) * 0.9), max(4, len(tasks) * 0.5))
+        )
+        im = ax.imshow(
+            M,
+            aspect="auto",
+            cmap="viridis",
+            vmin=np.nanmin(M) if np.isfinite(M).any() else 0,
+            vmax=np.nanmax(M) if np.isfinite(M).any() else 1,
+        )
         ax.set_xticks(range(len(damages)))
         ax.set_xticklabels(damages, rotation=45, ha="right", fontsize=7)
         ax.set_yticks(range(len(tasks)))
@@ -284,8 +339,15 @@ def main():
         for i in range(len(tasks)):
             for j in range(len(damages)):
                 if not np.isnan(M[i, j]):
-                    ax.text(j, i, f"{M[i, j]:.2f}", ha="center", va="center", fontsize=7,
-                            color="white" if M[i, j] < np.nanmean(M) else "black")
+                    ax.text(
+                        j,
+                        i,
+                        f"{M[i, j]:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                        color="white" if M[i, j] < np.nanmean(M) else "black",
+                    )
         ax.set_title("Final bit accuracy — mean over seeds (tasks x damage sets)")
         fig.colorbar(im, ax=ax, label="final bits")
         fig.tight_layout()
