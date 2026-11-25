@@ -634,6 +634,27 @@ def freeze_frame(frames, timesteps, repeat):
     return torch.cat(chunks, dim=0)
 
 
+def save_gif(path, frames, fps=10, loop=0):
+    """Write an animated GIF from a (T, H, W, 3) uint8 RGB array using Pillow.
+
+    Unlike ``mediapy.write_video(codec="gif")`` this does not need an ffmpeg
+    binary, so it also works on cluster nodes without ffmpeg installed.
+    """
+    from PIL import Image
+
+    frames = np.asarray(frames)
+    if frames.ndim != 4 or frames.shape[-1] != 3:
+        raise ValueError(f"frames must be (T, H, W, 3), got {frames.shape}")
+    if frames.dtype != np.uint8:
+        # float frames are assumed to be in [0, 1] (e.g. torchvision make_grid output)
+        frames = (np.clip(frames.astype(np.float64), 0.0, 1.0) * 255).round().astype(np.uint8)
+    imgs = [Image.fromarray(f) for f in frames]
+    duration = max(1, int(round(1000.0 / fps)))
+    imgs[0].save(
+        str(path), save_all=True, append_images=imgs[1:], duration=duration, loop=loop
+    )
+
+
 def save_grid_image(
     path,
     rows,

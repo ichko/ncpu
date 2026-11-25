@@ -69,6 +69,7 @@ from ncpu.utils import (
     git_info,
     make_grid,
     make_io_screen_cols1,
+    save_gif,
     save_grid_image,
 )
 
@@ -558,9 +559,11 @@ for step in pbar:
     frames_rgb = torch.from_numpy(media.to_rgb(frames, vmin=-1, vmax=1, cmap="viridis"))
     grid = make_grid(frames_rgb, nrow=gif_b, padding=1)
     grid = freeze_frame(grid, timesteps=[0, -1], repeat=8)
-    media.write_video(
-        str(run_dir / "rollout_latest.gif"), grid.numpy(), fps=10, codec="gif"
-    )
+    try:
+        # Pillow-based GIF writer: no ffmpeg binary needed (works on cluster nodes)
+        save_gif(run_dir / "rollout_latest.gif", grid.numpy(), fps=10)
+    except Exception as e:
+        print(f"WARNING: rollout gif failed: {e}")
     if SAVE_ROLLOUT_NPZ:
         np.savez_compressed(run_dir / "rollout_latest.npz", rollout=ch0.numpy())
 

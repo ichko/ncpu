@@ -334,5 +334,33 @@ class TestTrainerIntegration(unittest.TestCase):
         self.assertAlmostEqual(result["per_cfg"][0]["noise_std"], 0.0)
 
 
+class TestSaveGif(unittest.TestCase):
+    def test_save_gif_writes_valid_animated_gif(self):
+        import tempfile
+        from pathlib import Path
+
+        import numpy as np
+        from PIL import Image
+
+        from ncpu.utils import save_gif
+
+        frames = (np.random.rand(5, 16, 24, 3) * 255).astype(np.uint8)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "out.gif"
+            save_gif(p, frames, fps=10)
+            self.assertTrue(p.exists() and p.stat().st_size > 0)
+            with Image.open(p) as im:
+                self.assertEqual(im.format, "GIF")
+                self.assertEqual(getattr(im, "n_frames", 1), 5)
+
+    def test_save_gif_rejects_bad_shape(self):
+        import numpy as np
+
+        from ncpu.utils import save_gif
+
+        with self.assertRaises(ValueError):
+            save_gif("/tmp/should_not_exist.gif", np.zeros((4, 8, 8), dtype=np.uint8))
+
+
 if __name__ == "__main__":
     unittest.main()
