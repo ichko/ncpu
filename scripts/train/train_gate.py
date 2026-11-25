@@ -55,7 +55,7 @@ from ncpu.dataset import (
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, make_io_screen_cols1
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, make_io_screen_cols1, setup_device
 
 # ── Gate registry ──────────────────────────────────────────────────────────────
 # n_inputs: None means "use --n-inputs" (general boolean gates); a fixed int
@@ -110,7 +110,7 @@ sampler = GATES[args.gate][0](args.n_inputs)
 
 TOTAL_STEPS = args.steps
 PLOT_EVERY = 500
-DEVICE = args.device
+DEVICE = setup_device(args.device)
 FIXED_NOISE = args.gaussian_noise > 0 or args.gaussian_noise_fire_rate > 0
 
 # Grid: spread `n_inputs` input bits across a single input column automatically.

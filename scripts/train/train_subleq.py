@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from ncpu.nca import NeuralCA
 from ncpu.subleq import SubleqLayout, DartboardLayout, AddresserLayout, MemTileLayout, Gather2Layout, GatherDiscLayout, GatherColLayout, GatherDartLayout
-from ncpu.utils import git_info
+from ncpu.utils import git_info, setup_device
 
 # ── Args ─────────────────────────────────────────────────────────────────────
 parser = ArgumentParser()
@@ -79,7 +79,7 @@ args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
-DEVICE = args.device
+DEVICE = setup_device(args.device)
 
 # ── Geometry, model config ───────────────────────────────────────────────────
 if args.layout == "dartboard":

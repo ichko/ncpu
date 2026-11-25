@@ -36,7 +36,7 @@ from ncpu.dataset import NCPUDataset, sample_8bit_adder, sample_8bit_subleq
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, setup_device
 
 
 # ── Media helpers ─────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ _parser.add_argument("--steps", type=int, default=100_000)
 _parser.add_argument("--device", default="cuda")
 _args = _parser.parse_args()
 
-DEVICE = _args.device
+DEVICE = setup_device(_args.device)
 TOTAL_STEPS = _args.steps
 SAMPLER = sample_8bit_subleq if _args.task == "subleq" else sample_8bit_adder
 

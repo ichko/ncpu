@@ -36,7 +36,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 
 from ncpu.nca import NeuralCA
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, setup_device
 
 # ── Args ───────────────────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 random.seed(args.seed)
-DEVICE = args.device if torch.cuda.is_available() else "cpu"
+DEVICE = setup_device(args.device)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 

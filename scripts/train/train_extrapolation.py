@@ -38,7 +38,7 @@ from ncpu.dataset import ExtrapolationDataset
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, setup_device
 
 # ── Args ───────────────────────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ PLOT_EVERY     = 500
 MEDIA_EVERY    = 5000
 VAL_EVERY      = 1000        # steps between validation runs
 VAL_BATCHES    = 4           # batches per val k
-DEVICE         = args.device
+DEVICE = setup_device(args.device)
 NOISE_MAX_STD  = 0.3
 NOISE_MAX_PROB = 0.3
 BATCH_SIZE     = 8

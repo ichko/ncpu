@@ -38,6 +38,7 @@ from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
 from ncpu.utils import (
+    setup_device,
     freeze_frame,
     git_info,
     make_grid,
@@ -60,7 +61,7 @@ torch.manual_seed(args.seed)
 TOTAL_STEPS = args.steps
 PLOT_EVERY = 500
 MEDIA_EVERY = 5000
-DEVICE = args.device
+DEVICE = setup_device(args.device)
 NOISE_MAX_STD = 0.3  # ramps from 0 → this over training
 NOISE_MAX_PROB = 0.3  # ramps from 0 → this over training
 

@@ -40,6 +40,30 @@ def git_info():
         return {"commit": None, "dirty": None}
 
 
+def setup_device(device: str) -> str:
+    """Activate a torch device, failing hard if CUDA was requested but is not visible.
+
+    Returns the device string. When ``device`` is a cuda device, raises
+    RuntimeError if torch sees no GPU (e.g. SLURM --gres allocated a GPU but
+    CUDA_VISIBLE_DEVICES was not exported), and otherwise sets the default
+    device so every tensor lands on the GPU. "cpu" is always allowed.
+    """
+    if device.startswith("cuda"):
+        if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+            raise RuntimeError(
+                f"--device {device!r} requested but no CUDA GPU is visible "
+                f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}). "
+                "On SLURM, --gres=gpu:1 normally exports CUDA_VISIBLE_DEVICES; "
+                "check the partition/gres config."
+            )
+        torch.set_default_device(device)
+        print(
+            f"CUDA: {torch.cuda.device_count()} GPU(s), using {torch.cuda.get_device_name(0)}, "
+            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}"
+        )
+    return device
+
+
 def mass_conserving_update(beta, q, affinity, padding_type, pad):
     weights = torch.exp(beta * affinity)
     kernel_size = pad * 2 + 1

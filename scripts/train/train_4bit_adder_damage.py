@@ -24,7 +24,6 @@ Usage:
 """
 
 import json
-import os
 import shutil
 import sys
 from argparse import ArgumentParser, Namespace
@@ -53,7 +52,7 @@ from ncpu.noise import (
     parse_damage_specs,
 )
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, setup_device
 
 # ── Args ───────────────────────────────────────────────────────────────────────
 
@@ -116,24 +115,8 @@ TOTAL_STEPS = args.steps
 PLOT_EVERY = 500
 MEDIA_EVERY = 5000
 EVAL_EVERY = args.eval_every
-DEVICE = args.device
+DEVICE = setup_device(args.device)
 SAVE_ROLLOUT_NPZ = args.save_rollout_npz
-
-if DEVICE.startswith("cuda"):
-    if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
-        raise RuntimeError(
-            f"--device {DEVICE!r} requested but no CUDA GPU is visible "
-            f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}). "
-            "SLURM --gres=gpu:1 normally exports CUDA_VISIBLE_DEVICES; "
-            "check the partition/gres config."
-        )
-    # default device = GPU, so even tensors created without an explicit
-    # device (torch.zeros/randn/...) land on the GPU, not the CPU
-    torch.set_default_device(DEVICE)
-    print(
-        f"CUDA: {torch.cuda.device_count()} GPU(s), using {torch.cuda.get_device_name(0)}, "
-        f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}"
-    )
 
 # amplitude is in pixel units on the raw [0,255] screen for input damages,
 # and on the [-10,10] state scale for state damages.

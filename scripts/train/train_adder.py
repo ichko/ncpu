@@ -38,7 +38,7 @@ from ncpu.dataset import NCPUDataset, sample_4bit_adder, sample_8bit_adder
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, make_io_screen, make_io_screen_cols1
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, make_io_screen, make_io_screen_cols1, setup_device
 
 # ── Args ───────────────────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ TOTAL_STEPS = args.steps
 PLOT_EVERY  = 500
 MEDIA_EVERY = 5000
 EVAL_EVERY  = args.eval_every
-DEVICE      = args.device
+DEVICE = setup_device(args.device)
 
 if args.bits == 4:
     experiment  = "E2"

@@ -30,7 +30,6 @@ Usage:
 """
 
 import json
-import os
 import shutil
 import sys
 from argparse import ArgumentParser, Namespace
@@ -65,6 +64,7 @@ from ncpu.noise import (
 )
 from ncpu.trainer import NCPUTrainer
 from ncpu.utils import (
+    setup_device,
     freeze_frame,
     git_info,
     make_grid,
@@ -167,25 +167,9 @@ dmg_tag = "mix" if using_defaults else damages_slug([*input_damages, *state_dama
 
 TOTAL_STEPS = args.steps
 PLOT_EVERY = 500
-DEVICE = args.device
+DEVICE = setup_device(args.device)
 SAVE_ROLLOUT_NPZ = args.save_rollout_npz
 EVAL_EVERY = args.eval_every
-
-if DEVICE.startswith("cuda"):
-    if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
-        raise RuntimeError(
-            f"--device {DEVICE!r} requested but no CUDA GPU is visible "
-            f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}). "
-            "SLURM --gres=gpu:1 normally exports CUDA_VISIBLE_DEVICES; "
-            "check the partition/gres config."
-        )
-    # default device = GPU, so even tensors created without an explicit
-    # device (torch.zeros/randn/...) land on the GPU, not the CPU
-    torch.set_default_device(DEVICE)
-    print(
-        f"CUDA: {torch.cuda.device_count()} GPU(s), using {torch.cuda.get_device_name(0)}, "
-        f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}"
-    )
 
 cfg = make_gate_config(n_inputs=args.n_inputs, H=48, side_sp=10, among_sp=2)
 ds_config = Namespace(

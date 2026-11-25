@@ -46,7 +46,7 @@ from ncpu.dataset import ALUDataset
 from ncpu.loss import output_masked_rollout_loss
 from ncpu.nca import NeuralCA
 from ncpu.trainer import NCPUTrainer
-from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image
+from ncpu.utils import freeze_frame, git_info, make_grid, save_grid_image, setup_device
 
 # ── Args ───────────────────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ TOTAL_STEPS = args.steps
 PLOT_EVERY = 500
 MEDIA_EVERY = 5000
 EVAL_EVERY = args.eval_every
-DEVICE = args.device
+DEVICE = setup_device(args.device)
 SAVE_ROLLOUT_NPZ = args.save_rollout_npz
 
 # Grid: wide enough for 3 regions (left inputs / middle opcode / right output).
