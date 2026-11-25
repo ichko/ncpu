@@ -27,6 +27,12 @@
 #SBATCH --error=damagesweep_%A_%a.err
 
 module load uv
+
+# SLURM's --gres=gpu:1 normally exports CUDA_VISIBLE_DEVICES pointing at the
+# allocated GPU. If this cluster's gres config does not export it, fall back
+# to GPU 0 so the allocated GPU is actually used (the train scripts fail fast
+# with a clear error if no GPU is visible at all).
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 cd ncpu
 
 # Per-task venv (ARRAY_TASK_ID in the name: concurrent tasks must not

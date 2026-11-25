@@ -30,6 +30,7 @@ Usage:
 """
 
 import json
+import os
 import shutil
 import sys
 from argparse import ArgumentParser, Namespace
@@ -170,6 +171,22 @@ DEVICE = args.device
 SAVE_ROLLOUT_NPZ = args.save_rollout_npz
 EVAL_EVERY = args.eval_every
 
+if DEVICE.startswith("cuda"):
+    if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+        raise RuntimeError(
+            f"--device {DEVICE!r} requested but no CUDA GPU is visible "
+            f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}). "
+            "SLURM --gres=gpu:1 normally exports CUDA_VISIBLE_DEVICES; "
+            "check the partition/gres config."
+        )
+    # default device = GPU, so even tensors created without an explicit
+    # device (torch.zeros/randn/...) land on the GPU, not the CPU
+    torch.set_default_device(DEVICE)
+    print(
+        f"CUDA: {torch.cuda.device_count()} GPU(s), using {torch.cuda.get_device_name(0)}, "
+        f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r}"
+    )
+
 cfg = make_gate_config(n_inputs=args.n_inputs, H=48, side_sp=10, among_sp=2)
 ds_config = Namespace(
     W=cfg.W,
@@ -256,6 +273,12 @@ else:
                     "device": DEVICE,
                     "damage_mode": args.damage_mode,
                     "damage_tag": dmg_tag,
+                    "cuda_available": bool(torch.cuda.is_available()),
+                    "cuda_device_name": (
+                        torch.cuda.get_device_name(0)
+                        if torch.cuda.is_available()
+                        else None
+                    ),
                 },
                 "ds": {
                     **{
@@ -337,6 +360,11 @@ else:
     trainer.ds = dataset
     trainer.sanity_check()
 
+_dev = next(trainer.nca.parameters()).device
+print(f"model device: {_dev}")
+if DEVICE.startswith("cuda") and _dev.type != "cuda":
+    raise RuntimeError(f"model is on {_dev} but --device {DEVICE!r} was requested")
+
 # ── Eval robustness matrix ─────────────────────────────────────────────────────
 
 eval_batch = next(iter(dataset.get_dataloader(batch_size=optim_config.batch_size)))
@@ -393,6 +421,10 @@ for step in pbar:
         steps=(optim_config.steps_min, optim_config.steps_max),
         return_rollout=(step % PLOT_EVERY == 0),
     )
+    if step == start_step:
+        print(
+            f"first batch device: inp={info['inp'].device} nca_out={info['nca_out'].device}"
+        )
     loss = info["loss"]
     num_valid_bits = info["num_valid_bits"]
     grad_norm = trainer.metrics[-1].get("grad_norm") if trainer.metrics else None
