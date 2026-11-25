@@ -59,6 +59,8 @@ from ncpu.nca import NeuralCA
 from ncpu.noise import (
     DEFAULT_INPUT_DAMAGE_SPECS,
     DEFAULT_STATE_DAMAGE_SPECS,
+    MIX_INPUT_DAMAGE_SPECS,
+    MIX_STATE_DAMAGE_SPECS,
     damages_slug,
     parse_damage_specs,
 )
@@ -105,16 +107,16 @@ parser.add_argument(
     action="append",
     default=None,
     help="input damage spec 'kind:amplitude[:prob[:k=v,...]]'; repeatable. "
-    "Defaults to the full input-side mix; pass 'none' to disable "
-    "input damages (e.g. for state-only ablations)",
+    "Default: mild 'gaussian:0.5:0.5'. Pass 'none' to disable input damages, "
+    "'mix' for the full input damage mix",
 )
 parser.add_argument(
     "--state-damage",
     action="append",
     default=None,
     dest="state_damage",
-    help="state damage spec; repeatable. Defaults to the full state-side mix; "
-    "pass 'none' to disable state damages",
+    help="state damage spec; repeatable. Default: mild 'state_gaussian:0.5:0.5'. "
+    "Pass 'none' to disable state damages, 'mix' for the full state damage mix",
 )
 parser.add_argument(
     "--damage-mode",
@@ -159,10 +161,15 @@ if GATES[args.gate][1] is not None:
     args.n_inputs = GATES[args.gate][1]
 sampler = GATES[args.gate][0](args.n_inputs)
 
-input_damages = parse_damage_specs(args.damage or DEFAULT_INPUT_DAMAGE_SPECS)
-state_damages = parse_damage_specs(args.state_damage or DEFAULT_STATE_DAMAGE_SPECS)
-using_defaults = args.damage is None and args.state_damage is None
-dmg_tag = "mix" if using_defaults else damages_slug([*input_damages, *state_damages])
+# No flags -> mild gaussian:0.5:0.5 per side; the literal spec "mix"
+# selects the full mix.
+input_damages = parse_damage_specs(
+    args.damage or DEFAULT_INPUT_DAMAGE_SPECS, mix_specs=MIX_INPUT_DAMAGE_SPECS
+)
+state_damages = parse_damage_specs(
+    args.state_damage or DEFAULT_STATE_DAMAGE_SPECS, mix_specs=MIX_STATE_DAMAGE_SPECS
+)
+dmg_tag = damages_slug([*input_damages, *state_damages])
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 

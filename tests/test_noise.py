@@ -53,6 +53,25 @@ class TestDamageSpec(unittest.TestCase):
         ds = parse_damage_specs(["none", "perlin:40:0.5"])
         self.assertEqual([d.kind for d in ds], ["perlin"])
 
+    def test_parse_mix_expands(self):
+        mix = ["gaussian:20:0.5", "perlin:40:0.5"]
+        ds = parse_damage_specs(["mix"], mix_specs=mix)
+        self.assertEqual([d.kind for d in ds], ["gaussian", "perlin"])
+        ds = parse_damage_specs(["none", "mix", "jitter:2"], mix_specs=mix)
+        self.assertEqual([d.kind for d in ds], ["gaussian", "perlin", "jitter"])
+        with self.assertRaises(ValueError):
+            parse_damage_specs(["mix"])
+
+    def test_defaults_are_mild_gaussian(self):
+        from ncpu.noise import DEFAULT_INPUT_DAMAGE_SPECS, DEFAULT_STATE_DAMAGE_SPECS
+
+        (d_in,) = parse_damage_specs(DEFAULT_INPUT_DAMAGE_SPECS)
+        (d_st,) = parse_damage_specs(DEFAULT_STATE_DAMAGE_SPECS)
+        self.assertEqual((d_in.kind, d_in.amplitude, d_in.prob), ("gaussian", 0.5, 0.5))
+        self.assertEqual(
+            (d_st.kind, d_st.amplitude, d_st.prob), ("state_gaussian", 0.5, 0.5)
+        )
+
     def test_slug_is_filename_safe(self):
         d = Damage.parse("occlusion:2:0.5:block_size=8,fill=0")
         s = d.slug()

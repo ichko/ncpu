@@ -115,9 +115,23 @@ def _parse_value(v: str):
         return v
 
 
-def parse_damage_specs(specs: Optional[Sequence[str]]) -> list:
-    """Parse specs; the literal spec ``"none"`` disables that damage side."""
-    return [Damage.parse(s) for s in (specs or []) if s != "none"]
+def parse_damage_specs(specs: Optional[Sequence[str]], mix_specs=None) -> list:
+    """Parse specs; the literal spec ``"none"`` disables that damage side.
+
+    The literal spec ``"mix"`` expands to ``mix_specs`` (the full damage mix),
+    so CLIs can offer it explicitly: ``--damage mix``.
+    """
+    out = []
+    for s in specs or []:
+        if s == "none":
+            continue
+        if s == "mix":
+            if mix_specs is None:
+                raise ValueError("'mix' requires mix_specs to be provided")
+            out.extend(mix_specs)
+        else:
+            out.append(s)
+    return [Damage.parse(s) for s in out]
 
 
 def damages_slug(damages: Sequence[Damage], max_len: int = 60) -> str:
@@ -328,10 +342,19 @@ STATE_DAMAGE_KINDS = sorted(
     k for k, v in DAMAGE_REGISTRY.items() if v["side"] == "state"
 )
 
-# Canonical default damage mixes for the damage-sweep train scripts
-# (D4 adder / D5 gates): input amplitudes in [0, 255] pixel units,
-# state amplitudes on the [-10, 10] state scale.
-DEFAULT_INPUT_DAMAGE_SPECS = [
+# Default damages when a damage-sweep train script is run with no
+# --damage/--state-damage flags: a single mild gaussian per side
+# (amplitude 0.5, fire rate 0.5). Input amplitudes are in [0, 255] pixel
+# units, state amplitudes on the [-10, 10] state scale. Note gaussian:0.5
+# on the input side is very subtle (0.5/255 px std) — bump it if a visible
+# input default is wanted. Pass "mix" explicitly for the full MIX_* sets.
+DEFAULT_INPUT_DAMAGE_SPECS = ["gaussian:0.5:0.5"]
+DEFAULT_STATE_DAMAGE_SPECS = ["state_gaussian:0.5:0.5"]
+
+# Full damage mixes for the damage-sweep train scripts (D4 adder / D5
+# gates), selected with the literal spec "mix": input amplitudes in
+# [0, 255] pixel units, state amplitudes on the [-10, 10] state scale.
+MIX_INPUT_DAMAGE_SPECS = [
     "gaussian:20:0.5",
     "perlin:40:0.5",
     "salt_pepper:0.05:0.5",
@@ -342,7 +365,7 @@ DEFAULT_INPUT_DAMAGE_SPECS = [
     "jitter:2:0.5",
     "speckle:0.3:0.5",
 ]
-DEFAULT_STATE_DAMAGE_SPECS = [
+MIX_STATE_DAMAGE_SPECS = [
     "state_gaussian:0.5:0.5",
     "state_perlin:0.5:0.5",
     "channel_dropout:0.1:0.5",

@@ -47,6 +47,8 @@ from ncpu.nca import NeuralCA
 from ncpu.noise import (
     DEFAULT_INPUT_DAMAGE_SPECS,
     DEFAULT_STATE_DAMAGE_SPECS,
+    MIX_INPUT_DAMAGE_SPECS,
+    MIX_STATE_DAMAGE_SPECS,
     Damage,
     damages_slug,
     parse_damage_specs,
@@ -87,8 +89,8 @@ parser.add_argument(
     action="append",
     default=None,
     help="input damage spec 'kind:amplitude[:prob[:k=v,...]]'; repeatable. "
-    "Defaults to a representative mix of all input-side kinds; "
-    "pass 'none' to disable input damages",
+    "Default: mild 'gaussian:0.5:0.5'. Pass 'none' to disable input damages, "
+    "'mix' for the full input damage mix",
 )
 parser.add_argument(
     "--state-damage",
@@ -96,8 +98,8 @@ parser.add_argument(
     default=None,
     dest="state_damage",
     help="state damage spec (state_gaussian/state_perlin/channel_dropout/"
-    "block_dropout); repeatable. Defaults to a mix of all state-side kinds; "
-    "pass 'none' to disable state damages",
+    "block_dropout); repeatable. Default: mild 'state_gaussian:0.5:0.5'. "
+    "Pass 'none' to disable state damages, 'mix' for the full state damage mix",
 )
 parser.add_argument(
     "--damage-mode",
@@ -126,9 +128,14 @@ DEVICE = setup_device(args.device)
 SAVE_ROLLOUT_NPZ = args.save_rollout_npz
 
 # amplitude is in pixel units on the raw [0,255] screen for input damages,
-# and on the [-10,10] state scale for state damages.
-input_damages = parse_damage_specs(args.damage or DEFAULT_INPUT_DAMAGE_SPECS)
-state_damages = parse_damage_specs(args.state_damage or DEFAULT_STATE_DAMAGE_SPECS)
+# and on the [-10,10] state scale for state damages. No flags -> mild
+# gaussian:0.5:0.5 per side; the literal spec "mix" selects the full mix.
+input_damages = parse_damage_specs(
+    args.damage or DEFAULT_INPUT_DAMAGE_SPECS, mix_specs=MIX_INPUT_DAMAGE_SPECS
+)
+state_damages = parse_damage_specs(
+    args.state_damage or DEFAULT_STATE_DAMAGE_SPECS, mix_specs=MIX_STATE_DAMAGE_SPECS
+)
 
 ds_config = Namespace(
     W=64,
@@ -182,10 +189,7 @@ if args.resume:
     print(f"Resuming run {run_dir.name}: damage config comes from the pickled trainer")
 else:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    using_defaults = args.damage is None and args.state_damage is None
-    dmg_tag = (
-        "mix" if using_defaults else damages_slug([*input_damages, *state_damages])
-    )
+    dmg_tag = damages_slug([*input_damages, *state_damages])
     run_name = f"D4_adder4_{dmg_tag}_s{args.seed}_{timestamp}"
     run_dir = Path("runs") / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
